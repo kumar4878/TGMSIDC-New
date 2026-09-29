@@ -67,6 +67,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
       { href: "/vendor-portal", label: "Vendor Portal", icon: Building2 },
     ],
   },
+  /* Hiding Inventory temporarily as per request
   {
     label: "INVENTORY",
     items: [
@@ -74,6 +75,7 @@ const ALL_NAV_GROUPS: NavGroup[] = [
       { href: "/stock-transfers", label: "Stock Transfers", icon: ArrowRightLeft },
     ],
   },
+  */
   {
     label: "FINANCE",
     items: [
@@ -89,14 +91,14 @@ const ALL_NAV_GROUPS: NavGroup[] = [
       { href: "/vendors", label: "Vendors", icon: Users },
       { href: "/institutions", label: "Hospital Master", icon: Building2 },
       { href: "/approval-hierarchy", label: "Approval Hierarchy", icon: Settings },
-      { href: "/audit-trail", label: "Audit Trail", icon: ShieldCheck },
+      // { href: "/audit-trail", label: "Audit Trail", icon: ShieldCheck },
     ],
   },
   {
     label: "ANALYTICS & REPORTS",
     items: [
-      { href: "/kpi-dashboard", label: "KPI Control Tower", icon: Activity },
-      { href: "/demand-forecast", label: "Demand Forecast", icon: TrendingUp },
+      // { href: "/kpi-dashboard", label: "KPI Control Tower", icon: Activity },
+      // { href: "/demand-forecast", label: "Demand Forecast", icon: TrendingUp },
       { href: "/reports", label: "Reports", icon: BarChart3 },
     ],
   },
@@ -227,7 +229,7 @@ function getBreadcrumb(pathname: string): { section: string; title: string } {
   if (pathname.startsWith("/kpi-dashboard")) return { section: "Analytics", title: "Procurement Control Tower" };
   if (pathname.startsWith("/demand-forecast")) return { section: "Analytics", title: "Demand Forecasting" };
   if (pathname.startsWith("/reports")) return { section: "Analytics", title: "Statutory Reports" };
-  return { section: "TGMSIDC", title: "Portal" };
+  return { section: "Procurement", title: "Portal" };
 }
 
 function NavItemEl({ href, label, icon: Icon, badge, collapsed }: NavItem & { collapsed: boolean }) {
@@ -341,7 +343,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </button>
             </div>
 
-            {/* Sub-identity: TGMSIDC Portal */}
+            {/* Sub-identity: Procurement Portal */}
             {!collapsed && (
               <div className="flex items-center gap-2.5 mt-4 pt-0.5">
                 <div className="w-6 h-6 flex items-center justify-center text-white/90 shrink-0">
@@ -349,7 +351,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </div>
                 <div className="min-w-0">
                   <div className="text-[13.5px] font-bold text-white tracking-tight leading-tight truncate">
-                    TGMSIDC Portal
+                    Procurement Portal
                   </div>
                   <div className="text-[#38bdf8] text-[10.5px] font-semibold leading-none mt-1 truncate tracking-wide">
                     Healthcare Procurement
@@ -423,7 +425,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
               <div className="flex items-center gap-1.5 text-xs text-[#6b7a93] truncate">
                 <span className="font-semibold text-[#152340]/70 hover:text-[#152340] cursor-pointer" onClick={() => navigate("/")}>
-                  TGMSIDC
+                  Portal
                 </span>
                 <span className="text-[#93a2b8] font-mono">/</span>
                 <span className="text-[#6b7a93] font-medium">{breadcrumb.section}</span>

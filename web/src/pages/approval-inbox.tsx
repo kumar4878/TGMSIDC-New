@@ -212,7 +212,7 @@ export default function ApprovalInbox() {
         </p>
         {!["tgmsidc_user", "gm_equipment", "so_equipment", "executive_director", "admin", "gm", "biomedical_engineer", "director"].includes(user.role) && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mt-2 inline-block">
-            Your role ({user.roleLabel}) does not have approval steps. Indent review/approval steps are assigned to TGMSIDC Users, GM Equipment, SO Equipment, and Executive Director.
+            Your role ({user.roleLabel}) does not have approval steps. Indent review/approval steps are assigned to Procurement Officers, GM Equipment, SO Equipment, and Executive Director.
           </p>
         )}
       </div>

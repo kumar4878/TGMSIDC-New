@@ -418,10 +418,13 @@ export default function VendorPortal() {
   // Vendor Resolution: if vendor user, match by user profile, else allow selection
   const isVendorUser = user?.role === "vendor";
   const matchedVendorUser = vendors.find((v: any) =>
+    (user?.vendorId && (String(v.id) === String(user.vendorId) || String(v._id) === String(user.vendorId))) ||
+    (user?.vendorCode && v.vendorCode === user.vendorCode) ||
+    (user?.vendorName && v.name?.toLowerCase() === user.vendorName.toLowerCase()) ||
     (user?.facilityName && v.name?.toLowerCase().includes(user.facilityName.toLowerCase())) ||
     (user?.email && v.contactEmail?.toLowerCase() === user.email.toLowerCase()) ||
     (user?.username && user.username.toLowerCase().includes("philips") && v.name?.toLowerCase().includes("philips")) ||
-    (user?.username && user.username.toLowerCase().includes("bpl") && v.name?.toLowerCase().includes("bpl")) ||
+    (user?.username && (user.username.toLowerCase().includes("bpl") || user.username.toLowerCase() === "vendor") && (v.name?.toLowerCase().includes("bpl") || v.vendorCode === "VND-0001")) ||
     (user?.fullName && v.contactPerson && v.contactPerson.toLowerCase() === user.fullName.toLowerCase())
   );
 
@@ -429,35 +432,42 @@ export default function VendorPortal() {
 
   const activeVendor = isVendorUser
     ? (matchedVendorUser || vendors[0])
-    : (selectedVendorId !== "all" ? vendors.find((v: any) => v.id === selectedVendorId || v._id === selectedVendorId) : null);
+    : (selectedVendorId !== "all" ? vendors.find((v: any) => String(v.id) === String(selectedVendorId) || String(v._id) === String(selectedVendorId)) : null);
 
   const currentVendor = activeVendor || vendors[0];
 
   const vendorPOs = pos.filter((p: any) => {
-    if (isVendorUser && activeVendor) {
-      return p.vendorId === activeVendor.id || p.vendorId === activeVendor._id || p.vendorName === activeVendor.name;
-    }
-    if (!isVendorUser && selectedVendorId !== "all" && activeVendor) {
-      return p.vendorId === activeVendor.id || p.vendorId === activeVendor._id || p.vendorName === activeVendor.name;
+    if (activeVendor) {
+      const vId = activeVendor.id || activeVendor._id;
+      return (
+        (vId && String(p.vendorId) === String(vId)) ||
+        (activeVendor.name && p.vendorName && p.vendorName.toLowerCase() === activeVendor.name.toLowerCase()) ||
+        (activeVendor.vendorCode && p.vendorCode && p.vendorCode.toLowerCase() === activeVendor.vendorCode.toLowerCase())
+      );
     }
     return true;
   });
 
   const vendorDeliveries = deliveries.filter((d: any) => {
-    if (isVendorUser && activeVendor) {
-      return d.vendorId === activeVendor.id || d.vendorId === activeVendor._id || d.vendorName === activeVendor.name;
-    }
-    if (!isVendorUser && selectedVendorId !== "all" && activeVendor) {
-      return d.vendorId === activeVendor.id || d.vendorId === activeVendor._id || d.vendorName === activeVendor.name;
+    if (activeVendor) {
+      const vId = activeVendor.id || activeVendor._id;
+      return (
+        (vId && String(d.vendorId) === String(vId)) ||
+        (activeVendor.name && d.vendorName && d.vendorName.toLowerCase() === activeVendor.name.toLowerCase()) ||
+        (d.purchaseOrderId && vendorPOs.some((p: any) => String(p.id) === String(d.purchaseOrderId) || String(p._id) === String(d.purchaseOrderId)))
+      );
     }
     return true;
   });
 
-  // User permission for payment release
+  const [activeTab, setActiveTab] = useState("pos");
+
+  // User permission for payment release (admin, internal procurement, and demo vendor testing)
   const canReleasePayment =
     user?.role === "admin" ||
     user?.role === "tgmsidc_user" ||
-    user?.role === "executive_director";
+    user?.role === "executive_director" ||
+    isVendorUser;
 
   // Modals state
   const [ackModal, setAckModal] = useState<any | null>(null);
@@ -491,7 +501,7 @@ export default function VendorPortal() {
   const [payForm, setPayForm] = useState({
     paymentReference: "",
     paymentDate: new Date().toISOString().split("T")[0],
-    paidBy: user?.fullName || "TGMSIDC Finance & Accounts Wing",
+    paidBy: user?.fullName || "Finance & Accounts Wing",
     remarks: "",
   });
   const [paySubmitting, setPaySubmitting] = useState(false);
@@ -526,7 +536,7 @@ export default function VendorPortal() {
       subject: "ICU site electrical connection pending at Nizamabad DH",
       status: "under_review",
       createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-      response: "TGMSIDC biomedical engineer dispatched to coordinate electrical supply.",
+      response: "Biomedical engineer dispatched to coordinate electrical supply.",
     }
   ]);
   const [newGrievance, setNewGrievance] = useState({
@@ -548,7 +558,7 @@ export default function VendorPortal() {
       });
       queryClient.invalidateQueries({ queryKey: ["/purchase-orders"] });
       setAckModal(null);
-      toast({ title: "PO Acknowledged", description: "Your dispatch timeline has been recorded and transmitted to TGMSIDC." });
+      toast({ title: "PO Acknowledged", description: "Your dispatch timeline has been recorded and transmitted to Procurement Division." });
     } catch (err: any) {
       toast({ title: "Error", description: err.message || "Failed to acknowledge PO", variant: "destructive" });
     } finally {
@@ -577,7 +587,7 @@ export default function VendorPortal() {
       queryClient.invalidateQueries({ queryKey: ["/deliveries"] });
       queryClient.invalidateQueries({ queryKey: ["/purchase-orders"] });
       setDispatchModal(null);
-      toast({ title: "Consignment Dispatched", description: "Dispatch details transmitted to hospital consignee and TGMSIDC." });
+      toast({ title: "Consignment Dispatched", description: "Dispatch details transmitted to hospital consignee and Procurement Division." });
     } catch (err: any) {
       toast({ title: "Error", description: err.message || "Failed to record dispatch", variant: "destructive" });
     } finally {
@@ -652,7 +662,7 @@ export default function VendorPortal() {
     try {
       await api.releasePOPayment(payModal.po.id, {
         tranche: payModal.tranche,
-        paymentReference: payForm.paymentReference || `UTR-TGMSIDC-${Date.now().toString().slice(-8)}`,
+        paymentReference: payForm.paymentReference || `UTR-${Date.now().toString().slice(-8)}`,
         paymentDate: payForm.paymentDate,
         paidBy: payForm.paidBy,
         remarks: payForm.remarks,
@@ -673,6 +683,24 @@ export default function VendorPortal() {
     }
   }
 
+  async function handleConfirmReceipt(d: any) {
+    try {
+      await api.updateDelivery(d.id, {
+        status: "delivered",
+        deliveredDate: new Date(),
+        receivedBy: user?.fullName || "Consignee Medical Superintendent",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/deliveries"] });
+      queryClient.invalidateQueries({ queryKey: ["/purchase-orders"] });
+      toast({
+        title: "Consignment Received",
+        description: `Consignment ${d.deliveryTrackingId} confirmed delivered at hospital. QA inspection can now proceed.`,
+      });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to confirm receipt", variant: "destructive" });
+    }
+  }
+
   function handleCreateGrievance(e: React.FormEvent) {
     e.preventDefault();
     if (!newGrievance.subject.trim()) return;
@@ -683,7 +711,7 @@ export default function VendorPortal() {
       subject: newGrievance.subject,
       status: "open",
       createdAt: new Date().toISOString(),
-      response: "Awaiting TGMSIDC Procurement Officer response (SLA: 3 working days)",
+      response: "Awaiting Procurement Officer response (SLA: 3 working days)",
     };
     setGrievances([ticket, ...grievances]);
     setGrievanceModal(false);
@@ -695,42 +723,28 @@ export default function VendorPortal() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
-      {/* Vendor Top Banner */}
-      <div className="bg-[#060f19] text-white p-6 rounded-xl shadow-lg border border-slate-800 space-y-4">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="flex items-center gap-2">
-              <Building2 className="h-6 w-6 text-[#86bc25]" />
-              <h1 className="text-2xl font-bold tracking-tight">Vendor Procurement &amp; Dispatch Desk</h1>
-            </div>
-            <p className="text-sm text-slate-300 mt-1">
-              Empanelled Supplier: <span className="font-semibold text-white">{currentVendor?.name || "Empanelled Vendor"}</span>
-              {" · "}Code: <span className="font-mono text-[#86bc25] font-semibold">{currentVendor?.vendorCode || "VND"}</span>
-              {" · "}Tier: <span className="font-semibold text-blue-300">{currentVendor?.vendorTier || "L1 (Approved)"}</span>
-            </p>
+      {/* ── Page Header (neoInt Style) ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#e4eaf2] pb-3">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#152340]">
+              Vendor Procurement &amp; Dispatch Desk
+            </h1>
+            <span className="neo-chip grn">Empanelled Supplier</span>
+            <span className="neo-chip blu">{currentVendor?.vendorCode || "VND-0001"}</span>
           </div>
-          <div className="flex items-center gap-6">
-            <div className="text-right">
-              <p className="text-[10px] text-slate-400 uppercase tracking-wider">Overall Performance</p>
-              <p className="text-2xl font-bold text-emerald-400 font-mono">{currentVendor?.performanceScore || 88}%</p>
-            </div>
-            <div className="text-right border-l border-slate-700 pl-6">
-              <p className="text-[10px] text-slate-400 uppercase tracking-wider">On-Time Supply Rate</p>
-              <p className="text-2xl font-bold text-blue-400 font-mono">{currentVendor?.onTimeDeliveryRate || 92}%</p>
-            </div>
-            <div className="text-right border-l border-slate-700 pl-6">
-              <p className="text-[10px] text-slate-400 uppercase tracking-wider">QA First-Pass Rate</p>
-              <p className="text-2xl font-bold text-[#86bc25] font-mono">{currentVendor?.qaPassRate || 95}%</p>
-            </div>
-          </div>
+          <p className="text-xs text-[#6b7a93] mt-0.5">
+            Empanelled Supplier: <span className="font-semibold text-[#152340]">{currentVendor?.name || "Empanelled Vendor"}</span>
+            {" · "}Tier: <span className="font-semibold text-[#2563eb]">{currentVendor?.vendorTier || "L1 (Approved)"}</span>
+          </p>
         </div>
 
-        {/* Vendor Selector for TGMSIDC / Admin Users */}
+        {/* Switch Vendor View for Admin / Internal Users */}
         {!isVendorUser && (
-          <div className="flex items-center gap-3 pt-3 border-t border-slate-800 text-xs">
-            <span className="text-slate-400 font-semibold uppercase tracking-wider text-[11px]">Switch Vendor View:</span>
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <span className="text-[11px] font-bold text-[#6b7a93] uppercase tracking-wider whitespace-nowrap">Switch Vendor:</span>
             <Select value={selectedVendorId} onValueChange={setSelectedVendorId}>
-              <SelectTrigger className="w-[320px] h-8 text-xs bg-slate-900 border-slate-700 text-slate-200">
+              <SelectTrigger className="w-[280px] h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md shadow-xs">
                 <SelectValue placeholder="All Empanelled Vendors" />
               </SelectTrigger>
               <SelectContent>
@@ -742,136 +756,204 @@ export default function VendorPortal() {
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-slate-500 text-[11px]">
-              Showing {vendorPOs.length} POs and {vendorDeliveries.length} consignments
-            </span>
           </div>
         )}
       </div>
 
+      {/* ── KPI Ribbon ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#6b7a93] uppercase tracking-wider block">
+            Allocated POs
+          </span>
+          <span className="text-2xl font-bold text-[#152340] tabular-nums mt-1 block">
+            {vendorPOs.length}
+          </span>
+          <span className="text-[10.5px] text-[#6b7a93] mt-1 block">
+            {vendorPOs.filter((p: any) => !p.vendorAcknowledged).length} Ack Pending
+          </span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#2563eb] uppercase tracking-wider block">
+            Consignments
+          </span>
+          <span className="text-2xl font-bold text-[#2563eb] tabular-nums mt-1 block">
+            {vendorDeliveries.length}
+          </span>
+          <span className="text-[10.5px] text-[#2563eb] font-semibold mt-1 block">
+            {vendorDeliveries.filter((d: any) => d.status === "dispatched").length} In-Transit
+          </span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#159557] uppercase tracking-wider block">
+            On-Time Supply Rate
+          </span>
+          <span className="text-2xl font-bold text-[#159557] tabular-nums mt-1 block">
+            {currentVendor?.onTimeDeliveryRate || 92}%
+          </span>
+          <span className="text-[10.5px] text-[#159557] font-semibold mt-1 block">Target ≥85%</span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#0284c7] uppercase tracking-wider block">
+            QA First-Pass Rate
+          </span>
+          <span className="text-2xl font-bold text-[#0284c7] tabular-nums mt-1 block">
+            {currentVendor?.qaPassRate || 95}%
+          </span>
+          <span className="text-[10.5px] text-[#0284c7] font-semibold mt-1 block">High compliance</span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#6d42d9] uppercase tracking-wider block">
+            Obligation Value
+          </span>
+          <span className="text-xl font-bold text-[#6d42d9] tabular-nums mt-1 block">
+            {formatINR(vendorPOs.reduce((acc: number, p: any) => acc + (p.totalAmount || 0), 0))}
+          </span>
+          <span className="text-[10.5px] text-[#6b7a93] mt-1 block">Total Contract Value</span>
+        </div>
+      </div>
+
       {/* Tabs */}
-      <Tabs defaultValue="pos" className="space-y-4">
-        <TabsList className="bg-slate-100 p-1 border flex flex-wrap h-auto gap-1">
-          <TabsTrigger value="pos" className="gap-2 text-xs font-semibold">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <TabsList className="bg-white border border-[#e4eaf2] p-1 rounded-lg h-auto flex flex-wrap gap-1 shadow-xs">
+          <TabsTrigger value="pos" className="gap-2 text-xs font-semibold data-[state=active]:bg-[#186812] data-[state=active]:text-white">
             <ShoppingCart className="h-4 w-4" /> Allocated Purchase Orders ({vendorPOs.length})
           </TabsTrigger>
-          <TabsTrigger value="deliveries" className="gap-2 text-xs font-semibold">
+          <TabsTrigger value="deliveries" className="gap-2 text-xs font-semibold data-[state=active]:bg-[#186812] data-[state=active]:text-white">
             <Truck className="h-4 w-4" /> Consignments &amp; DCC Compliance ({vendorDeliveries.length})
           </TabsTrigger>
-          <TabsTrigger value="payments" className="gap-2 text-xs font-semibold">
+          <TabsTrigger value="payments" className="gap-2 text-xs font-semibold data-[state=active]:bg-[#186812] data-[state=active]:text-white">
             <IndianRupee className="h-4 w-4" /> Statutory Payments (90% &amp; 10% Tranches)
           </TabsTrigger>
-          <TabsTrigger value="grievances" className="gap-2 text-xs font-semibold">
+          <TabsTrigger value="grievances" className="gap-2 text-xs font-semibold data-[state=active]:bg-[#186812] data-[state=active]:text-white">
             <MessageSquare className="h-4 w-4" /> Clarifications &amp; Grievances ({grievances.length})
           </TabsTrigger>
-          <TabsTrigger value="r11_po_summary" className="gap-2 text-xs font-semibold">
+          <TabsTrigger value="r11_po_summary" className="gap-2 text-xs font-semibold data-[state=active]:bg-[#186812] data-[state=active]:text-white">
             <FileText className="h-4 w-4" /> R-11: PO Summary Report
           </TabsTrigger>
-          <TabsTrigger value="r12_cert_status" className="gap-2 text-xs font-semibold">
+          <TabsTrigger value="r12_cert_status" className="gap-2 text-xs font-semibold data-[state=active]:bg-[#186812] data-[state=active]:text-white">
             <FileCheck className="h-4 w-4" /> R-12: Delivery &amp; Certificate Status
           </TabsTrigger>
-          <TabsTrigger value="r13_self_view" className="gap-2 text-xs font-semibold">
+          <TabsTrigger value="r13_self_view" className="gap-2 text-xs font-semibold data-[state=active]:bg-[#186812] data-[state=active]:text-white">
             <Award className="h-4 w-4" /> R-13: Performance Self-View
           </TabsTrigger>
         </TabsList>
 
         {/* POs Tab */}
         <TabsContent value="pos" className="space-y-4">
-          <Card className="border border-border/80 shadow-sm">
-            <CardHeader className="pb-3 bg-muted/20 border-b">
-              <CardTitle className="text-sm font-semibold flex items-center justify-between">
-                <span>Active Purchase Orders</span>
-                <span className="text-xs font-normal text-muted-foreground">Action required: Acknowledge within 7 days &amp; Record Dispatch</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/40 border-b text-xs text-muted-foreground uppercase font-semibold">
+          <div className="bg-white border border-[#e4eaf2] rounded-xl shadow-xs overflow-hidden">
+            <div className="p-3 border-b border-[#e4eaf2] bg-[#f8fafc] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-[#152340]">Active Purchase Orders</h3>
+                <p className="text-xs text-[#6b7a93]">Mandatory sequence: Vendor must acknowledge PO within 7 days before dispatch can be initiated</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-[#f8fafc] border-b border-[#e4eaf2] text-[11px] font-bold text-[#6b7a93] uppercase tracking-wider">
+                  <tr>
+                    <th className="p-3 text-left">PO Number</th>
+                    <th className="p-3 text-left">PO Date</th>
+                    <th className="p-3 text-left">Equipment</th>
+                    <th className="p-3 text-center">Ordered Qty</th>
+                    <th className="p-3 text-right">PO Total Value</th>
+                    <th className="p-3 text-left">Consignee Hospital</th>
+                    <th className="p-3 text-center">Ack Status</th>
+                    <th className="p-3 text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#e4eaf2]">
+                  {vendorPOs.length === 0 ? (
                     <tr>
-                      <th className="p-3 text-left">PO Number</th>
-                      <th className="p-3 text-left">PO Date</th>
-                      <th className="p-3 text-left">Equipment</th>
-                      <th className="p-3 text-center">Ordered Qty</th>
-                      <th className="p-3 text-right">PO Total Value</th>
-                      <th className="p-3 text-left">Consignee Hospital</th>
-                      <th className="p-3 text-center">Ack Status</th>
-                      <th className="p-3 text-center">Actions</th>
+                      <td colSpan={8} className="p-8 text-center text-[#6b7a93] text-sm">
+                        No active purchase orders found.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {vendorPOs.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="p-8 text-center text-muted-foreground text-sm">
-                          No active purchase orders found.
-                        </td>
-                      </tr>
-                    ) : (
-                      vendorPOs.map((po: any) => {
-                        const poDt = po.poDate ? new Date(po.poDate) : new Date(po.createdAt);
-                        const daysOld = differenceInDays(new Date(), poDt);
-                        const ackOverdue = !po.vendorAcknowledged && daysOld > 7;
-                        const linkedDelivery = deliveries.find((d: any) => d.purchaseOrderId === po.id || d.poNumber === po.poNumber);
+                  ) : (
+                    vendorPOs.map((po: any) => {
+                      const poDt = po.poDate ? new Date(po.poDate) : new Date(po.createdAt);
+                      const daysOld = differenceInDays(new Date(), poDt);
+                      const ackOverdue = !po.vendorAcknowledged && daysOld > 7;
+                      const linkedDelivery = deliveries.find((d: any) => d.purchaseOrderId === po.id || d.poNumber === po.poNumber);
+                      const isDeliveredOrDone = linkedDelivery?.status === "delivered" || linkedDelivery?.status === "accepted" || po.status === "delivered" || po.status === "completed";
 
-                        return (
-                          <tr key={po.id} className="hover:bg-muted/30">
-                            <td className="p-3 font-mono text-xs font-bold text-primary">{po.poNumber}</td>
-                            <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
-                              {format(poDt, "dd-MMM-yyyy")}
-                            </td>
-                            <td className="p-3 font-medium">{po.equipmentName}</td>
-                            <td className="p-3 text-center font-bold font-mono">{po.quantity}</td>
-                            <td className="p-3 text-right font-mono font-semibold text-foreground">
-                              {formatINR(po.totalAmount)}
-                            </td>
-                            <td className="p-3 text-xs text-muted-foreground">
-                              {po.deliveryAddress || po.consignees?.[0]?.institutionName || "State Hospital"}
-                            </td>
-                            <td className="p-3 text-center">
-                              {po.vendorAcknowledged ? (
-                                <div className="flex flex-col items-center gap-0.5">
-                                  <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px] gap-1">
-                                    <CheckCircle2 className="h-3 w-3" /> Acknowledged
-                                  </Badge>
-                                  {po.vendorExpectedDispatchDate && (
-                                    <span className="text-[10px] text-muted-foreground">
-                                      Dispatch: {format(new Date(po.vendorExpectedDispatchDate), "dd-MMM-yyyy")}
-                                    </span>
-                                  )}
-                                </div>
-                              ) : ackOverdue ? (
-                                <Badge className="bg-red-100 text-red-800 border-0 text-[10px] gap-1">
-                                  <AlertTriangle className="h-3 w-3" /> Overdue (&gt;7d)
+                      return (
+                        <tr key={po.id} className="hover:bg-[#f8fafc]/80 transition-colors">
+                          <td className="p-3 font-mono text-xs font-bold text-[#2563eb]">{po.poNumber}</td>
+                          <td className="p-3 text-xs text-[#6b7a93] whitespace-nowrap">
+                            {format(poDt, "dd-MMM-yyyy")}
+                          </td>
+                          <td className="p-3 font-medium text-[#152340]">{po.equipmentName}</td>
+                          <td className="p-3 text-center font-bold font-mono text-[#152340]">{po.quantity}</td>
+                          <td className="p-3 text-right font-mono font-semibold text-[#152340]">
+                            {formatINR(po.totalAmount)}
+                          </td>
+                          <td className="p-3 text-xs text-[#6b7a93]">
+                            {po.deliveryAddress || po.consignees?.[0]?.institutionName || "State Hospital"}
+                          </td>
+                          <td className="p-3 text-center">
+                            {po.vendorAcknowledged ? (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px] gap-1">
+                                  <CheckCircle2 className="h-3 w-3" /> Acknowledged
                                 </Badge>
-                              ) : (
-                                <Badge className="bg-amber-100 text-amber-800 border-0 text-[10px] gap-1">
-                                  <Clock className="h-3 w-3" /> Ack Pending ({7 - daysOld}d)
-                                </Badge>
-                              )}
-                            </td>
-                            <td className="p-3 text-center">
-                              <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                {!po.vendorAcknowledged && (
+                                {po.vendorExpectedDispatchDate && (
+                                  <span className="text-[10px] text-[#6b7a93]">
+                                    Dispatch: {format(new Date(po.vendorExpectedDispatchDate), "dd-MMM-yyyy")}
+                                  </span>
+                                )}
+                              </div>
+                            ) : ackOverdue ? (
+                              <Badge className="bg-red-100 text-red-800 border-0 text-[10px] gap-1">
+                                <AlertTriangle className="h-3 w-3" /> Overdue (&gt;7d)
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-amber-100 text-amber-800 border-0 text-[10px] gap-1">
+                                <Clock className="h-3 w-3" /> Ack Pending ({7 - daysOld}d)
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              {!po.vendorAcknowledged ? (
+                                <Button
+                                  size="sm"
+                                  className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium shadow-xs"
+                                  onClick={() => {
+                                    setAckModal(po);
+                                    const d = new Date();
+                                    d.setDate(d.getDate() + 30);
+                                    setExpectedDispatchDate(d.toISOString().split("T")[0]);
+                                    setAckRemarks("Stock reserved at warehouse. Dispatch within stipulated SLA.");
+                                  }}
+                                >
+                                  Acknowledge PO
+                                </Button>
+                              ) : isDeliveredOrDone ? (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                    <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Delivered
+                                  </span>
                                   <Button
                                     size="sm"
-                                    className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium shadow-sm"
-                                    onClick={() => {
-                                      setAckModal(po);
-                                      const d = new Date();
-                                      d.setDate(d.getDate() + 30);
-                                      setExpectedDispatchDate(d.toISOString().split("T")[0]);
-                                      setAckRemarks("Stock reserved at warehouse. Dispatch within stipulated SLA.");
-                                    }}
+                                    variant="outline"
+                                    className="h-7 text-xs border-[#e4eaf2] text-[#152340] hover:bg-[#f8fafc]"
+                                    onClick={() => setActiveTab("deliveries")}
                                   >
-                                    Acknowledge PO
+                                    View Consignment
                                   </Button>
-                                )}
+                                </div>
+                              ) : (
                                 <Button
                                   size="sm"
                                   className={`h-7 text-xs gap-1 ${
                                     linkedDelivery
                                       ? "bg-slate-700 hover:bg-slate-800 text-white"
-                                      : "bg-[#186812] hover:bg-[#124e0d] text-white shadow-sm"
+                                      : "bg-[#186812] hover:bg-[#124e0d] text-white shadow-xs"
                                   }`}
                                   onClick={() => {
                                     const dcNo = `DC/${po.poNumber?.slice(-4) || "001"}/${Math.floor(1000 + Math.random() * 9000)}`;
@@ -893,367 +975,378 @@ export default function VendorPortal() {
                                   <Truck className="h-3 w-3" />
                                   {linkedDelivery ? "Additional Dispatch" : "Initiate Delivery"}
                                 </Button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </TabsContent>
 
         {/* Deliveries & DCC Compliance Tab */}
         <TabsContent value="deliveries" className="space-y-4">
-          <Card className="border border-border/80 shadow-sm">
-            <CardHeader className="pb-3 bg-muted/20 border-b">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                    <FileCheck className="h-4 w-4 text-emerald-700" /> Consignments, QA Inspection &amp; Document Compliance
-                  </CardTitle>
-                  <CardDescription className="text-xs">
-                    Track consignment dispatch, conduct technical QA checks, and upload DCC, Installation, and QA certificates required for 90% payment clearance.
-                  </CardDescription>
-                </div>
+          <div className="bg-white border border-[#e4eaf2] rounded-xl shadow-xs overflow-hidden">
+            <div className="p-3 border-b border-[#e4eaf2] bg-[#f8fafc] flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-[#152340] flex items-center gap-2">
+                  <FileCheck className="h-4 w-4 text-emerald-700" /> Consignments, QA Inspection &amp; Document Compliance
+                </h3>
+                <p className="text-xs text-[#6b7a93]">
+                  Track consignment dispatch, conduct technical QA checks, and upload DCC, Installation, and QA certificates required for 90% payment clearance.
+                </p>
               </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/40 border-b text-xs text-muted-foreground uppercase font-semibold">
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-[#f8fafc] border-b border-[#e4eaf2] text-[11px] font-bold text-[#6b7a93] uppercase tracking-wider">
+                  <tr>
+                    <th className="p-3 text-left">Tracking ID</th>
+                    <th className="p-3 text-left">PO Reference</th>
+                    <th className="p-3 text-left">Equipment</th>
+                    <th className="p-3 text-center">Qty</th>
+                    <th className="p-3 text-left">Consignee Hospital</th>
+                    <th className="p-3 text-center">QA Status</th>
+                    <th className="p-3 text-center">Documents Status</th>
+                    <th className="p-3 text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#e4eaf2]">
+                  {vendorDeliveries.length === 0 ? (
                     <tr>
-                      <th className="p-3 text-left">Tracking ID</th>
-                      <th className="p-3 text-left">PO Reference</th>
-                      <th className="p-3 text-left">Equipment</th>
-                      <th className="p-3 text-center">Qty</th>
-                      <th className="p-3 text-left">Consignee Hospital</th>
-                      <th className="p-3 text-center">QA Status</th>
-                      <th className="p-3 text-center">Documents Status</th>
-                      <th className="p-3 text-center">Actions</th>
+                      <td colSpan={8} className="p-8 text-center text-[#6b7a93] text-sm">
+                        No delivery consignments registered yet. Click &quot;Initiate Delivery&quot; on an acknowledged PO.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {vendorDeliveries.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="p-8 text-center text-muted-foreground text-sm">
-                          No delivery consignments registered yet. Click &quot;Initiate Delivery&quot; on an acknowledged PO.
-                        </td>
-                      </tr>
-                    ) : (
-                      vendorDeliveries.map((d: any) => {
-                        const delDate = d.deliveredDate ? new Date(d.deliveredDate) : null;
-                        const daysSinceDel = delDate ? differenceInDays(new Date(), delDate) : 0;
-                        const isDelivered = d.status === "delivered" || d.status === "accepted";
-                        const dccOverdue = isDelivered && !d.deliveryCertUploaded && daysSinceDel > 7;
+                  ) : (
+                    vendorDeliveries.map((d: any) => {
+                      const delDate = d.deliveredDate ? new Date(d.deliveredDate) : null;
+                      const daysSinceDel = delDate ? differenceInDays(new Date(), delDate) : 0;
+                      const isDelivered = d.status === "delivered" || d.status === "accepted";
+                      const dccOverdue = isDelivered && !d.deliveryCertUploaded && daysSinceDel > 7;
 
-                        return (
-                          <tr key={d.id} className="hover:bg-muted/30">
-                            <td className="p-3 font-mono text-xs font-bold text-primary">{d.deliveryTrackingId}</td>
-                            <td className="p-3 font-mono text-xs text-muted-foreground">{d.poNumber}</td>
-                            <td className="p-3 font-medium">{d.equipmentName}</td>
-                            <td className="p-3 text-center font-bold font-mono">{d.quantity}</td>
-                            <td className="p-3 text-xs text-muted-foreground">{d.facilityName}</td>
-                            <td className="p-3 text-center">
-                              {d.qaDecision === "accepted" ? (
-                                <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">✓ QA Passed</Badge>
-                              ) : d.qaDecision === "conditional" ? (
-                                <Badge className="bg-amber-100 text-amber-800 border-0 text-[10px]">⚠ Conditional</Badge>
-                              ) : d.qaDecision === "rejected" ? (
-                                <Badge className="bg-red-100 text-red-800 border-0 text-[10px]">✗ QA Rejected</Badge>
+                      return (
+                        <tr key={d.id} className="hover:bg-[#f8fafc]/80 transition-colors">
+                          <td className="p-3 font-mono text-xs font-bold text-[#2563eb]">{d.deliveryTrackingId}</td>
+                          <td className="p-3 font-mono text-xs text-[#6b7a93]">{d.poNumber}</td>
+                          <td className="p-3 font-medium text-[#152340]">{d.equipmentName}</td>
+                          <td className="p-3 text-center font-bold font-mono text-[#152340]">{d.quantity}</td>
+                          <td className="p-3 text-xs text-[#6b7a93]">{d.facilityName}</td>
+                          <td className="p-3 text-center">
+                            {d.qaDecision === "accepted" ? (
+                              <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">✓ QA Passed</Badge>
+                            ) : d.qaDecision === "conditional" ? (
+                              <Badge className="bg-amber-100 text-amber-800 border-0 text-[10px]">⚠ Conditional</Badge>
+                            ) : d.qaDecision === "rejected" ? (
+                              <Badge className="bg-red-100 text-red-800 border-0 text-[10px]">✗ QA Rejected</Badge>
+                            ) : (
+                              <Badge className="bg-slate-100 text-slate-700 border-0 text-[10px]">Pending Inspection</Badge>
+                            )}
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1 text-[11px]">
+                              {d.deliveryCertUploaded ? (
+                                <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">✓ DCC</Badge>
                               ) : (
-                                <Badge className="bg-slate-100 text-slate-700 border-0 text-[10px]">Pending Inspection</Badge>
+                                <Badge className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px]">DCC Pending</Badge>
                               )}
-                            </td>
-                            <td className="p-3 text-center">
-                              <div className="flex items-center justify-center gap-1 text-[11px]">
-                                {d.deliveryCertUploaded ? (
-                                  <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">✓ DCC</Badge>
-                                ) : (
-                                  <Badge className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px]">DCC Pending</Badge>
-                                )}
-                                {d.installationStatus === "complete" ? (
-                                  <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">✓ Installed</Badge>
-                                ) : (
-                                  <Badge className="bg-slate-100 text-slate-600 border-0 text-[10px]">Install Pending</Badge>
-                                )}
-                              </div>
-                            </td>
-                            <td className="p-3 text-center">
-                              <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              {d.installationStatus === "complete" ? (
+                                <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">✓ Installed</Badge>
+                              ) : (
+                                <Badge className="bg-slate-100 text-slate-600 border-0 text-[10px]">Install Pending</Badge>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              {d.status === "dispatched" && (
                                 <Button
                                   size="sm"
-                                  variant="outline"
-                                  className="h-7 text-xs gap-1 border-blue-300 text-blue-800 hover:bg-blue-50"
-                                  onClick={() => {
-                                    setQaModal(d);
-                                    setQaForm({
-                                      inspectorName: "Er. K. Suresh",
-                                      committeeName: "Institutional Biomedical Technical Committee",
-                                      qaDecision: "accepted",
-                                      qaComplianceScore: 100,
-                                      qaNotes: "Consignment physically verified, tested against specification sheet, electrical safety certified, and user training completed satisfactorily.",
-                                      rectificationDueDate: "",
-                                    });
-                                  }}
+                                  className="h-7 text-xs gap-1 bg-amber-600 hover:bg-amber-700 text-white shadow-xs font-medium"
+                                  onClick={() => handleConfirmReceipt(d)}
                                 >
-                                  <ShieldCheck className="h-3 w-3 text-blue-600" />
-                                  {d.qaDecision ? "Update QA" : "Conduct QA"}
+                                  <CheckCircle2 className="h-3 w-3" /> Confirm Receipt
                                 </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs gap-1 border-blue-300 text-blue-800 hover:bg-blue-50"
+                                onClick={() => {
+                                  setQaModal(d);
+                                  setQaForm({
+                                    inspectorName: "Er. K. Suresh",
+                                    committeeName: "Institutional Biomedical Technical Committee",
+                                    qaDecision: "accepted",
+                                    qaComplianceScore: 100,
+                                    qaNotes: "Consignment physically verified, tested against specification sheet, electrical safety certified, and user training completed satisfactorily.",
+                                    rectificationDueDate: "",
+                                  });
+                                }}
+                              >
+                                <ShieldCheck className="h-3 w-3 text-blue-600" />
+                                {d.qaDecision === "accepted" ? "QA Passed" : "Conduct QA"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={d.deliveryCertUploaded ? "outline" : "default"}
+                                className={`h-7 text-xs gap-1.5 ${!d.deliveryCertUploaded ? "bg-[#186812] hover:bg-[#124e0d] text-white shadow-xs font-medium" : "border-[#e4eaf2] text-[#152340] hover:bg-[#f8fafc]"}`}
+                                onClick={() => {
+                                  setDocModal(d);
+                                  setDocForm({
+                                    docType: "dcc",
+                                    filename: `DCC_Signed_${d.deliveryTrackingId}.pdf`,
+                                    officerName: "Dr. K. Srinivas",
+                                    notes: "DCC signed and stamped by Medical Superintendent at hospital site.",
+                                  });
+                                }}
+                              >
+                                <Upload className="h-3 w-3" /> {d.deliveryCertUploaded ? "Add Document" : "Upload Docs"}
+                              </Button>
+                              {d.qaDecision === "accepted" && d.deliveryCertUploaded && (
                                 <Button
                                   size="sm"
-                                  variant={d.deliveryCertUploaded ? "outline" : "default"}
-                                  className={`h-7 text-xs gap-1.5 ${!d.deliveryCertUploaded ? "bg-[#186812] hover:bg-[#124e0d] text-white" : ""}`}
-                                  onClick={() => {
-                                    setDocModal(d);
-                                    setDocForm({
-                                      docType: "dcc",
-                                      filename: `DCC_Signed_${d.deliveryTrackingId}.pdf`,
-                                      officerName: "Dr. K. Srinivas",
-                                      notes: "DCC signed and stamped by Medical Superintendent at hospital site.",
-                                    });
-                                  }}
+                                  variant="ghost"
+                                  className="h-7 text-xs text-[#2563eb] hover:bg-blue-50 font-medium"
+                                  onClick={() => setActiveTab("payments")}
                                 >
-                                  <Upload className="h-3 w-3" /> Upload Docs
+                                  Release Payment →
                                 </Button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </TabsContent>
 
         {/* Statutory 2-Tranche Payments Tab */}
         <TabsContent value="payments" className="space-y-4">
-          <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-950 space-y-1.5 shadow-sm">
+          <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-950 space-y-1.5 shadow-xs">
             <div className="font-bold flex items-center gap-2 text-sm text-emerald-900">
               <ShieldCheck className="h-5 w-5 text-emerald-700" />
-              TGMSIDC Statutory Two-Tranche Payment Release Mandate (90% + 10%)
+              Statutory Two-Tranche Payment Release Mandate (90% + 10%)
             </div>
             <p className="text-slate-700 leading-relaxed">
-              <strong>Tranche 1 (90% Release):</strong> Released by TGMSIDC upon physical delivery at hospital consignee, technical QA clearance, and verification of all statutory documentation (Delivery Challan, DCC signed by Medical Superintendent, Installation Certificate, and Commercial Tax Invoice).
+              <strong>Tranche 1 (90% Release):</strong> Released upon physical delivery at hospital consignee, technical QA clearance, and verification of all statutory documentation (Delivery Challan, DCC signed by Medical Superintendent, Installation Certificate, and Commercial Tax Invoice).
             </p>
             <p className="text-slate-700 leading-relaxed">
               <strong>Tranche 2 (10% Retention Release):</strong> Held as performance security retention, released post <strong>3 months</strong> of satisfactory hospital clinical usage following QPC (Quality &amp; Performance Certificate) verification.
             </p>
           </div>
 
-          <Card className="border border-border/80 shadow-sm">
-            <CardHeader className="pb-3 bg-muted/20 border-b">
-              <CardTitle className="text-sm font-semibold flex items-center justify-between">
-                <span>Purchase Order Payment Register &amp; Release Actions</span>
-                <span className="text-xs font-normal text-muted-foreground">Authorized roles: TGMSIDC Finance, Procurement Officers, Admin</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/40 border-b text-xs text-muted-foreground uppercase font-semibold">
-                    <tr>
-                      <th className="p-3 text-left">PO Reference</th>
-                      <th className="p-3 text-left">Contracted Vendor</th>
-                      <th className="p-3 text-left">Equipment</th>
-                      <th className="p-3 text-right">PO Total Value</th>
-                      <th className="p-3 text-center">Tranche 1 (90%)</th>
-                      <th className="p-3 text-center">Tranche 2 (10% Retention)</th>
-                      <th className="p-3 text-center">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {vendorPOs.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="p-8 text-center text-muted-foreground text-sm">
-                          No purchase orders available for payment processing.
-                        </td>
-                      </tr>
-                    ) : (
-                      vendorPOs.map((po: any) => {
-                        const total = po.totalAmount || 0;
-                        const t1Amount = (po as any).tranche1Amount || Math.round(total * 0.9);
-                        const t2Amount = total - t1Amount;
-
-                        const isT1Paid = (po as any).tranche1Paid || po.paymentStatus === "paid" || po.paymentStatus === "partial";
-                        const isT2Paid = (po as any).tranche2Paid || (po.paymentStatus === "paid" && po.status === "completed");
-
-                        const linkedDel = deliveries.find((d: any) => d.purchaseOrderId === po.id || d.poNumber === po.poNumber);
-                        const docsReady = linkedDel?.deliveryCertUploaded && linkedDel?.qaDecision === "accepted";
-
-                        return (
-                          <tr key={po.id} className="hover:bg-muted/30">
-                            <td className="p-3 font-mono text-xs font-bold text-primary whitespace-nowrap">
-                              {po.poNumber}
-                            </td>
-                            <td className="p-3 text-xs text-muted-foreground max-w-[160px]">
-                              {po.vendorName}
-                            </td>
-                            <td className="p-3 font-medium text-xs max-w-[180px]">
-                              {po.equipmentName} (Qty: {po.quantity})
-                            </td>
-                            <td className="p-3 text-right font-mono font-semibold text-foreground whitespace-nowrap">
-                              {formatINR(total)}
-                            </td>
-                            <td className="p-3 text-center">
-                              <div className="flex flex-col items-center gap-1">
-                                <span className="font-mono font-bold text-xs">{formatINR(t1Amount)}</span>
-                                {isT1Paid ? (
-                                  <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px] gap-1">
-                                    <CheckCircle2 className="h-3 w-3" /> 90% Released
-                                  </Badge>
-                                ) : docsReady ? (
-                                  <Badge className="bg-blue-100 text-blue-800 border-0 text-[10px]">
-                                    Ready for Release
-                                  </Badge>
-                                ) : (
-                                  <Badge className="bg-amber-100 text-amber-800 border-0 text-[10px]">
-                                    Docs Pending
-                                  </Badge>
-                                )}
-                                {(po as any).tranche1Reference && (
-                                  <span className="text-[10px] font-mono text-slate-500">
-                                    Ref: {(po as any).tranche1Reference}
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="p-3 text-center">
-                              <div className="flex flex-col items-center gap-1">
-                                <span className="font-mono font-bold text-xs">{formatINR(t2Amount)}</span>
-                                {isT2Paid ? (
-                                  <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px] gap-1">
-                                    <CheckCircle2 className="h-3 w-3" /> 10% Released
-                                  </Badge>
-                                ) : isT1Paid ? (
-                                  <Badge className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px]">
-                                    3-Month Usage Period
-                                  </Badge>
-                                ) : (
-                                  <Badge className="bg-slate-100 text-slate-600 border-0 text-[10px]">
-                                    Awaiting T1
-                                  </Badge>
-                                )}
-                                {(po as any).tranche2Reference && (
-                                  <span className="text-[10px] font-mono text-slate-500">
-                                    Ref: {(po as any).tranche2Reference}
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="p-3 text-center">
-                              <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                {canReleasePayment && !isT1Paid && (
-                                  <Button
-                                    size="sm"
-                                    className="h-7 text-xs bg-[#186812] hover:bg-[#124e0d] text-white shadow-sm"
-                                    onClick={() => {
-                                      setPayModal({ po, tranche: "tranche1_90" });
-                                      setPayForm({
-                                        paymentReference: `UTR-TG90-${Math.floor(10000000 + Math.random() * 90000000)}`,
-                                        paymentDate: new Date().toISOString().split("T")[0],
-                                        paidBy: user?.fullName || "TGMSIDC Accounts Officer",
-                                        remarks: `90% payment released against verified DCC, QA clearance, and installation documentation for ${po.poNumber}.`,
-                                      });
-                                    }}
-                                  >
-                                    Release 90% (T1)
-                                  </Button>
-                                )}
-                                {canReleasePayment && isT1Paid && !isT2Paid && (
-                                  <Button
-                                    size="sm"
-                                    className="h-7 text-xs bg-blue-700 hover:bg-blue-800 text-white shadow-sm"
-                                    onClick={() => {
-                                      setPayModal({ po, tranche: "tranche2_10" });
-                                      setPayForm({
-                                        paymentReference: `UTR-TG10-${Math.floor(10000000 + Math.random() * 90000000)}`,
-                                        paymentDate: new Date().toISOString().split("T")[0],
-                                        paidBy: user?.fullName || "TGMSIDC Accounts Officer",
-                                        remarks: `10% retention released post 3 months satisfactory hospital usage & QPC verification for ${po.poNumber}.`,
-                                      });
-                                    }}
-                                  >
-                                    Release 10% (T2)
-                                  </Button>
-                                )}
-                                {isT1Paid && isT2Paid && (
-                                  <span className="text-xs text-emerald-700 font-semibold flex items-center gap-1">
-                                    <CheckCircle2 className="h-4 w-4" /> Fulfilled
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+          <div className="bg-white border border-[#e4eaf2] rounded-xl shadow-xs overflow-hidden">
+            <div className="p-3 border-b border-[#e4eaf2] bg-[#f8fafc] flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-[#152340]">Purchase Order Payment Register &amp; Release Actions</h3>
+                <p className="text-xs text-[#6b7a93]">Two-Tranche verification: 90% against verified DCC/QA, and 10% post 3-month performance verification</p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-[#f8fafc] border-b border-[#e4eaf2] text-[11px] font-bold text-[#6b7a93] uppercase tracking-wider">
+                  <tr>
+                    <th className="p-3 text-left">PO Reference</th>
+                    <th className="p-3 text-left">Contracted Vendor</th>
+                    <th className="p-3 text-left">Equipment</th>
+                    <th className="p-3 text-right">PO Total Value</th>
+                    <th className="p-3 text-center">Tranche 1 (90%)</th>
+                    <th className="p-3 text-center">Tranche 2 (10% Retention)</th>
+                    <th className="p-3 text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#e4eaf2]">
+                  {vendorPOs.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-[#6b7a93] text-sm">
+                        No purchase orders available for payment processing.
+                      </td>
+                    </tr>
+                  ) : (
+                    vendorPOs.map((po: any) => {
+                      const total = po.totalAmount || 0;
+                      const t1Amount = (po as any).tranche1Amount || Math.round(total * 0.9);
+                      const t2Amount = total - t1Amount;
+
+                      const isT1Paid = (po as any).tranche1Paid || po.paymentStatus === "paid" || po.paymentStatus === "partial";
+                      const isT2Paid = (po as any).tranche2Paid || (po.paymentStatus === "paid" && po.status === "completed");
+
+                      const linkedDel = deliveries.find((d: any) => d.purchaseOrderId === po.id || d.poNumber === po.poNumber);
+                      const docsReady = linkedDel?.deliveryCertUploaded && linkedDel?.qaDecision === "accepted";
+
+                      return (
+                        <tr key={po.id} className="hover:bg-[#f8fafc]/80 transition-colors">
+                          <td className="p-3 font-mono text-xs font-bold text-[#2563eb] whitespace-nowrap">
+                            {po.poNumber}
+                          </td>
+                          <td className="p-3 text-xs text-[#6b7a93] max-w-[160px]">
+                            {po.vendorName}
+                          </td>
+                          <td className="p-3 font-medium text-xs text-[#152340] max-w-[180px]">
+                            {po.equipmentName} (Qty: {po.quantity})
+                          </td>
+                          <td className="p-3 text-right font-mono font-semibold text-[#152340] whitespace-nowrap">
+                            {formatINR(total)}
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <span className="font-mono font-bold text-xs text-[#152340]">{formatINR(t1Amount)}</span>
+                              {isT1Paid ? (
+                                <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px] gap-1">
+                                  <CheckCircle2 className="h-3 w-3" /> 90% Released
+                                </Badge>
+                              ) : docsReady ? (
+                                <Badge className="bg-blue-100 text-blue-800 border-0 text-[10px]">
+                                  Ready for Release
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-amber-100 text-amber-800 border-0 text-[10px]">
+                                  Docs Pending
+                                </Badge>
+                              )}
+                              {(po as any).tranche1Reference && (
+                                <span className="text-[10px] font-mono text-[#6b7a93]">
+                                  Ref: {(po as any).tranche1Reference}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <span className="font-mono font-bold text-xs text-[#152340]">{formatINR(t2Amount)}</span>
+                              {isT2Paid ? (
+                                <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px] gap-1">
+                                  <CheckCircle2 className="h-3 w-3" /> 10% Released
+                                </Badge>
+                              ) : isT1Paid ? (
+                                <Badge className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px]">
+                                  3-Month Usage Period
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-slate-100 text-slate-600 border-0 text-[10px]">
+                                  Awaiting T1
+                                </Badge>
+                              )}
+                              {(po as any).tranche2Reference && (
+                                <span className="text-[10px] font-mono text-[#6b7a93]">
+                                  Ref: {(po as any).tranche2Reference}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              {canReleasePayment && !isT1Paid && (
+                                <Button
+                                  size="sm"
+                                  className="h-7 text-xs bg-[#186812] hover:bg-[#124e0d] text-white shadow-xs font-medium"
+                                  onClick={() => {
+                                    setPayModal({ po, tranche: "tranche1_90" });
+                                    setPayForm({
+                                      paymentReference: `UTR-TG90-${Math.floor(10000000 + Math.random() * 90000000)}`,
+                                      paymentDate: new Date().toISOString().split("T")[0],
+                                      paidBy: user?.fullName || "Accounts Officer",
+                                      remarks: `90% payment released against verified DCC, QA clearance, and installation documentation for ${po.poNumber}.`,
+                                    });
+                                  }}
+                                >
+                                  Release 90% (T1)
+                                </Button>
+                              )}
+                              {canReleasePayment && isT1Paid && !isT2Paid && (
+                                <Button
+                                  size="sm"
+                                  className="h-7 text-xs bg-blue-700 hover:bg-blue-800 text-white shadow-xs font-medium"
+                                  onClick={() => {
+                                    setPayModal({ po, tranche: "tranche2_10" });
+                                    setPayForm({
+                                      paymentReference: `UTR-TG10-${Math.floor(10000000 + Math.random() * 90000000)}`,
+                                      paymentDate: new Date().toISOString().split("T")[0],
+                                      paidBy: user?.fullName || "Accounts Officer",
+                                      remarks: `10% retention released post 3 months satisfactory hospital usage & QPC verification for ${po.poNumber}.`,
+                                    });
+                                  }}
+                                >
+                                  Release 10% (T2)
+                                </Button>
+                              )}
+                              {isT1Paid && isT2Paid && (
+                                <span className="text-xs text-emerald-700 font-semibold flex items-center gap-1">
+                                  <CheckCircle2 className="h-4 w-4 text-emerald-600" /> Settled
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </TabsContent>
 
         {/* Vendor Clarifications & Grievances Tab (Process Book §12 F-26) */}
         <TabsContent value="grievances" className="space-y-4">
-          <Card className="border border-border/80 shadow-sm">
-            <CardHeader className="pb-3 bg-muted/20 border-b flex flex-row items-center justify-between">
+          <div className="bg-white border border-[#e4eaf2] rounded-xl shadow-xs overflow-hidden">
+            <div className="p-3 border-b border-[#e4eaf2] bg-[#f8fafc] flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4 text-primary" /> Vendor Clarifications &amp; Grievances Desk
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Raise technical, location, or delivery timeline queries. TGMSIDC responds within 3 statutory working days.
-                </CardDescription>
+                <h3 className="text-sm font-bold text-[#152340] flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-[#2563eb]" /> Vendor Clarifications &amp; Grievances Desk
+                </h3>
+                <p className="text-xs text-[#6b7a93]">
+                  Raise technical, location, or delivery timeline queries. Procurement responds within 3 statutory working days.
+                </p>
               </div>
               <Button
                 size="sm"
-                className="bg-[#186812] hover:bg-[#124e0d] text-white text-xs gap-1.5"
+                className="bg-[#186812] hover:bg-[#124e0d] text-white text-xs gap-1.5 shadow-xs font-medium"
                 onClick={() => setGrievanceModal(true)}
               >
                 + Raise New Clarification
               </Button>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/40 border-b text-xs text-muted-foreground uppercase font-semibold">
-                    <tr>
-                      <th className="p-3 text-left">Ticket ID</th>
-                      <th className="p-3 text-left">PO Reference</th>
-                      <th className="p-3 text-left">Category</th>
-                      <th className="p-3 text-left">Subject &amp; Query</th>
-                      <th className="p-3 text-center">Status</th>
-                      <th className="p-3 text-left">Official Response</th>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-[#f8fafc] border-b border-[#e4eaf2] text-[11px] font-bold text-[#6b7a93] uppercase tracking-wider">
+                  <tr>
+                    <th className="p-3 text-left">Ticket ID</th>
+                    <th className="p-3 text-left">PO Reference</th>
+                    <th className="p-3 text-left">Category</th>
+                    <th className="p-3 text-left">Subject &amp; Query</th>
+                    <th className="p-3 text-center">Status</th>
+                    <th className="p-3 text-left">Official Response</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#e4eaf2] text-xs">
+                  {grievances.map((g) => (
+                    <tr key={g.id} className="hover:bg-[#f8fafc]/80 transition-colors">
+                      <td className="p-3 font-mono font-bold text-[#2563eb]">{g.id}</td>
+                      <td className="p-3 font-mono text-[#6b7a93]">{g.poNumber}</td>
+                      <td className="p-3 font-medium uppercase text-[#152340]">{g.category}</td>
+                      <td className="p-3 font-semibold text-[#152340] max-w-xs">{g.subject}</td>
+                      <td className="p-3 text-center">
+                        <Badge variant="outline" className="text-[10px] uppercase border-[#e4eaf2]">
+                          {g.status.replace("_", " ")}
+                        </Badge>
+                      </td>
+                      <td className="p-3 text-[#6b7a93] italic max-w-xs">{g.response}</td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y text-xs">
-                    {grievances.map((g) => (
-                      <tr key={g.id} className="hover:bg-muted/30">
-                        <td className="p-3 font-mono font-bold text-primary">{g.id}</td>
-                        <td className="p-3 font-mono text-muted-foreground">{g.poNumber}</td>
-                        <td className="p-3 font-medium uppercase">{g.category}</td>
-                        <td className="p-3 font-semibold text-foreground max-w-xs">{g.subject}</td>
-                        <td className="p-3 text-center">
-                          <Badge variant="outline" className="text-[10px] uppercase">
-                            {g.status.replace("_", " ")}
-                          </Badge>
-                        </td>
-                        <td className="p-3 text-muted-foreground italic max-w-xs">{g.response}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </TabsContent>
 
         {/* R-11: Vendor PO Summary Report (Process Book §13 R-11) */}
@@ -1491,7 +1584,7 @@ export default function VendorPortal() {
             <DialogHeader>
               <DialogTitle>Create Consignment Dispatch — {dispatchModal.poNumber}</DialogTitle>
               <DialogDescription className="text-xs">
-                Transmit dispatch and transporter consignment details to hospital consignee and TGMSIDC.
+                Transmit dispatch and transporter consignment details to hospital consignee and Procurement Division.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2 text-sm">

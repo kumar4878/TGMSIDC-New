@@ -1484,7 +1484,7 @@ export default function IndentNew() {
                     {[
                       { label: "Draft Created", desc: `${currentDate} · ${form.digitisedBy}`, detail: "Indent form is being filled.", active: true },
                       { label: "Submit for Review", desc: "Pending", detail: "", active: false },
-                      { label: "TGMSIDC User Review", desc: "Pending", detail: "", active: false },
+                      { label: "Procurement Review", desc: "Pending", detail: "", active: false },
                       { label: "GM Equipment Approval", desc: "Pending", detail: "", active: false },
                       { label: "SO Equipment Final Sign-off", desc: "Pending", detail: "", active: false },
                     ].map((step, i) => (

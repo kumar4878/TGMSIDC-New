@@ -54,7 +54,7 @@ export default function MasterData() {
             <h1 className="text-2xl font-bold text-foreground">Statutory Master Data</h1>
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Government of Telangana — TGMSIDC Procurement Masters per V9 Process Book
+            Government of Telangana — Equipment Procurement Masters per V9 Process Book
           </p>
         </div>
         <div className="flex items-center gap-2">

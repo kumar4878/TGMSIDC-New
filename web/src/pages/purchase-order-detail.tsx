@@ -61,7 +61,7 @@ export default function PurchaseOrderDetail() {
   const [payTrancheForm, setPayTrancheForm] = useState({
     reference: "",
     date: new Date().toISOString().split("T")[0],
-    paidBy: user?.fullName || "TGMSIDC Accounts Officer",
+    paidBy: user?.fullName || "Accounts Officer",
     remarks: "",
   });
   const [payTrancheSubmitting, setPayTrancheSubmitting] = useState(false);
@@ -72,7 +72,7 @@ export default function PurchaseOrderDetail() {
     paymentReference: "",
     paymentDate: new Date().toISOString().split("T")[0],
     paymentAmount: 0,
-    paidBy: "TGMSIDC Accounts Officer",
+    paidBy: "Accounts Officer",
     paymentRemarks: "",
   });
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
@@ -83,7 +83,7 @@ export default function PurchaseOrderDetail() {
     description: "",
     previousValue: "",
     newValue: "",
-    requestedBy: "TGMSIDC Procurement Division",
+    requestedBy: "Procurement Division",
   });
   const [amendSubmitting, setAmendSubmitting] = useState(false);
 
@@ -155,7 +155,7 @@ export default function PurchaseOrderDetail() {
         description: "",
         previousValue: "",
         newValue: "",
-        requestedBy: "TGMSIDC Procurement Division",
+        requestedBy: "Procurement Division",
       });
       toast({ title: "PO Amended", description: `Statutory version incremented to v${(rawPO.version || 1) + 1}` });
     } catch (err: any) {
@@ -321,7 +321,7 @@ export default function PurchaseOrderDetail() {
         <div className="flex-1">
           <span className="font-semibold text-emerald-950">Statutory Scope Boundary Rule (Process Book §0): </span>
           Payment disbursement, invoice matching, and treasury transfers are processed outside the platform via IFMIS/Treasury.
-          TGMSIDC Accounts records a manual <strong>Paid / Not-Paid</strong> status and reference number (UTR / Cheque No) against this PO for official fulfillment records.
+          Accounts records a manual <strong>Paid / Not-Paid</strong> status and reference number (UTR / Cheque No) against this PO for official fulfillment records.
         </div>
         <Button
           size="sm"
@@ -332,7 +332,7 @@ export default function PurchaseOrderDetail() {
               paymentReference: rawPO.paymentReference || "",
               paymentDate: rawPO.paymentDate ? new Date(rawPO.paymentDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
               paymentAmount: rawPO.paymentAmount || po.totalAmount,
-              paidBy: rawPO.paidBy || "TGMSIDC Accounts Officer",
+              paidBy: rawPO.paidBy || "Accounts Officer",
               paymentRemarks: rawPO.paymentRemarks || "",
             });
             setPaymentOpen(true);
@@ -475,43 +475,65 @@ export default function PurchaseOrderDetail() {
             {/* Lifecycle Action Buttons */}
             <div className="pt-3 border-t mt-3 flex flex-col gap-2">
               {!rawPO.vendorAcknowledged && (
-                <Button
-                  size="sm"
-                  className="w-full bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs shadow-sm"
-                  onClick={() => {
-                    const d = new Date();
-                    d.setDate(d.getDate() + 30);
-                    setAckExpectedDispatchDate(d.toISOString().split("T")[0]);
-                    setAckRemarks("Stock allocated. Dispatch committed within SLA.");
-                    setAckOpen(true);
-                  }}
-                >
-                  <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> Acknowledge Purchase Order
-                </Button>
+                role === "vendor" ? (
+                  <Button
+                    size="sm"
+                    className="w-full bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs shadow-sm"
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() + 30);
+                      setAckExpectedDispatchDate(d.toISOString().split("T")[0]);
+                      setAckRemarks("Stock allocated. Dispatch committed within SLA.");
+                      setAckOpen(true);
+                    }}
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> Acknowledge Purchase Order
+                  </Button>
+                ) : (
+                  <div className="p-3 bg-amber-50/90 border border-amber-200 rounded-lg text-xs space-y-1">
+                    <div className="flex items-center gap-1.5 font-semibold text-amber-900">
+                      <Clock className="h-4 w-4 text-amber-600 shrink-0" /> Awaiting Empanelled Vendor Acknowledgment
+                    </div>
+                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                      Official PO has been issued to <span className="font-semibold text-amber-950">{po.vendorName}</span>. Statutory acceptance &amp; dispatch commitment can only be confirmed by the empanelled vendor.
+                    </p>
+                  </div>
+                )
               )}
               {rawPO.vendorAcknowledged && po.status !== "delivered" && po.status !== "completed" && (
-                <Button
-                  size="sm"
-                  className="w-full bg-[#186812] hover:bg-[#124e0d] text-white font-medium text-xs shadow-sm"
-                  onClick={() => {
-                    const dcNo = `DC/${po.poNumber?.slice(-4) || "001"}/${Math.floor(1000 + Math.random() * 9000)}`;
-                    const invNo = `INV/${format(new Date(), "yyyy")}-${(Number(format(new Date(), "yy")) + 1)}/${Math.floor(100 + Math.random() * 900)}`;
-                    const lrNo = `LR-TS-${Math.floor(100000 + Math.random() * 900000)}`;
-                    const serials = Array.from({ length: po.quantity || 1 }, (_, i) => `${po.equipmentId || "EQ"}-${Math.floor(10000 + Math.random() * 90000)}-0${i + 1}`).join(", ");
-                    setDispatchForm({
-                      quantity: po.quantity || 1,
-                      challanNumber: dcNo,
-                      invoiceNumber: invNo,
-                      lrGrNumber: lrNo,
-                      transporterName: "Safechem Express Logistics",
-                      transporterVehicle: "TS 09 UB 5678",
-                      serialNumbers: serials,
-                    });
-                    setDispatchOpen(true);
-                  }}
-                >
-                  <Truck className="h-3.5 w-3.5 mr-1.5" /> Initiate Delivery / Record Dispatch
-                </Button>
+                role === "vendor" || role === "admin" ? (
+                  <Button
+                    size="sm"
+                    className="w-full bg-[#186812] hover:bg-[#124e0d] text-white font-medium text-xs shadow-sm"
+                    onClick={() => {
+                      const dcNo = `DC/${po.poNumber?.slice(-4) || "001"}/${Math.floor(1000 + Math.random() * 9000)}`;
+                      const invNo = `INV/${format(new Date(), "yyyy")}-${(Number(format(new Date(), "yy")) + 1)}/${Math.floor(100 + Math.random() * 900)}`;
+                      const lrNo = `LR-TS-${Math.floor(100000 + Math.random() * 900000)}`;
+                      const serials = Array.from({ length: po.quantity || 1 }, (_, i) => `${po.equipmentId || "EQ"}-${Math.floor(10000 + Math.random() * 90000)}-0${i + 1}`).join(", ");
+                      setDispatchForm({
+                        quantity: po.quantity || 1,
+                        challanNumber: dcNo,
+                        invoiceNumber: invNo,
+                        lrGrNumber: lrNo,
+                        transporterName: "Safechem Express Logistics",
+                        transporterVehicle: "TS 09 UB 5678",
+                        serialNumbers: serials,
+                      });
+                      setDispatchOpen(true);
+                    }}
+                  >
+                    <Truck className="h-3.5 w-3.5 mr-1.5" /> Initiate Delivery / Record Dispatch
+                  </Button>
+                ) : (
+                  <div className="p-3 bg-blue-50/90 border border-blue-200 rounded-lg text-xs space-y-1">
+                    <div className="flex items-center gap-1.5 font-semibold text-blue-900">
+                      <Truck className="h-4 w-4 text-blue-600 shrink-0" /> PO Acknowledged — Consignment in Progress
+                    </div>
+                    <p className="text-[11px] text-blue-800 leading-relaxed">
+                      Empanelled vendor has acknowledged the PO. Consignment dispatch and DC/LR will be logged by <span className="font-semibold text-blue-950">{po.vendorName}</span>.
+                    </p>
+                  </div>
+                )
               )}
             </div>
           </CardContent>
@@ -580,7 +602,7 @@ export default function PurchaseOrderDetail() {
               </div>
               {rawPO.tranche1Reference && (
                 <div className="text-[10px] text-slate-500 font-mono">
-                  UTR: {rawPO.tranche1Reference} · By: {rawPO.tranche1PaidBy || "TGMSIDC Accounts"}
+                  UTR: {rawPO.tranche1Reference} · By: {rawPO.tranche1PaidBy || "Accounts Division"}
                 </div>
               )}
               {(role === "admin" || role === "tgmsidc_user" || role === "executive_director") && !isT1Paid && (
@@ -592,7 +614,7 @@ export default function PurchaseOrderDetail() {
                     setPayTrancheForm({
                       reference: `UTR-TG90-${Math.floor(10000000 + Math.random() * 90000000)}`,
                       date: new Date().toISOString().split("T")[0],
-                      paidBy: user?.fullName || "TGMSIDC Accounts Officer",
+                      paidBy: user?.fullName || "Accounts Officer",
                       remarks: `90% payment released against verified DCC, QA clearance & installation documents for ${po.poNumber}.`,
                     });
                   }}
@@ -629,7 +651,7 @@ export default function PurchaseOrderDetail() {
               </div>
               {rawPO.tranche2Reference && (
                 <div className="text-[10px] text-slate-500 font-mono">
-                  UTR: {rawPO.tranche2Reference} · By: {rawPO.tranche2PaidBy || "TGMSIDC Accounts"}
+                  UTR: {rawPO.tranche2Reference} · By: {rawPO.tranche2PaidBy || "Accounts Division"}
                 </div>
               )}
               {(role === "admin" || role === "tgmsidc_user" || role === "executive_director") && isT1Paid && !isT2Paid && (
@@ -641,7 +663,7 @@ export default function PurchaseOrderDetail() {
                     setPayTrancheForm({
                       reference: `UTR-TG10-${Math.floor(10000000 + Math.random() * 90000000)}`,
                       date: new Date().toISOString().split("T")[0],
-                      paidBy: user?.fullName || "TGMSIDC Accounts Officer",
+                      paidBy: user?.fullName || "Accounts Officer",
                       remarks: `Final 10% retention released post 3 months satisfactory hospital usage & QPC verification for ${po.poNumber}.`,
                     });
                   }}
@@ -776,7 +798,7 @@ export default function PurchaseOrderDetail() {
                     <td className="px-4 py-2.5 font-mono font-semibold text-primary">{a.amendmentRef}</td>
                     <td className="px-4 py-2.5 uppercase font-medium">{a.amendmentType?.replace("_", " ")}</td>
                     <td className="px-4 py-2.5">{a.description}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{a.requestedBy || "TGMSIDC User"}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground">{a.requestedBy || "Procurement Officer"}</td>
                     <td className="px-4 py-2.5 text-right text-muted-foreground">{a.requestedDate ? format(new Date(a.requestedDate), "dd MMM yyyy") : "—"}</td>
                   </tr>
                 ))}
@@ -806,23 +828,25 @@ export default function PurchaseOrderDetail() {
               </>
             )}
 
-            <Button
-              variant="outline"
-              className="gap-2"
-              onClick={() => {
-                setPaymentForm({
-                  paymentStatus: rawPO.paymentStatus || "paid",
-                  paymentReference: rawPO.paymentReference || "",
-                  paymentDate: rawPO.paymentDate ? new Date(rawPO.paymentDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
-                  paymentAmount: rawPO.paymentAmount || po.totalAmount,
-                  paidBy: rawPO.paidBy || "TGMSIDC Accounts Officer",
-                  paymentRemarks: rawPO.paymentRemarks || "",
-                });
-                setPaymentOpen(true);
-              }}
-            >
-              <CreditCard className="h-4 w-4 text-emerald-700" /> Record Payment Status
-            </Button>
+            {(role === "admin" || role === "tgmsidc_user" || role === "executive_director" || role === "so_equipment") && (
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => {
+                  setPaymentForm({
+                    paymentStatus: rawPO.paymentStatus || "paid",
+                    paymentReference: rawPO.paymentReference || "",
+                    paymentDate: rawPO.paymentDate ? new Date(rawPO.paymentDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
+                    paymentAmount: rawPO.paymentAmount || po.totalAmount,
+                    paidBy: rawPO.paidBy || "Accounts Officer",
+                    paymentRemarks: rawPO.paymentRemarks || "",
+                  });
+                  setPaymentOpen(true);
+                }}
+              >
+                <CreditCard className="h-4 w-4 text-emerald-700" /> Record Payment Status
+              </Button>
+            )}
 
             {po.status !== "cancelled" && (role === "admin" || role === "gm_equipment") && (
               <Button variant="destructive" onClick={() => setCancelOpen(true)} className="ml-auto">
@@ -1102,7 +1126,7 @@ export default function PurchaseOrderDetail() {
             <DialogHeader>
               <DialogTitle>Create Consignment Dispatch — {po.poNumber}</DialogTitle>
               <DialogDescription className="text-xs">
-                Transmit dispatch and transporter consignment details to hospital consignee and TGMSIDC.
+                Transmit dispatch and transporter consignment details to hospital consignee and Procurement Division.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2 text-sm">

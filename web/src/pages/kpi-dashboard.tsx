@@ -162,7 +162,7 @@ function ProcurementKPIView({ period }: { period: Period }) {
                   <span className="text-xs text-muted-foreground">Period: {period}</span>
                 </div>
                 <p className="text-xs text-slate-600 mt-1.5 max-w-md">
-                  Real-time statutory tracking against Process Book §13 benchmarks for TGMSIDC Equipment Wing.
+                  Real-time statutory tracking against Process Book §13 benchmarks for Equipment Wing.
                 </p>
               </div>
             </div>
@@ -905,7 +905,7 @@ export default function KPIDashboard() {
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Real-time executive performance monitoring and governance metrics for TGMSIDC
+            Real-time executive performance monitoring and governance metrics
           </p>
         </div>
 

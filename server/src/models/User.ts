@@ -21,6 +21,9 @@ export interface IUser extends Document {
   facilityId?: Schema.Types.ObjectId;
   facilityName?: string;
   hodMapping?: string;
+  vendorId?: Schema.Types.ObjectId;
+  vendorCode?: string;
+  vendorName?: string;
   email: string;
   phone: string;
   initials: string;
@@ -54,6 +57,9 @@ const UserSchema = new Schema<IUser>(
     facilityId: { type: Schema.Types.ObjectId, ref: "Institution" },
     facilityName: { type: String },
     hodMapping: { type: String },
+    vendorId: { type: Schema.Types.ObjectId, ref: "Vendor" },
+    vendorCode: { type: String },
+    vendorName: { type: String },
     email: { type: String, required: true },
     phone: { type: String, required: true },
     initials: { type: String, required: true },

@@ -167,7 +167,7 @@ export function getIndentLifecycleData(
       log.push({
         id: `edit-audit-${idx}`,
         timestamp: edit.correctedAt || edit.editedAt || indent.updatedAt,
-        actor: edit.correctedBy || edit.editedBy || "TGMSIDC Reviewer",
+        actor: edit.correctedBy || edit.editedBy || "Procurement Reviewer",
         role: "Verification Officer",
         event: `Data Verified & Corrected: ${edit.field} from "${edit.originalValue ?? "—"}" to "${edit.correctedValue ?? "—"}"`,
         eventType: "indent",

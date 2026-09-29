@@ -37,7 +37,7 @@ const INIT_WORKFLOWS: ApprovalWorkflow[] = [
     entityType: "indent",
     levels: [
       { id: 1, level: 1, role: "deo", roleLabel: "DEO (Initiator)", minAmount: 0, maxAmount: null, required: true, slaHours: 24, escalationHours: 48 },
-      { id: 2, level: 2, role: "tgmsidc_user", roleLabel: "TGMSIDC User (Verification)", minAmount: 0, maxAmount: null, required: true, slaHours: 48, escalationHours: 72 },
+      { id: 2, level: 2, role: "tgmsidc_user", roleLabel: "Procurement Officer (Verification)", minAmount: 0, maxAmount: null, required: true, slaHours: 48, escalationHours: 72 },
       { id: 3, level: 3, role: "gm_equipment", roleLabel: "GM Equipment (Technical Review)", minAmount: 0, maxAmount: null, required: true, slaHours: 72, escalationHours: 96 },
       { id: 4, level: 4, role: "so_equipment", roleLabel: "SO Equipment (Administrative Sanction)", minAmount: 0, maxAmount: null, required: true, slaHours: 48, escalationHours: 72 },
       { id: 5, level: 5, role: "executive_director", roleLabel: "Executive Director (High Value ≥ ₹5L)", minAmount: 500000, maxAmount: null, required: true, slaHours: 48, escalationHours: 96 },
@@ -49,7 +49,7 @@ const INIT_WORKFLOWS: ApprovalWorkflow[] = [
     description: "Sanction and release hierarchy for rate contract purchase orders",
     entityType: "purchase_order",
     levels: [
-      { id: 6, level: 1, role: "tgmsidc_user", roleLabel: "TGMSIDC User (Drafting & Validation)", minAmount: 0, maxAmount: null, required: true, slaHours: 24, escalationHours: 48 },
+      { id: 6, level: 1, role: "tgmsidc_user", roleLabel: "Procurement Officer (Drafting & Validation)", minAmount: 0, maxAmount: null, required: true, slaHours: 24, escalationHours: 48 },
       { id: 7, level: 2, role: "so_equipment", roleLabel: "SO Equipment (Sanction Order)", minAmount: 0, maxAmount: 2500000, required: true, slaHours: 48, escalationHours: 72 },
       { id: 8, level: 3, role: "executive_director", roleLabel: "Executive Director (> ₹25L Sanctions)", minAmount: 2500000, maxAmount: null, required: true, slaHours: 72, escalationHours: 120 },
     ],
@@ -79,7 +79,7 @@ const INIT_WORKFLOWS: ApprovalWorkflow[] = [
 
 const ROLE_OPTIONS = [
   { value: "deo", label: "Data Entry Operator (DEO)" },
-  { value: "tgmsidc_user", label: "TGMSIDC User / Biomedical Engineer" },
+  { value: "tgmsidc_user", label: "Procurement Officer / Biomedical Engineer" },
   { value: "gm_equipment", label: "GM Equipment" },
   { value: "so_equipment", label: "SO Equipment" },
   { value: "executive_director", label: "Executive Director" },
@@ -222,7 +222,7 @@ export default function ApprovalHierarchy() {
                   id: -1,
                   level: editingWorkflow.levels.length + 1,
                   role: "tgmsidc_user",
-                  roleLabel: "TGMSIDC User",
+                  roleLabel: "Procurement Officer",
                   minAmount: 0,
                   maxAmount: null,
                   required: true,

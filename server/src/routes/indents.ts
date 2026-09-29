@@ -80,6 +80,17 @@ function padNum(n: number, len = 4) {
   return String(n).padStart(len, "0");
 }
 
+async function findIndentDoc(id: string) {
+  if (!id) return null;
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    const found = await Indent.findById(id).catch(() => null);
+    if (found) return found;
+  }
+  return await Indent.findOne({
+    $or: [{ indentNumber: id }, { indentRefNumber: id }]
+  }).catch(() => null);
+}
+
 async function formatIndent(r: any) {
   let facility = null;
   if (r.facilityId) {
@@ -393,6 +404,25 @@ router.post("/indents", async (req, res): Promise<void> => {
       }
     }
 
+    const allEqIds = [resolvedEquipmentId, ...normalizedLineItems.map((li: any) => li.equipmentId)].filter(Boolean);
+    const activeRc = allEqIds.length > 0 ? await RateContract.findOne({
+      equipmentId: { $in: allEqIds },
+      status: "active",
+      endDate: { $gte: new Date() },
+    }) : null;
+
+    const determinedProcurementMode = activeRc ? "rate_contract" : (req.body.procurementMode || "tender");
+    const determinedRateContractId = activeRc ? activeRc._id : (req.body.rateContractId || undefined);
+
+    if (activeRc) {
+      for (const li of normalizedLineItems) {
+        if (!li.equipmentId || String(li.equipmentId) === String(activeRc.equipmentId)) {
+          li.rateContractId = activeRc._id;
+          li.procurementMode = "rate_contract";
+        }
+      }
+    }
+
     const indent = await Indent.create({
       indentNumber,
       indentRefNumber,
@@ -417,6 +447,8 @@ router.post("/indents", async (req, res): Promise<void> => {
       quantity: totalQty,
       technicalRequirements: technicalRequirements || normalizedLineItems.map((li: any) => li.specifications).join("; ") || "—",
       estimatedTotalValue: totalEstVal,
+      rateContractId: determinedRateContractId,
+      procurementMode: determinedProcurementMode,
       accountHeadName,
       programmeName,
       fundingSourceName,
@@ -452,207 +484,294 @@ router.post("/indents", async (req, res): Promise<void> => {
 });
 
 router.get("/indents/:id", async (req, res): Promise<void> => {
-  const indent = await Indent.findById(req.params.id);
-  if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
-  res.json(await formatIndent(indent));
+  try {
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+    res.json(await formatIndent(indent));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to fetch indent" });
+  }
 });
 
 router.patch("/indents/:id", async (req, res): Promise<void> => {
-  const update: Record<string, any> = {};
-  const allowed = ["quantity", "technicalRequirements", "status", "procurementMode",
-    "lineItems", "institutions", "reviewedBy", "returnComments", "accountHeadName",
-    "programmeName", "fundingSourceName", "estimatedTotalValue"];
-  for (const k of allowed) {
-    if (req.body[k] != null) update[k] = req.body[k];
+  try {
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+    const allowed = ["quantity", "technicalRequirements", "status", "procurementMode",
+      "lineItems", "institutions", "reviewedBy", "returnComments", "accountHeadName",
+      "programmeName", "fundingSourceName", "estimatedTotalValue"];
+    for (const k of allowed) {
+      if (req.body[k] != null) (indent as any)[k] = req.body[k];
+    }
+    await indent.save();
+    res.json(await formatIndent(indent));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to update indent" });
   }
-  const indent = await Indent.findByIdAndUpdate(req.params.id, update, { new: true });
-  if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
-  res.json(await formatIndent(indent));
 });
 
 router.post("/indents/:id/approve", async (req, res): Promise<void> => {
-  const { procurementMode, rateContractId, approvedBy } = req.body;
-  const indent = await Indent.findById(req.params.id);
-  if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+  try {
+    const { procurementMode, rateContractId, approvedBy } = req.body;
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
 
-  // Check matching active rate contract if not provided
-  const eqIds = [
-    indent.equipmentId,
-    ...(indent.lineItems?.map((li: any) => li.equipmentId) || [])
-  ].filter(Boolean);
-
-  let finalRcId = rateContractId || indent.rateContractId;
-  if (!finalRcId && eqIds.length > 0) {
-    const activeRc = await RateContract.findOne({ equipmentId: { $in: eqIds }, status: "active" });
-    if (activeRc) finalRcId = activeRc._id;
-  }
-
-  const mode = procurementMode || (finalRcId ? "rate_contract" : "tender");
-  const newStatus = (mode === "rate_contract" || finalRcId) ? "linked_to_rc" : "tender_initiated";
-
-  indent.status = newStatus;
-  indent.procurementMode = mode;
-  indent.approvedBy = approvedBy || "Authorised Officer";
-  if (finalRcId) indent.rateContractId = finalRcId;
-
-  // If routing to tender and no tender exists yet, create it immediately
-  if (newStatus === "tender_initiated" && !indent.tenderId) {
-    const count = await Tender.countDocuments();
-    const tenderYear = new Date().getFullYear();
-    const tenderNumber = `TND-${tenderYear}-${padNum(count + 1)}`;
-    const tender = await Tender.create({
-      tenderNumber,
-      indentId: indent._id,
-      equipmentId: indent.equipmentId || (indent.lineItems?.[0]?.equipmentId ?? undefined),
-      equipmentName: indent.lineItems?.length ? indent.lineItems.map((li: any) => li.equipmentName).join(", ") : (indent.equipmentName || "Medical Equipment"),
-      equipmentCategory: indent.lineItems?.[0]?.category || "Medical Equipment",
-      tenderType: "open",
-      portal: "gem",
-      financialYear: indent.financialYear || "2025-26",
-      status: "invited",
-      tenderInvitedDate: new Date(),
-      currentStageNumber: 1,
-      notes: `Tender initiated on final approval by ${approvedBy || "Authorised Officer"} (Rate Contract not available/expired).`,
-    });
-    indent.tenderId = tender._id;
-  }
-
-  if (indent.approvalSteps?.length) {
-    indent.approvalSteps.forEach((s: any) => {
-      s.status = "approved";
-      s.actionedAt = new Date();
-      if (!s.comments) s.comments = `Approved by ${approvedBy || "Authorised Officer"}`;
-    });
-    indent.markModified("approvalSteps");
-  }
-
-  await indent.save();
-  await notifyIndentStatusChange(indent, "approved", approvedBy);
-  res.json(await formatIndent(indent));
-});
-
-router.post("/indents/:id/reject", async (req, res): Promise<void> => {
-  const { rejectionReason, rejectedBy } = req.body;
-  if (!rejectionReason) { res.status(400).json({ error: "rejectionReason is required" }); return; }
-  const indent = await Indent.findById(req.params.id);
-  if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
-
-  indent.status = "rejected";
-  indent.rejectionReason = rejectionReason;
-  if (indent.approvalSteps?.length) {
-    const currentStep = indent.approvalSteps.find((s: any) => s.status === "pending");
-    if (currentStep) {
-      currentStep.status = "rejected";
-      currentStep.comments = rejectionReason;
-      currentStep.actionedAt = new Date();
-      indent.markModified("approvalSteps");
-    }
-  }
-  await indent.save();
-  await notifyIndentStatusChange(indent, "rejected", rejectedBy);
-  res.json(await formatIndent(indent));
-});
-
-router.post("/indents/:id/return", async (req, res): Promise<void> => {
-  const { returnComments, returnedBy } = req.body;
-  if (!returnComments) { res.status(400).json({ error: "returnComments required" }); return; }
-  const indent = await Indent.findById(req.params.id);
-  if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
-
-  indent.status = "returned";
-  indent.returnComments = returnComments;
-  indent.reviewedBy = returnedBy;
-  if (indent.approvalSteps?.length) {
-    const currentStep = indent.approvalSteps.find((s: any) => s.status === "pending");
-    if (currentStep) {
-      currentStep.status = "returned";
-      currentStep.comments = returnComments;
-      currentStep.actionedAt = new Date();
-      indent.markModified("approvalSteps");
-    }
-  }
-  await indent.save();
-  await notifyIndentStatusChange(indent, "returned", returnedBy);
-  res.json(await formatIndent(indent));
-});
-
-router.get("/indents/:id/approval-steps", async (req, res): Promise<void> => {
-  const indent = await Indent.findById(req.params.id);
-  if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
-  res.json(indent.approvalSteps || []);
-});
-
-router.patch("/indents/:id/approval-steps/:stepNumber", async (req, res): Promise<void> => {
-  const indent = await Indent.findById(req.params.id);
-  if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
-  const stepNumber = parseInt(req.params.stepNumber);
-  const stepIndex = indent.approvalSteps.findIndex((s: any) => s.stepNumber === stepNumber);
-  if (stepIndex === -1) { res.status(404).json({ error: "Step not found" }); return; }
-
-  const { status, comments, approvedBy, procurementMode, rateContractId } = req.body;
-  const step = indent.approvalSteps[stepIndex];
-  step.status = status;
-  step.comments = comments;
-  step.actionedAt = new Date();
-
-  if (status === "rejected") {
-    indent.status = "rejected";
-    indent.rejectionReason = comments;
-  } else if (status === "returned") {
-    indent.status = "returned";
-    indent.returnComments = comments;
-  } else if (status === "approved") {
-    const allApproved = indent.approvalSteps.every((s: any) =>
-      s.stepNumber <= stepNumber ? (s.status === "approved" || s.status === "skipped") : true
-    );
-    const isLastStep = stepNumber === indent.approvalSteps.length;
-
-    // Check for active Rate Contract match
+    // Check matching active rate contract if not provided
     const eqIds = [
       indent.equipmentId,
       ...(indent.lineItems?.map((li: any) => li.equipmentId) || [])
     ].filter(Boolean);
 
     let finalRcId = rateContractId || indent.rateContractId;
-    if (!finalRcId && eqIds.length > 0) {
-      const activeRc = await RateContract.findOne({ equipmentId: { $in: eqIds }, status: "active" });
+    let activeRc: any = null;
+    if (finalRcId) {
+      activeRc = await RateContract.findOne({ _id: finalRcId, status: "active", endDate: { $gte: new Date() } });
+    }
+    if (!activeRc && eqIds.length > 0) {
+      activeRc = await RateContract.findOne({ equipmentId: { $in: eqIds }, status: "active", endDate: { $gte: new Date() } });
+    }
+
+    if (activeRc) {
+      finalRcId = activeRc._id;
+      indent.rateContractId = activeRc._id;
+      indent.procurementMode = "rate_contract";
+      indent.status = "po_issued";
+      indent.approvedBy = approvedBy || "Authorised Officer";
+
+      // Auto-generate PO for RC Vendor
+      let po = await PurchaseOrder.findOne({ indentId: indent._id });
+      if (!po) {
+        const vn = await Vendor.findById(activeRc.vendorId).catch(() => null);
+        const quantity = indent.quantity || indent.lineItems?.[0]?.requestedQty || 1;
+        const unitPrice = activeRc.unitPrice || 100000;
+        const gstRate = activeRc.gstRate ?? 12;
+        const gstAmt = (unitPrice * quantity * gstRate) / 100;
+        const total = unitPrice * quantity + gstAmt;
+        const count = await PurchaseOrder.countDocuments();
+        const poNumber = `PO-2526-${String(count + 1).padStart(4, "0")}`;
+
+        po = await PurchaseOrder.create({
+          poNumber,
+          poType: "rc_based",
+          financialYear: indent.financialYear || "2025-26",
+          indentId: indent._id,
+          indentNumber: indent.indentNumber,
+          rateContractId: activeRc._id,
+          rcNumber: activeRc.contractNumber,
+          vendorId: activeRc.vendorId,
+          vendorName: vn?.name || activeRc.vendorName || "Empanelled Vendor",
+          vendorTier: "L1",
+          allocationRatio: "100%",
+          equipmentId: indent.equipmentId || activeRc.equipmentId || indent.lineItems?.[0]?.equipmentId,
+          equipmentName: indent.lineItems?.[0]?.equipmentName || indent.equipmentName || activeRc.equipmentName || "Medical Equipment",
+          quantity,
+          unitPrice,
+          gstRate,
+          gstAmount: gstAmt,
+          unitPriceInclTax: unitPrice * (1 + gstRate / 100),
+          totalEquipmentCost: unitPrice * quantity,
+          totalAmount: total,
+          deliveryAddress: indent.facilityName || "Telangana Medical Facility",
+          supplyPeriodDays: activeRc.supplyPeriodDays ?? 45,
+          expectedDeliveryDate: new Date(Date.now() + (activeRc.supplyPeriodDays ?? 45) * 86400000),
+          consignees: [
+            {
+              institutionId: indent.facilityId,
+              institutionName: indent.facilityName || "Telangana Medical Facility",
+              district: indent.institutions?.[0]?.district || "Hyderabad",
+              address: indent.facilityName || "Telangana Medical Facility",
+              quantity,
+              deliveryStatus: "pending",
+            },
+          ],
+          approvalStatus: "approved",
+          approvedBy: approvedBy || "Authorised Officer",
+          approvedDate: new Date(),
+          status: "issued",
+          vendorAcknowledged: false,
+          generatedBy: approvedBy || "Authorised Officer",
+          fileNo: indent.indentRefNumber || `RC/HPC/EQU/${indent.financialYear || "2025-26"}/${indent.indentNumber}`,
+        });
+
+        if (indent.lineItems && indent.lineItems.length > 0) {
+          for (const li of indent.lineItems) {
+            li.poId = po._id;
+            li.rateContractId = activeRc._id;
+            li.procurementMode = "rate_contract";
+          }
+          indent.markModified("lineItems");
+        }
+        await notifyPOStatusChange(po, "issued_to_vendor", approvedBy || "Authorised Officer");
+      }
+    } else {
+      // No active Rate Contract available: seamlessly route into Open Tendering
+      indent.rateContractId = undefined;
+      indent.procurementMode = "tender";
+      indent.status = "tender_initiated";
+      indent.approvedBy = approvedBy || "Authorised Officer";
+
+      if (!indent.tenderId) {
+        const count = await Tender.countDocuments();
+        const tenderYear = new Date().getFullYear();
+        const tenderNumber = `TND-${tenderYear}-${padNum(count + 1)}`;
+        const tender = await Tender.create({
+          tenderNumber,
+          indentId: indent._id,
+          equipmentId: indent.equipmentId || (indent.lineItems?.[0]?.equipmentId ?? undefined),
+          equipmentName: indent.lineItems?.length ? indent.lineItems.map((li: any) => li.equipmentName).join(", ") : (indent.equipmentName || "Medical Equipment"),
+          equipmentCategory: indent.lineItems?.[0]?.category || "Medical Equipment",
+          tenderType: "open",
+          portal: "gem",
+          financialYear: indent.financialYear || "2025-26",
+          status: "invited",
+          tenderInvitedDate: new Date(),
+          currentStageNumber: 1,
+          notes: `Tender initiated on final approval by ${approvedBy || "Authorised Officer"} (Rate Contract not available for requested equipment).`,
+        });
+        indent.tenderId = tender._id;
+      }
+    }
+
+    if (indent.approvalSteps?.length) {
+      indent.approvalSteps.forEach((s: any) => {
+        s.status = "approved";
+        s.actionedAt = new Date();
+        if (!s.comments) s.comments = `Approved by ${approvedBy || "Authorised Officer"}`;
+      });
+      indent.markModified("approvalSteps");
+    }
+
+    await indent.save();
+    await notifyIndentStatusChange(indent, "approved", approvedBy);
+    res.json(await formatIndent(indent));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to approve indent" });
+  }
+});
+
+router.post("/indents/:id/reject", async (req, res): Promise<void> => {
+  try {
+    const { rejectionReason, rejectedBy } = req.body;
+    if (!rejectionReason) { res.status(400).json({ error: "rejectionReason is required" }); return; }
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+
+    indent.status = "rejected";
+    indent.rejectionReason = rejectionReason;
+    if (indent.approvalSteps?.length) {
+      const currentStep = indent.approvalSteps.find((s: any) => s.status === "pending");
+      if (currentStep) {
+        currentStep.status = "rejected";
+        currentStep.comments = rejectionReason;
+        currentStep.actionedAt = new Date();
+        indent.markModified("approvalSteps");
+      }
+    }
+    await indent.save();
+    await notifyIndentStatusChange(indent, "rejected", rejectedBy);
+    res.json(await formatIndent(indent));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to reject indent" });
+  }
+});
+
+router.post("/indents/:id/return", async (req, res): Promise<void> => {
+  try {
+    const { returnComments, returnedBy } = req.body;
+    if (!returnComments) { res.status(400).json({ error: "returnComments required" }); return; }
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+
+    indent.status = "returned";
+    indent.returnComments = returnComments;
+    indent.reviewedBy = returnedBy;
+    if (indent.approvalSteps?.length) {
+      const currentStep = indent.approvalSteps.find((s: any) => s.status === "pending");
+      if (currentStep) {
+        currentStep.status = "returned";
+        currentStep.comments = returnComments;
+        currentStep.actionedAt = new Date();
+        indent.markModified("approvalSteps");
+      }
+    }
+    await indent.save();
+    await notifyIndentStatusChange(indent, "returned", returnedBy);
+    res.json(await formatIndent(indent));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to return indent" });
+  }
+});
+
+router.get("/indents/:id/approval-steps", async (req, res): Promise<void> => {
+  try {
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+    res.json(indent.approvalSteps || []);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to get approval steps" });
+  }
+});
+
+router.patch("/indents/:id/approval-steps/:stepNumber", async (req, res): Promise<void> => {
+  try {
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+    const stepNumber = parseInt(req.params.stepNumber);
+    const stepIndex = indent.approvalSteps.findIndex((s: any) => s.stepNumber === stepNumber);
+    if (stepIndex === -1) { res.status(404).json({ error: "Step not found" }); return; }
+
+    const { status, comments, approvedBy, procurementMode, rateContractId } = req.body;
+    const step = indent.approvalSteps[stepIndex];
+    step.status = status;
+    step.comments = comments;
+    step.actionedAt = new Date();
+
+    if (status === "rejected") {
+      indent.status = "rejected";
+      indent.rejectionReason = comments;
+    } else if (status === "returned") {
+      indent.status = "returned";
+      indent.returnComments = comments;
+    } else if (status === "approved") {
+      const allApproved = indent.approvalSteps.every((s: any) =>
+        s.stepNumber <= stepNumber ? (s.status === "approved" || s.status === "skipped") : true
+      );
+      const isLastStep = stepNumber === indent.approvalSteps.length;
+
+      // Check for active Rate Contract match
+      const eqIds = [
+        indent.equipmentId,
+        ...(indent.lineItems?.map((li: any) => li.equipmentId) || [])
+      ].filter(Boolean);
+
+      let finalRcId = rateContractId || indent.rateContractId;
+      let activeRc: any = null;
+      if (finalRcId) {
+        activeRc = await RateContract.findOne({ _id: finalRcId, status: "active", endDate: { $gte: new Date() } });
+      }
+      if (!activeRc && eqIds.length > 0) {
+        activeRc = await RateContract.findOne({ equipmentId: { $in: eqIds }, status: "active", endDate: { $gte: new Date() } });
+      }
+
       if (activeRc) {
         finalRcId = activeRc._id;
+        indent.rateContractId = activeRc._id;
+        if (!procurementMode && !indent.procurementMode) {
+          indent.procurementMode = "rate_contract";
+        }
       }
-    }
 
-    if (finalRcId) {
-      indent.rateContractId = finalRcId;
-      if (!procurementMode && !indent.procurementMode) {
-        indent.procurementMode = "rate_contract";
-      }
-    }
-
-    if (isLastStep && allApproved) {
-      /* Final approval — set terminal status */
-      if (procurementMode) indent.procurementMode = procurementMode;
-      indent.approvedBy = approvedBy || step.assignedUserName;
-
-      const isRateContract = indent.procurementMode === "rate_contract" || finalRcId || !indent.tenderId;
-
-      if (isRateContract) {
-        // Resolve active Rate Contract
-        let activeRc: any = null;
-        if (finalRcId) {
-          activeRc = await RateContract.findById(finalRcId);
-        }
-        if (!activeRc && eqIds.length > 0) {
-          activeRc = await RateContract.findOne({ equipmentId: { $in: eqIds }, status: "active" });
-        }
-        if (!activeRc) {
-          activeRc = await RateContract.findOne({ status: "active" });
-        }
+      if (isLastStep && allApproved) {
+        /* Final approval — set terminal status */
+        if (procurementMode) indent.procurementMode = procurementMode;
+        indent.approvedBy = approvedBy || step.assignedUserName;
 
         if (activeRc) {
           indent.rateContractId = activeRc._id;
           indent.procurementMode = "rate_contract";
+          indent.status = "po_issued";
 
-          // Auto-generate and issue Purchase Order if not already present
+          // Auto-generate and issue Purchase Order to RC Vendor
           let po = await PurchaseOrder.findOne({ indentId: indent._id });
           if (!po) {
             const vn = await Vendor.findById(activeRc.vendorId).catch(() => null);
@@ -701,7 +820,8 @@ router.patch("/indents/:id/approval-steps/:stepNumber", async (req, res): Promis
               approvalStatus: "approved",
               approvedBy: approvedBy || step.assignedUserName || "Executive Director, TGMSIDC",
               approvedDate: new Date(),
-              status: "approved",
+              status: "issued",
+              vendorAcknowledged: false,
               generatedBy: approvedBy || step.assignedUserName || "Executive Director, TGMSIDC",
               fileNo: indent.indentRefNumber || `RC/HPC/EQU/${indent.financialYear || "2025-26"}/${indent.indentNumber}`,
             });
@@ -716,89 +836,51 @@ router.patch("/indents/:id/approval-steps/:stepNumber", async (req, res): Promis
               indent.markModified("lineItems");
             }
 
-            // Auto-create Delivery consignment in transit
-            const existingDel = await Delivery.findOne({ purchaseOrderId: po._id });
-            if (!existingDel) {
-              const delCount = await Delivery.countDocuments();
-              const delTrackingId = `DEL-${String(delCount + 1).padStart(5, "0")}`;
-              await Delivery.create({
-                deliveryTrackingId: delTrackingId,
-                purchaseOrderId: po._id,
-                poNumber: po.poNumber,
-                vendorId: po.vendorId,
-                vendorName: po.vendorName,
-                facilityId: indent.facilityId,
-                facilityName: indent.facilityName,
-                equipmentId: po.equipmentId,
-                equipmentName: po.equipmentName,
-                orderedQty: quantity,
-                quantity,
-                receivedQty: 0,
-                dispatchDate: new Date(),
-                transporterName: "TGMSIDC Central Cold Chain & Heavy Transport",
-                transporterVehicle: "TS-09-UB-4812",
-                lrGrNumber: `LR-TG-${String(delCount + 101).padStart(4, "0")}`,
-                challanNumber: `DC-${po.poNumber.slice(-4)}`,
-                invoiceNumber: `INV-${po.poNumber.slice(-4)}`,
-                expectedDeliveryDate: new Date(Date.now() + 7 * 86400000),
-                status: "dispatched",
-                condition: "good",
-                installationRequired: true,
-                installationStatus: "pending",
-              });
-            }
+            await notifyPOStatusChange(po, "issued_to_vendor", approvedBy || step.assignedUserName);
+          }
+        } else {
+          // No active Rate Contract available: seamlessly route into Open Tendering
+          indent.rateContractId = undefined;
+          indent.procurementMode = "tender";
+          indent.status = "tender_initiated";
 
-            await notifyPOStatusChange(po, "approved & issued", approvedBy || step.assignedUserName);
+          if (!indent.tenderId) {
+            const count = await Tender.countDocuments();
+            const tenderYear = new Date().getFullYear();
+            const tenderNumber = `TND-${tenderYear}-${padNum(count + 1)}`;
+            const tender = await Tender.create({
+              tenderNumber,
+              indentId: indent._id,
+              equipmentId: indent.equipmentId || (indent.lineItems?.[0]?.equipmentId ?? undefined),
+              equipmentName: indent.lineItems?.length ? indent.lineItems.map((li: any) => li.equipmentName).join(", ") : (indent.equipmentName || "Medical Equipment"),
+              equipmentCategory: indent.lineItems?.[0]?.category || "Medical Equipment",
+              tenderType: "open",
+              portal: "gem",
+              financialYear: indent.financialYear || "2025-26",
+              status: "invited",
+              tenderInvitedDate: new Date(),
+              currentStageNumber: 1,
+              notes: `Tender initiated on final approval by ${approvedBy || step.assignedUserName} (Rate Contract not available for requested equipment).`,
+            });
+            indent.tenderId = tender._id;
           }
         }
-        indent.status = "po_issued";
-      } else {
-        indent.status = "tender_initiated";
-        if (!indent.tenderId) {
-          const count = await Tender.countDocuments();
-          const tenderYear = new Date().getFullYear();
-          const tenderNumber = `TND-${tenderYear}-${padNum(count + 1)}`;
-          const tender = await Tender.create({
-            tenderNumber,
-            indentId: indent._id,
-            equipmentId: indent.equipmentId || (indent.lineItems?.[0]?.equipmentId ?? undefined),
-            equipmentName: indent.lineItems?.length ? indent.lineItems.map((li: any) => li.equipmentName).join(", ") : (indent.equipmentName || "Medical Equipment"),
-            equipmentCategory: indent.lineItems?.[0]?.category || "Medical Equipment",
-            tenderType: "open",
-            portal: "gem",
-            financialYear: indent.financialYear || "2025-26",
-            status: "invited",
-            tenderInvitedDate: new Date(),
-            currentStageNumber: 1,
-            notes: `Tender initiated on final approval step ${stepNumber} by ${approvedBy || step.assignedUserName}.`,
-          });
-          indent.tenderId = tender._id;
-        }
       }
-    } else {
-      /* Intermediate step — update status to reflect progress */
-      indent.status = "pending_approval";
-      indent.reviewedBy = approvedBy || step.assignedUserName;
     }
+
+    indent.markModified("approvalSteps");
+    await indent.save();
+
+    await notifyIndentStatusChange(indent, "step_approved", approvedBy || step.assignedUserName);
+    res.json(await formatIndent(indent));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to update approval step" });
   }
-
-  indent.markModified("approvalSteps");
-  await indent.save();
-
-  // Send notifications for step action
-  await notifyIndentStatusChange(
-    indent,
-    status === "approved" ? (indent.status === "linked_to_rc" || indent.status === "po_issued" || indent.status === "approved" ? "approved" : "step_approved") : status,
-    approvedBy || step.assignedUserName
-  );
-
-  /* Return the full updated indent so the UI can refresh */
-  res.json(await formatIndent(indent));
 });
 
 router.post("/indents/:id/initiate-tender", async (req, res): Promise<void> => {
   try {
-    const indent = await Indent.findById(req.params.id);
+    const indent = await findIndentDoc(req.params.id);
     if (!indent) {
       res.status(404).json({ error: "Indent not found" });
       return;
@@ -874,7 +956,7 @@ router.post("/indents/:id/initiate-tender", async (req, res): Promise<void> => {
 /* Write-in Equipment Resolution (Process Book §1 Step 12 & §12 F-38) */
 router.post("/indents/:id/resolve-write-in", async (req, res): Promise<void> => {
   try {
-    const indent = await Indent.findById(req.params.id);
+    const indent = await findIndentDoc(req.params.id);
     if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
 
     const { lineItemIndex = 0, action, mappedEquipmentId, newEquipmentName, category, specifications, estimatedUnitCost, resolvedBy, comments } = req.body;
@@ -949,7 +1031,7 @@ router.post("/indents/:id/resolve-write-in", async (req, res): Promise<void> => 
 /* Side-by-side Edit Audit Trail logger (Process Book §1 Step 11) */
 router.post("/indents/:id/edit-audit", async (req, res): Promise<void> => {
   try {
-    const indent = await Indent.findById(req.params.id);
+    const indent = await findIndentDoc(req.params.id);
     if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
 
     const { changes, updatedFields, editedBy } = req.body;
@@ -985,7 +1067,7 @@ router.post("/indents/:id/edit-audit", async (req, res): Promise<void> => {
 /* Comprehensive End-to-End Procurement Lifecycle Progression */
 router.post("/indents/:id/advance-lifecycle", async (req, res): Promise<void> => {
   try {
-    const indent = await Indent.findById(req.params.id);
+    const indent = await findIndentDoc(req.params.id);
     if (!indent) {
       res.status(404).json({ error: "Indent not found" });
       return;

@@ -105,7 +105,7 @@ export function updateStep(
 export function initStepsForNewIndent(indentId: string | number, initiatorName: string, isHighValue: boolean): ApprovalStep[] {
   const baseSteps: ApprovalStep[] = [
     { stepNumber: 1, requiredRole: "deo", roleLabel: "DEO (Initiator)", assignedUserName: initiatorName, assignedUserId: "u1", status: "approved", actionedAt: new Date().toISOString(), comments: "Indent submitted." },
-    { stepNumber: 2, requiredRole: "tgmsidc_user", roleLabel: "TGMSIDC User", assignedUserName: "K. Srinivas", assignedUserId: "u2", status: "pending", actionedAt: null, comments: "" },
+    { stepNumber: 2, requiredRole: "tgmsidc_user", roleLabel: "Procurement Officer", assignedUserName: "K. Srinivas", assignedUserId: "u2", status: "pending", actionedAt: null, comments: "" },
     { stepNumber: 3, requiredRole: "gm_equipment", roleLabel: "GM Equipment", assignedUserName: "P. Narayan", assignedUserId: "u3", status: "pending", actionedAt: null, comments: "" },
     { stepNumber: 4, requiredRole: "so_equipment", roleLabel: "SO Equipment", assignedUserName: "R. Sharma", assignedUserId: "u4", status: "pending", actionedAt: null, comments: "" },
   ];

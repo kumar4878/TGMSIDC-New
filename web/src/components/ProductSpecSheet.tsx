@@ -482,7 +482,7 @@ export function ProductSpecSheet({ equipmentId, equipmentCode, equipmentName, co
           <SpecGrid fields={[
             { label: "Warranty Period", value: current.warranty ? `${current.warranty.years} Years Comprehensive Warranty from commissioning` : "3 Years Comprehensive" },
             { label: "CMC Commences", value: current.warranty ? `Year ${current.warranty.cmcStartYear} onwards for 5–7 years` : "Year 4 onwards" },
-            { label: "CMC Rate (Annual Reference)", value: current.warranty?.cmcAnnualRate ? `₹${current.warranty.cmcAnnualRate.toLocaleString("en-IN")} per year` : "As per TGMSIDC tender terms" },
+            { label: "CMC Rate (Annual Reference)", value: current.warranty?.cmcAnnualRate ? `₹${current.warranty.cmcAnnualRate.toLocaleString("en-IN")} per year` : "As per tender terms" },
           ]} />
         )}
       </Section>

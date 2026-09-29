@@ -234,7 +234,7 @@ export default function IndentDetail() {
         newEquipmentName: writeInAction === "new_addition_requested" ? newEquipmentName : undefined,
         category: writeInAction === "new_addition_requested" ? newEquipmentCategory : undefined,
         specifications: writeInAction === "new_addition_requested" ? newEquipmentSpecs : undefined,
-        resolvedBy: user?.fullName || "TGMSIDC User",
+        resolvedBy: user?.fullName || "Procurement Officer",
       });
       queryClient.invalidateQueries({ queryKey: getGetIndentQueryKey(id) });
       setWriteInModal(null);
@@ -354,7 +354,7 @@ export default function IndentDetail() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action,
-          actorName: user?.fullName || user?.username || "Authorised Officer, TGMSIDC",
+          actorName: user?.fullName || user?.username || "Authorised Officer",
         }),
       });
       if (!res.ok) {
@@ -654,7 +654,7 @@ export default function IndentDetail() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-bold text-amber-950">
-                      Active Rate Contract Not Available for All Items (TGMSIDC Rule BR-02)
+                      Active Rate Contract Not Available for All Items (Rule BR-02)
                     </h3>
                     <span className="neo-chip amb text-[10px]">Tender Required</span>
                   </div>
@@ -1692,21 +1692,21 @@ export default function IndentDetail() {
         </div>
       </div>
 
-      {/* TGMSIDC Reviewer Data Edit Audit Trail (Process Book §1 Step 11) */}
+      {/* Reviewer Data Edit Audit Trail (Process Book §1 Step 11) */}
       {indent.editAuditTrail && indent.editAuditTrail.length > 0 && (
         <Card className="border-blue-200 bg-blue-50/20">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base flex items-center gap-2 text-blue-950">
                 <FileCheck2 className="h-4 w-4 text-blue-600" />
-                TGMSIDC Reviewer Data Correction Audit Trail
+                Reviewer Data Correction Audit Trail
               </CardTitle>
               <Badge variant="outline" className="text-xs bg-blue-100 text-blue-800 border-blue-300">
                 Process Book §1 Step 11 — Blue Highlighted Corrections
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Statutory verification corrections made by TGMSIDC Reviewers are tracked with original facility values preserved and verified values highlighted.
+              Statutory verification corrections made by Reviewers are tracked with original facility values preserved and verified values highlighted.
             </p>
           </CardHeader>
           <CardContent className="p-0">
@@ -1717,7 +1717,7 @@ export default function IndentDetail() {
                     <th className="px-3 py-2 text-left font-semibold text-blue-950">Timestamp &amp; Reviewer</th>
                     <th className="px-3 py-2 text-left font-semibold text-blue-950">Field Corrected</th>
                     <th className="px-3 py-2 text-left font-semibold text-blue-950">Facility Submitted Value</th>
-                    <th className="px-3 py-2 text-left font-semibold text-blue-950">TGMSIDC Verified Value</th>
+                    <th className="px-3 py-2 text-left font-semibold text-blue-950">Verified Value</th>
                     <th className="px-3 py-2 text-left font-semibold text-blue-950">Regulatory / Technical Justification</th>
                   </tr>
                 </thead>
@@ -1725,7 +1725,7 @@ export default function IndentDetail() {
                   {indent.editAuditTrail.map((edit: any, idx: number) => (
                     <tr key={idx} className="hover:bg-blue-50/50 transition-colors">
                       <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
-                        <div className="font-medium text-foreground">{edit.editedBy || "TGMSIDC Officer"}</div>
+                        <div className="font-medium text-foreground">{edit.editedBy || "Procurement Officer"}</div>
                         <div className="text-[10px]">{safeFormat(edit.editedAt, "dd MMM yyyy, HH:mm")}</div>
                       </td>
                       <td className="px-3 py-2.5 font-mono font-medium text-foreground">{edit.field}</td>
@@ -1836,7 +1836,7 @@ export default function IndentDetail() {
                 <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2.5">
                   <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                   <p className="text-xs text-red-800 leading-relaxed">
-                    This Rate Contract validity has expired. Per TGMSIDC Rule BR-02, no Purchase Orders can be drawn against an expired rate card. This equipment must be procured via Open Tendering (GeM / e-Procurement).
+                    This Rate Contract validity has expired. Per Procurement Rule BR-02, no Purchase Orders can be drawn against an expired rate card. This equipment must be procured via Open Tendering (GeM / e-Procurement).
                   </p>
                 </div>
               )}
@@ -2414,7 +2414,7 @@ function ScannedIndentViewer({
                 Telangana Medical Services &amp; Infrastructure Development Corporation
               </h4>
               <p className="text-[10px] text-slate-600 font-sans mt-0.5">
-                Form TGMSIDC-IND-01 · Official Hospital Indent Requisition &amp; Administrative Sanction
+                Form IND-01 · Official Hospital Indent Requisition &amp; Administrative Sanction
               </p>
             </div>
 
@@ -2484,7 +2484,7 @@ function ScannedIndentViewer({
 
             <div className="p-2 bg-emerald-50 border border-emerald-200 rounded text-[10px] font-sans flex items-center gap-1.5 text-emerald-800">
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-              <span>Digital verification watermark: TGMSIDC-DOC-SANCTION-VERIFIED</span>
+              <span>Digital verification watermark: DOC-SANCTION-VERIFIED</span>
             </div>
           </div>
         )}

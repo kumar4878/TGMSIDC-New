@@ -390,7 +390,7 @@ router.post("/purchase-orders/:id/acknowledge", async (req, res): Promise<void> 
   po.vendorAcknowledged = true;
   po.vendorAckDate = new Date();
   if (expectedDispatchDate) po.vendorExpectedDispatchDate = new Date(expectedDispatchDate);
-  if (po.status === "approved" || po.status === "draft") {
+  if (po.status === "approved" || po.status === "draft" || po.status === "issued") {
     po.status = "acknowledged";
   }
   if (remarks) po.remarks = `${po.remarks ? po.remarks + " | " : ""}Vendor Ack: ${remarks}`;

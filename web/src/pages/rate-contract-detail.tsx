@@ -170,7 +170,7 @@ export default function RateContractDetail() {
               Statutory Notice: Rate Contract Expired on {safeFormat(rc.endDate)}
             </h3>
             <p className="text-xs text-red-700 mt-0.5 leading-relaxed">
-              This master agreement has concluded its validity period. Per TGMSIDC Procurement Rule BR-02, no new Purchase Orders can be drawn against an expired rate card. All incoming requisitions for <span className="font-semibold">{rc.equipmentName}</span> must be routed to open tendering (GeM / e-Procurement).
+              This master agreement has concluded its validity period. Per Procurement Rule BR-02, no new Purchase Orders can be drawn against an expired rate card. All incoming requisitions for <span className="font-semibold">{rc.equipmentName}</span> must be routed to open tendering (GeM / e-Procurement).
             </p>
           </div>
           <Link href={`/tenders?equipment=${encodeURIComponent(rc.equipmentName)}`}>
@@ -271,7 +271,7 @@ export default function RateContractDetail() {
             <DetailRow label="L1 Vendor Name" value={rc.l1VendorName || rc.vendorName} />
             {rc.l2VendorName && <DetailRow label="L2 Vendor" value={rc.l2VendorName} />}
             <DetailRow label="Tender Reference" value={rc.tenderRef || "Open Tender Ref #2024"} />
-            <DetailRow label="BFC Approval Reference" value={rc.bfcApprovalRef || "BFC/TGMSIDC/APPROVED"} mono />
+            <DetailRow label="BFC Approval Reference" value={rc.bfcApprovalRef || "BFC/APPROVED"} mono />
             <DetailRow label="Award Date" value={safeFormat(rc.awardDate || rc.startDate)} />
           </CardContent>
         </Card>
@@ -315,7 +315,7 @@ export default function RateContractDetail() {
             <Wrench className="w-3.5 h-3.5 text-[#2563eb]" />
             Standard Technical Specifications ({rc.equipmentName})
           </CardTitle>
-          <span className="text-[11px] text-muted-foreground">Standardized TGMSIDC Equipment Master Specs</span>
+          <span className="text-[11px] text-muted-foreground">Standardized Equipment Master Specs</span>
         </CardHeader>
         <CardContent className="p-4">
           <ProductSpecSheet

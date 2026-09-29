@@ -22,6 +22,9 @@ export interface AuthUser {
   facilityId?: string | null;
   facilityName?: string | null;
   hodMapping?: string | null;
+  vendorId?: string | null;
+  vendorCode?: string | null;
+  vendorName?: string | null;
   email: string;
   phone: string;
   initials: string;
@@ -43,7 +46,7 @@ interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<AuthUser>;
   logout: () => void;
   can: (action: string) => boolean;
 }
@@ -66,11 +69,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [token]);
 
-  async function login(username: string, password: string) {
+  async function login(username: string, password: string): Promise<AuthUser> {
     const res = await post<{ token: string; user: AuthUser }>("/auth/login", { username, password });
     localStorage.setItem("tgmsidc_token", res.token);
     setToken(res.token);
     setUser(res.user);
+    return res.user;
   }
 
   function logout() {

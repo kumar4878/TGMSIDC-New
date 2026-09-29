@@ -6,9 +6,22 @@ import { Vendor } from "../models/Vendor.js";
 
 const router = Router();
 
+async function findRcDoc(id: string) {
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    const doc = await RateContract.findById(id).catch(() => null);
+    if (doc) return doc;
+  }
+  return await RateContract.findOne({
+    $or: [
+      { contractNumber: id },
+      { contractNumber: { $regex: new RegExp(`^${id}$`, "i") } }
+    ]
+  }).catch(() => null);
+}
+
 async function fmt(r: any) {
-  const eq = r.equipmentName ? null : await Equipment.findById(r.equipmentId);
-  const vn = r.vendorName ? null : await Vendor.findById(r.vendorId);
+  const eq = r.equipmentName ? null : (mongoose.Types.ObjectId.isValid(r.equipmentId) ? await Equipment.findById(r.equipmentId).catch(() => null) : null);
+  const vn = r.vendorName ? null : (mongoose.Types.ObjectId.isValid(r.vendorId) ? await Vendor.findById(r.vendorId).catch(() => null) : null);
   const now = new Date();
   const end = new Date(r.endDate);
   const daysToExpiry = Math.ceil((end.getTime() - now.getTime()) / 86400000);
@@ -72,16 +85,7 @@ router.get("/rate-contracts/expiring-soon", async (_req, res): Promise<void> => 
 
 router.get("/rate-contracts/:id", async (req, res): Promise<void> => {
   try {
-    let r = null;
-    if (mongoose.isValidObjectId(req.params.id)) {
-      r = await RateContract.findById(req.params.id);
-    }
-    if (!r) {
-      r = await RateContract.findOne({ contractNumber: req.params.id });
-    }
-    if (!r) {
-      r = await RateContract.findOne({ contractNumber: { $regex: new RegExp(`^${req.params.id}$`, "i") } });
-    }
+    const r = await findRcDoc(req.params.id);
     if (!r) {
       res.status(404).json({ error: "Rate contract not found" });
       return;

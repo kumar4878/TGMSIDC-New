@@ -218,7 +218,7 @@ export default function Payments() {
           tranche: target.tranche,
           paymentReference: ref,
           paymentDate: new Date().toISOString().split("T")[0],
-          paidBy: user?.fullName || "TGMSIDC Accounts Officer",
+          paidBy: user?.fullName || "Accounts Officer",
           remarks: target.tranche === "tranche1_90"
             ? "90% payment released against verified DCC, QA clearance and installation certificates"
             : "Final 10% retention released post 3 months satisfactory usage & QPC verification",

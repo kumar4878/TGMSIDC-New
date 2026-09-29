@@ -64,7 +64,7 @@ export default function DeliveryDetail() {
     quantity: 1,
     description: "",
     actionRequired: "replacement",
-    photoUrl: "https://photos.tgmsidc.gov.in/evidence-consignee-damages.jpg",
+    photoUrl: "https://photos.healthportal.gov.in/evidence-consignee-damages.jpg",
   });
   const [discSubmitting, setDiscSubmitting] = useState(false);
 
@@ -502,7 +502,7 @@ export default function DeliveryDetail() {
                 </Button>
               ) : (
                 <p className="text-[11px] text-muted-foreground italic pt-1 text-center">
-                  Consignee &amp; TGMSIDC Signoff Authority
+                  Consignee &amp; Procurement Signoff Authority
                 </p>
               )}
             </CardContent>
@@ -578,7 +578,7 @@ export default function DeliveryDetail() {
                 <Input
                   value={discrepancyForm.photoUrl}
                   onChange={(e) => setDiscrepancyForm(f => ({ ...f, photoUrl: e.target.value }))}
-                  placeholder="https://evidence.tgmsidc.gov.in/photo-01.jpg"
+                  placeholder="https://evidence.healthportal.gov.in/photo-01.jpg"
                   required
                 />
               </div>
@@ -614,7 +614,7 @@ export default function DeliveryDetail() {
               Telangana Medical Services &amp; Infrastructure Development Corporation
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Official Statutory Equipment Acceptance &amp; Commissioning Certificate (Form TGMSIDC-QA-09)
+              Official Statutory Equipment Acceptance &amp; Commissioning Certificate (Form QA-09)
             </DialogDescription>
           </DialogHeader>
 
@@ -653,14 +653,14 @@ export default function DeliveryDetail() {
 
             <div className="p-3 bg-emerald-50 border border-emerald-200 rounded text-emerald-900 space-y-1">
               <p className="font-bold">QA Committee Certification:</p>
-              <p>This is to certify that the medical equipment specified above has been physically inspected, tested under simulated load, and calibrated. The equipment conforms 100% to TGMSIDC technical specifications and has been commissioned into active clinical service.</p>
+              <p>This is to certify that the medical equipment specified above has been physically inspected, tested under simulated load, and calibrated. The equipment conforms 100% to approved technical specifications and has been commissioned into active clinical service.</p>
               <p className="mt-2 text-[10px]">Warranty Start Date: {format(new Date(), "dd-MMM-yyyy")} · Valid for: 12 Months</p>
             </div>
 
             <div className="flex justify-between items-end pt-4 border-t text-[11px]">
               <div>
                 <p className="font-bold">Biomedical Engineer</p>
-                <p className="text-muted-foreground">TGMSIDC Quality Wing</p>
+                <p className="text-muted-foreground">Quality &amp; Inspection Wing</p>
               </div>
               <div className="text-right">
                 <p className="font-bold">Medical Superintendent</p>

@@ -1,17 +1,34 @@
 import { Router } from "express";
+import mongoose from "mongoose";
 import { Tender } from "../models/Tender.js";
 import { Indent } from "../models/Indent.js";
 import { Equipment } from "../models/Equipment.js";
 
 const router = Router();
 
+async function findTender(id: string) {
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    const t = await Tender.findById(id).catch(() => null);
+    if (t) return t;
+  }
+  return await Tender.findOne({
+    $or: [{ tenderNumber: id }, { notes: new RegExp(id, "i") }]
+  }).catch(() => null);
+}
+
 async function enrichTender(t: any) {
   let equipmentName = t.equipmentName || "";
   if (!equipmentName && t.indentId) {
-    const indent = await Indent.findById(t.indentId);
+    let indent = null;
+    if (mongoose.Types.ObjectId.isValid(t.indentId)) {
+      indent = await Indent.findById(t.indentId).catch(() => null);
+    }
     if (indent) {
-      const equip = await Equipment.findById(indent.equipmentId);
-      equipmentName = equip?.name ?? "Unknown";
+      let equip = null;
+      if (indent.equipmentId && mongoose.Types.ObjectId.isValid(indent.equipmentId)) {
+        equip = await Equipment.findById(indent.equipmentId).catch(() => null);
+      }
+      equipmentName = equip?.name ?? "Medical Equipment";
     }
   }
   return {
@@ -19,7 +36,7 @@ async function enrichTender(t: any) {
     tenderNumber: t.tenderNumber,
     indentId: t.indentId?.toString() ?? null,
     equipmentId: t.equipmentId?.toString() ?? null,
-    equipmentName: equipmentName || "Unknown",
+    equipmentName: equipmentName || "Medical Equipment",
     equipmentCategory: t.equipmentCategory ?? "",
     tenderType: t.tenderType ?? "open",
     portal: t.portal ?? "e-procurement",
@@ -64,7 +81,7 @@ router.post("/tenders", async (req, res): Promise<void> => {
   if (!tenderInvitedDate) { res.status(400).json({ error: "tenderInvitedDate is required" }); return; }
   const count = await Tender.countDocuments();
   const tenderNumber = `TND-${new Date().getFullYear()}-${String(count + 1).padStart(4, "0")}`;
-  const hasBound = indentId && indentId !== "0";
+  const hasBound = indentId && indentId !== "0" && mongoose.Types.ObjectId.isValid(indentId);
   const tender = await Tender.create({
     tenderNumber, indentId: hasBound ? indentId : undefined,
     equipmentName: equipmentName ?? "", equipmentCategory: equipmentCategory ?? "",
@@ -79,88 +96,108 @@ router.post("/tenders", async (req, res): Promise<void> => {
 });
 
 router.get("/tenders/:id", async (req, res): Promise<void> => {
-  const t = await Tender.findById(req.params.id);
-  if (!t) { res.status(404).json({ error: "Not found" }); return; }
-  res.json(await enrichTender(t));
+  try {
+    const t = await findTender(req.params.id);
+    if (!t) { res.status(404).json({ error: "Tender not found" }); return; }
+    res.json(await enrichTender(t));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to fetch tender" });
+  }
 });
 
 router.patch("/tenders/:id", async (req, res): Promise<void> => {
-  const allowed = ["status", "bidsReceivedDate", "l1VendorName", "l1BidAmount",
-    "l2VendorName", "l2BidAmount", "l3VendorName", "l3BidAmount", "notes",
-    "currentStageNumber", "specsStatus", "specsApproverNames", "bfcApprovalRef",
-    "bfcApprovalDate", "bfcMembersPresent", "tenderType", "portal",
-    "isCancelled", "cancellationReason", "cancellationStage"];
-  const update: Record<string, any> = {};
-  for (const k of allowed) { if (req.body[k] != null) update[k] = req.body[k]; }
-  if (update.bidsReceivedDate) update.bidsReceivedDate = new Date(update.bidsReceivedDate);
-  if (update.bfcApprovalDate) update.bfcApprovalDate = new Date(update.bfcApprovalDate);
-  const t = await Tender.findByIdAndUpdate(req.params.id, update, { new: true });
-  if (!t) { res.status(404).json({ error: "Not found" }); return; }
-  res.json(await enrichTender(t));
+  try {
+    const t = await findTender(req.params.id);
+    if (!t) { res.status(404).json({ error: "Tender not found" }); return; }
+    const allowed = ["status", "bidsReceivedDate", "l1VendorName", "l1BidAmount",
+      "l2VendorName", "l2BidAmount", "l3VendorName", "l3BidAmount", "notes",
+      "currentStageNumber", "specsStatus", "specsApproverNames", "bfcApprovalRef",
+      "bfcApprovalDate", "bfcMembersPresent", "tenderType", "portal",
+      "isCancelled", "cancellationReason", "cancellationStage"];
+    for (const k of allowed) { if (req.body[k] != null) (t as any)[k] = req.body[k]; }
+    if (req.body.bidsReceivedDate) t.bidsReceivedDate = new Date(req.body.bidsReceivedDate);
+    if (req.body.bfcApprovalDate) t.bfcApprovalDate = new Date(req.body.bfcApprovalDate);
+    await t.save();
+    res.json(await enrichTender(t));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to update tender" });
+  }
 });
 
 router.patch("/tenders/:id/stages/:stageNumber", async (req, res): Promise<void> => {
-  const tender = await Tender.findById(req.params.id);
-  if (!tender) { res.status(404).json({ error: "Not found" }); return; }
-  const stageNum = parseInt(req.params.stageNumber);
-  const idx = tender.stages.findIndex((s: any) => s.stageNumber === stageNum);
-  if (idx === -1) { res.status(404).json({ error: "Stage not found" }); return; }
-  const { status, notes, data, completionDate } = req.body;
-  if (status) tender.stages[idx].status = status;
-  if (notes) tender.stages[idx].notes = notes;
-  if (data) tender.stages[idx].data = { ...tender.stages[idx].data, ...data };
-  if (completionDate) tender.stages[idx].completionDate = new Date(completionDate);
-  if (status === "in_progress" && !tender.stages[idx].startDate) tender.stages[idx].startDate = new Date();
-  if (status === "completed") {
-    tender.stages[idx].completionDate = tender.stages[idx].completionDate || new Date();
-    tender.currentStageNumber = stageNum + 1;
+  try {
+    const tender = await findTender(req.params.id);
+    if (!tender) { res.status(404).json({ error: "Tender not found" }); return; }
+    const stageNum = parseInt(req.params.stageNumber);
+    const idx = tender.stages.findIndex((s: any) => s.stageNumber === stageNum);
+    if (idx === -1) { res.status(404).json({ error: "Stage not found" }); return; }
+    const { status, notes, data, completionDate } = req.body;
+    if (status) tender.stages[idx].status = status;
+    if (notes) tender.stages[idx].notes = notes;
+    if (data) tender.stages[idx].data = { ...tender.stages[idx].data, ...data };
+    if (completionDate) tender.stages[idx].completionDate = new Date(completionDate);
+    if (status === "in_progress" && !tender.stages[idx].startDate) tender.stages[idx].startDate = new Date();
+    if (status === "completed") {
+      tender.stages[idx].completionDate = tender.stages[idx].completionDate || new Date();
+      tender.currentStageNumber = stageNum + 1;
+    }
+    tender.markModified("stages");
+    await tender.save();
+    res.json(await enrichTender(tender));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to update stage" });
   }
-  tender.markModified("stages");
-  await tender.save();
-  res.json(await enrichTender(tender));
 });
 
 /* ── Cancel Tender (§3 Step 16) ─────────────────────────────────────── */
 router.patch("/tenders/:id/cancel", async (req, res): Promise<void> => {
-  const tender = await Tender.findById(req.params.id);
-  if (!tender) { res.status(404).json({ error: "Not found" }); return; }
-  const { cancellationReason, cancellationStage, reTenderRef } = req.body;
-  if (!cancellationReason) { res.status(400).json({ error: "Cancellation reason is required" }); return; }
-  tender.isCancelled = true;
-  tender.cancellationReason = cancellationReason;
-  tender.cancellationStage = cancellationStage ?? tender.currentStageNumber;
-  tender.cancellationDate = new Date();
-  tender.reTenderRef = reTenderRef ?? "";
-  tender.status = "cancelled";
-  await tender.save();
-  res.json(await enrichTender(tender));
+  try {
+    const tender = await findTender(req.params.id);
+    if (!tender) { res.status(404).json({ error: "Tender not found" }); return; }
+    const { cancellationReason, cancellationStage, reTenderRef } = req.body;
+    if (!cancellationReason) { res.status(400).json({ error: "Cancellation reason is required" }); return; }
+    tender.isCancelled = true;
+    tender.cancellationReason = cancellationReason;
+    tender.cancellationStage = cancellationStage ?? tender.currentStageNumber;
+    tender.cancellationDate = new Date();
+    tender.reTenderRef = reTenderRef ?? "";
+    tender.status = "cancelled";
+    await tender.save();
+    res.json(await enrichTender(tender));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to cancel tender" });
+  }
 });
 
 /* ── Advance Tender to Next Stage ──────────────────────────────────── */
 router.patch("/tenders/:id/advance-stage", async (req, res): Promise<void> => {
-  const tender = await Tender.findById(req.params.id);
-  if (!tender) { res.status(404).json({ error: "Not found" }); return; }
-  if (tender.isCancelled) { res.status(400).json({ error: "Tender is cancelled" }); return; }
-  const current = tender.currentStageNumber;
-  const idx = tender.stages.findIndex((s: any) => s.stageNumber === current);
-  if (idx === -1) { res.status(400).json({ error: "Current stage not found" }); return; }
-  const { notes, data } = req.body;
-  tender.stages[idx].status = "completed";
-  tender.stages[idx].completionDate = new Date();
-  if (notes) tender.stages[idx].notes = notes;
-  if (data) tender.stages[idx].data = { ...tender.stages[idx].data, ...data };
-  // Advance to next stage
-  const nextIdx = tender.stages.findIndex((s: any) => s.stageNumber === current + 1);
-  if (nextIdx !== -1) {
-    tender.stages[nextIdx].status = "in_progress";
-    tender.stages[nextIdx].startDate = new Date();
-    tender.currentStageNumber = current + 1;
-  } else {
-    tender.status = "completed";
+  try {
+    const tender = await findTender(req.params.id);
+    if (!tender) { res.status(404).json({ error: "Tender not found" }); return; }
+    if (tender.isCancelled) { res.status(400).json({ error: "Tender is cancelled" }); return; }
+    const current = tender.currentStageNumber;
+    const idx = tender.stages.findIndex((s: any) => s.stageNumber === current);
+    if (idx === -1) { res.status(400).json({ error: "Current stage not found" }); return; }
+    const { notes, data } = req.body;
+    tender.stages[idx].status = "completed";
+    tender.stages[idx].completionDate = new Date();
+    if (notes) tender.stages[idx].notes = notes;
+    if (data) tender.stages[idx].data = { ...tender.stages[idx].data, ...data };
+    // Advance to next stage
+    const nextIdx = tender.stages.findIndex((s: any) => s.stageNumber === current + 1);
+    if (nextIdx !== -1) {
+      tender.stages[nextIdx].status = "in_progress";
+      tender.stages[nextIdx].startDate = new Date();
+      tender.currentStageNumber = current + 1;
+    } else {
+      tender.status = "completed";
+    }
+    tender.markModified("stages");
+    await tender.save();
+    res.json(await enrichTender(tender));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to advance tender stage" });
   }
-  tender.markModified("stages");
-  await tender.save();
-  res.json(await enrichTender(tender));
 });
 
 export default router;
