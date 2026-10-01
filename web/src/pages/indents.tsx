@@ -25,35 +25,37 @@ const STATUS_FILTERS = [
 
 function StepsBadge({ approvalSteps, indentStatus }: { approvalSteps?: any[]; indentStatus: string }) {
   const steps = approvalSteps ?? [];
-  const totalSteps = steps.length;
-  if (totalSteps === 0) return null;
-  const completedSteps = steps.filter((s: any) => s.status === "approved" || s.status === "skipped").length;
-  const isComplete = completedSteps === totalSteps || !["pending_approval", "pending_review"].includes(indentStatus);
-  const isRejected = steps.some((s: any) => s.status === "rejected") || indentStatus === "rejected";
+  const totalSteps = 4; // Canonical 4-gate workflow: DEO -> TGMSIDC User -> GM Equipment -> SO Equipment
+  const isRejected = indentStatus === "rejected" || steps.some((s: any) => s.status === "rejected");
+  const isComplete = !isRejected && !["pending_approval", "pending_review", "draft"].includes(indentStatus);
+  const rawCompleted = steps.filter((s: any) => s.status === "approved" || s.status === "skipped").length;
+  const completedSteps = isComplete ? 4 : Math.min(4, rawCompleted);
 
   return (
     <div className="flex items-center gap-1.5">
-      <div className="flex gap-1">
+      <div className="flex gap-1 items-center">
         {Array.from({ length: totalSteps }).map((_, i) => {
           const done = i < completedSteps;
-          const active = i === completedSteps && !isComplete && !isRejected;
+          const isThisStepRejected = isRejected && i === completedSteps;
+          const active = !isComplete && !isRejected && i === completedSteps;
           return (
             <div
               key={i}
               className={cn(
                 "h-1.5 rounded-full transition-all",
-                done ? "w-3 bg-[#159557]" :
-                isRejected ? "w-3 bg-[#dc2f3c]" :
-                active ? "w-3 bg-[#2563eb] animate-pulse" :
-                "w-2 bg-[#e4eaf2]"
+                done ? "w-3 bg-slate-500" :
+                isThisStepRejected ? "w-3 bg-rose-400" :
+                isRejected ? "w-2 bg-slate-200" :
+                active ? "w-3 bg-slate-400" :
+                "w-2 bg-slate-200"
               )}
             />
           );
         })}
       </div>
       <span className={cn(
-        "text-[10px] font-bold tabular-nums",
-        isRejected ? "text-[#dc2f3c]" : isComplete ? "text-[#159557]" : "text-[#6b7a93]"
+        "text-[10px] font-medium tabular-nums",
+        isRejected ? "text-rose-600 font-semibold" : "text-slate-600"
       )}>
         {isRejected ? "Rejected" : `${completedSteps}/${totalSteps}`}
       </span>
@@ -310,10 +312,7 @@ export default function Indents() {
                     <tr
                       key={indent.id}
                       onClick={() => navigate(`/indents/${indent.id}`)}
-                      className={cn(
-                        "hover:bg-[#eff5ff] cursor-pointer transition-colors group",
-                        myTurn && "bg-[#fff9ec]/60 hover:bg-[#fff9ec]"
-                      )}
+                      className="hover:bg-[#eff5ff] cursor-pointer transition-colors group"
                     >
                       {/* Indent Number */}
                       <td className="py-2.5 px-3">
@@ -339,7 +338,7 @@ export default function Indents() {
                             {indent.equipmentName || "Multi-Item Requisition"}
                           </span>
                           {myTurn && (
-                            <span className="neo-chip amb text-[9px] py-0 px-1.5">
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
                               Your Action
                             </span>
                           )}
@@ -359,13 +358,13 @@ export default function Indents() {
                       {/* Rate Contract Tag */}
                       <td className="py-2.5 px-3 text-center">
                         {indent.tenderId || indent.status === "tender_initiated" ? (
-                          <span className="neo-chip pur text-[10px]">Tender Initiated</span>
+                          <span className="neo-chip gry text-[10px]">Tender Route</span>
                         ) : indent.hasFullRCCoverage && indent.rateContractId ? (
-                          <span className="neo-chip grn text-[10px]">Tagged</span>
+                          <span className="neo-chip gry text-[10px]">RC Tagged</span>
                         ) : indent.hasFullRCCoverage ? (
                           <span className="neo-chip blu text-[10px]">RC Available</span>
                         ) : indent.hasPartialRCCoverage ? (
-                          <span className="neo-chip amb text-[10px]">Tender Req (Partial RC)</span>
+                          <span className="neo-chip gry text-[10px]">Partial RC</span>
                         ) : (
                           <span className="neo-chip gry text-[10px]">Tender Req</span>
                         )}
@@ -394,8 +393,8 @@ export default function Indents() {
                             className={cn(
                               "px-2.5 py-1 rounded text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer",
                               myTurn
-                                ? "bg-[#2563eb] text-white hover:bg-[#1d4ed8]"
-                                : "bg-white border border-[#e4eaf2] text-[#3c4a63] hover:border-[#2563eb] hover:text-[#2563eb]"
+                                ? "bg-[#eff5ff] text-[#1e40af] border border-[#bfdbfe] hover:bg-[#dbeafe]"
+                                : "bg-white border border-[#e2e8f0] text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                             )}
                           >
                             <Eye className="w-3 h-3" />

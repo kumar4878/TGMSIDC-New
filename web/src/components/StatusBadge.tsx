@@ -12,6 +12,7 @@ const statusConfig: Record<string, { label: string; tone: ChipTone }> = {
   linked_to_rc: { label: "Linked to RC", tone: "blu" },
   tender_initiated: { label: "Tender Initiated", tone: "vio" },
   po_issued: { label: "PO Issued", tone: "grn" },
+  completed: { label: "Completed", tone: "grn" },
 
   // RC statuses
   active: { label: "Active", tone: "grn" },
@@ -44,12 +45,12 @@ const statusConfig: Record<string, { label: string; tone: ChipTone }> = {
 };
 
 const DOT_COLOR: Record<ChipTone, string> = {
-  grn: "bg-[#159557]",
-  amb: "bg-[#e08a0b]",
-  red: "bg-[#dc2f3c]",
-  blu: "bg-[#2563eb]",
-  vio: "bg-[#6d42d9]",
-  gry: "bg-[#6b7a93]",
+  grn: "bg-emerald-500",
+  amb: "bg-amber-400",
+  red: "bg-rose-400",
+  blu: "bg-blue-400",
+  vio: "bg-indigo-400",
+  gry: "bg-slate-400",
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {

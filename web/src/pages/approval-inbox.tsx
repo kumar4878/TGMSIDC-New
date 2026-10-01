@@ -184,6 +184,7 @@ export default function ApprovalInbox() {
     const isLastStep = item.step.stepNumber === totalSteps;
     const needsMode = action === "approve" && (
       (item.step.requiredRole === "gm" && totalSteps === 3) ||
+      (item.step.requiredRole === "so_equipment" && isLastStep) ||
       (item.step.requiredRole === "director" && isLastStep)
     );
 
@@ -219,7 +220,7 @@ export default function ApprovalInbox() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-3 gap-4">
-        <Card className={cn("border", breachedCount > 0 ? "border-red-200 bg-red-50/40" : "border-amber-200 bg-amber-50/40")}>
+        <Card className="bg-white border border-[#e4eaf2] shadow-xs">
           <CardContent className="p-4 flex items-center gap-3">
             <Clock className={cn("h-5 w-5", breachedCount > 0 ? "text-red-600" : "text-amber-600")} />
             <div>
@@ -228,7 +229,7 @@ export default function ApprovalInbox() {
             </div>
           </CardContent>
         </Card>
-        <Card className="border-red-200 bg-red-50/40">
+        <Card className="bg-white border border-[#e4eaf2] shadow-xs">
           <CardContent className="p-4 flex items-center gap-3">
             <AlertTriangle className="h-5 w-5 text-red-600" />
             <div>
@@ -237,7 +238,7 @@ export default function ApprovalInbox() {
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="bg-white border border-[#e4eaf2] shadow-xs">
           <CardContent className="p-4 flex items-center gap-3">
             <CheckCircle2 className="h-5 w-5 text-emerald-600" />
             <div>
@@ -324,6 +325,7 @@ export default function ApprovalInbox() {
             const isLastStep = item.step.stepNumber === totalSteps;
             const needsMode = action === "approve" && (
               (item.step.requiredRole === "gm" && totalSteps === 3) ||
+              (item.step.requiredRole === "so_equipment" && isLastStep) ||
               (item.step.requiredRole === "director" && isLastStep)
             );
             const isReject = action === "reject";
@@ -366,9 +368,8 @@ export default function ApprovalInbox() {
                     </div>
                     <Button
                       type="button"
-                      variant="outline"
                       size="sm"
-                      className="h-7 text-xs gap-1 border-primary/30 text-primary hover:bg-primary hover:text-white"
+                      className="h-7 text-xs gap-1 bg-[#eff5ff] hover:bg-[#dbeafe] text-[#2563eb] border border-[#c6d6ec] font-semibold"
                       onClick={() => setSpecProduct({
                         equipmentId: String(item.indent.equipmentId || item.indent.equipmentName || "equipment"),
                         equipmentCode: (item.indent as any).equipmentCode,
@@ -425,11 +426,7 @@ export default function ApprovalInbox() {
                 <DialogFooter>
                   <Button variant="outline" disabled={processing} onClick={() => { setActionDialog(null); setComments(""); }}>Cancel</Button>
                   <Button
-                    className={cn(
-                      isApprove ? "bg-emerald-600 hover:bg-emerald-700" :
-                        isReturn ? "bg-amber-500 hover:bg-amber-600 text-white" :
-                          "bg-red-600 hover:bg-red-700"
-                    )}
+                    className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold"
                     disabled={processing || ((isReject || isReturn) && !comments.trim())}
                     onClick={submitAction}
                   >
@@ -571,8 +568,7 @@ function InboxCard({ item, onApprove, onReturn, onReject, onViewSpecs, completed
               </span>
               <span className="flex items-center gap-1" title={`Submitted: ${format(new Date(indent.createdAt), "dd MMM yyyy, HH:mm")}`}>
                 <Clock className="h-3 w-3" />
-                Waiting since {formatDistanceToNow(new Date(indent.createdAt), { addSuffix: false })}
-                {" · "}{format(new Date(indent.createdAt), "dd MMM yyyy")}
+                Submitted: {format(new Date((indent as any).indentDate || indent.createdAt), "dd MMM yyyy")}
               </span>
               {!completed && (
                 <span className={cn("flex items-center gap-1 font-medium", isBreach ? "text-red-600" : hoursLeft < 24 ? "text-amber-600" : "text-muted-foreground")}>
@@ -615,28 +611,39 @@ function InboxCard({ item, onApprove, onReturn, onReject, onViewSpecs, completed
           {/* Actions */}
           <div className="flex items-center gap-2 shrink-0 mt-1 flex-wrap justify-end">
             <Link href={`/indents/${indent.id}`}>
-              <Button variant="ghost" size="sm" className="gap-1 h-8">
-                <Eye className="h-3.5 w-3.5" />View
+              <Button variant="outline" size="sm" className="gap-1 h-8 text-xs border-[#e4eaf2] bg-white text-[#3c4a63] hover:bg-[#f4f7fb] font-medium shadow-2xs">
+                <Eye className="h-3.5 w-3.5 text-[#6b7a93]" />View
               </Button>
             </Link>
             <Button
-              variant="outline"
               size="sm"
-              className="gap-1 h-8 text-xs border-primary/30 text-primary hover:bg-primary hover:text-white"
+              className="gap-1 h-8 text-xs bg-[#eff5ff] hover:bg-[#dbeafe] text-[#2563eb] border border-[#c6d6ec] shadow-2xs font-semibold cursor-pointer"
               onClick={() => onViewSpecs?.(indent)}
             >
-              <Wrench className="h-3.5 w-3.5" />Specs
+              <Wrench className="h-3.5 w-3.5 text-[#2563eb]" />Specs
             </Button>
             {!completed && (
               <>
-                <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700 gap-1" onClick={onApprove}>
-                  <CheckCircle2 className="h-3.5 w-3.5" />Approve
+                <Button
+                  size="sm"
+                  className="gap-1 h-8 text-xs bg-[#f0fbf4] hover:bg-[#dcfce7] text-[#159557] border border-[#c8ebd6] shadow-2xs font-semibold cursor-pointer"
+                  onClick={onApprove}
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 text-[#159557]" />Approve
                 </Button>
-                <Button size="sm" variant="outline" className="h-8 gap-1 border-amber-300 text-amber-700 hover:bg-amber-50" onClick={onReturn}>
-                  <RotateCcw className="h-3.5 w-3.5" />Return
+                <Button
+                  size="sm"
+                  className="gap-1 h-8 text-xs bg-[#f5f1fe] hover:bg-[#ede9fe] text-[#6d42d9] border border-[#d8c8f8] shadow-2xs font-semibold cursor-pointer"
+                  onClick={onReturn}
+                >
+                  <RotateCcw className="h-3.5 w-3.5 text-[#6d42d9]" />Return
                 </Button>
-                <Button size="sm" variant="destructive" className="h-8 gap-1" onClick={onReject}>
-                  <XCircle className="h-3.5 w-3.5" />Reject
+                <Button
+                  size="sm"
+                  className="gap-1 h-8 text-xs bg-[#fef2f3] hover:bg-[#fee2e2] text-[#dc2f3c] border border-[#f8d5d8] shadow-2xs font-semibold cursor-pointer"
+                  onClick={onReject}
+                >
+                  <XCircle className="h-3.5 w-3.5 text-[#dc2f3c]" />Reject
                 </Button>
               </>
             )}

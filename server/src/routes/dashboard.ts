@@ -5,6 +5,9 @@ import { PurchaseOrder } from "../models/PurchaseOrder.js";
 import { Delivery } from "../models/Delivery.js";
 import { Tender } from "../models/Tender.js";
 import { Vendor } from "../models/Vendor.js";
+import { Equipment } from "../models/Equipment.js";
+import { District } from "../models/District.js";
+import { Institution } from "../models/Institution.js";
 
 const router = Router();
 
@@ -30,11 +33,35 @@ router.get("/dashboard/summary", async (_req, res): Promise<void> => {
   const totalPOValue = await PurchaseOrder.aggregate([{ $group: { _id: null, total: { $sum: "$totalAmount" } } }]);
   const totalBudgetUtilized = totalPOValue[0]?.total ?? 0;
 
+  const [
+    totalEquipment,
+    totalDistricts,
+    totalInstitutions,
+    activeCamcContracts,
+    acceptedDeliveries,
+    pendingInstallations,
+  ] = await Promise.all([
+    Equipment.countDocuments({ isActive: true }),
+    District.countDocuments(),
+    Institution.countDocuments(),
+    RateContract.countDocuments({ status: "active", camcApplicable: true }),
+    Delivery.find({ status: "accepted" }),
+    Delivery.countDocuments({ installationRequired: true, installationStatus: { $in: ["pending", "in_progress", "scheduled"] } }),
+  ]);
+
+  const deliveredUnits = acceptedDeliveries.reduce((sum, d) => sum + (d.receivedQty || d.quantity || 0), 0);
+  const unitsUnderWarranty = acceptedDeliveries
+    .filter(d => !d.warrantyEndDate || new Date(d.warrantyEndDate).getTime() > Date.now())
+    .reduce((sum, d) => sum + (d.receivedQty || d.quantity || 0), 0);
+
   res.json({
     totalIndents, pendingIndents, approvedIndents, rejectedIndents,
     activeRCs, expiringRCs, totalPOs, approvedPOs, pendingPOs,
     totalDeliveries, pendingDeliveries, completedDeliveries,
     activeTenders, totalBudgetUtilized,
+    totalEquipment, totalDistricts, totalInstitutions,
+    deliveredUnits, unitsUnderWarranty, activeCamcContracts,
+    pendingInstallations,
   });
 });
 

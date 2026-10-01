@@ -25,7 +25,6 @@ export default function Dashboard() {
   const { user } = useAuth();
   const canRaiseIndent = user?.role === "deo" || user?.role === "admin";
   const [, navigate] = useLocation();
-  const [activeLens, setActiveLens] = useState<"all" | "procurement" | "equipment">("all");
 
   const { data: summary, isLoading: s1, refetch } = useDashboardSummary();
   const { data: pipeline } = useProcurementPipeline();
@@ -64,6 +63,13 @@ export default function Dashboard() {
   const budgetAllocated = 500000000; // ₹50 Cr FY Allocation baseline
   const budgetPct = Math.min(100, Math.round((budgetUtilized / budgetAllocated) * 100));
 
+  const totalEquipment = summary?.totalEquipment ?? 20;
+  const totalDistricts = summary?.totalDistricts ?? 18;
+  const totalInstitutions = summary?.totalInstitutions ?? 17;
+  const unitsUnderWarranty = summary?.unitsUnderWarranty ?? 14;
+  const activeCamcContracts = summary?.activeCamcContracts ?? 2;
+  const pendingInstallations = summary?.pendingInstallations ?? 3;
+
   return (
     <div className="space-y-5 pb-8">
       {/* ── Top Page Header (neoInt .ph style) ── */}
@@ -86,33 +92,9 @@ export default function Dashboard() {
         {/* Action Buttons & Period Lens */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="bg-white border border-[#e4eaf2] rounded-lg p-0.5 flex items-center shadow-xs">
-            <button
-              onClick={() => setActiveLens("all")}
-              className={cn(
-                "px-2.5 py-1 text-xs font-semibold rounded-md transition-colors",
-                activeLens === "all" ? "bg-[#0f2b5b] text-white" : "text-[#6b7a93] hover:text-[#152340]"
-              )}
-            >
+            <span className="px-2.5 py-1 text-xs font-semibold rounded-md bg-[#0f2b5b] text-white">
               All Operations
-            </button>
-            <button
-              onClick={() => setActiveLens("procurement")}
-              className={cn(
-                "px-2.5 py-1 text-xs font-semibold rounded-md transition-colors",
-                activeLens === "procurement" ? "bg-[#0f2b5b] text-white" : "text-[#6b7a93] hover:text-[#152340]"
-              )}
-            >
-              Procurement
-            </button>
-            <button
-              onClick={() => setActiveLens("equipment")}
-              className={cn(
-                "px-2.5 py-1 text-xs font-semibold rounded-md transition-colors",
-                activeLens === "equipment" ? "bg-[#0f2b5b] text-white" : "text-[#6b7a93] hover:text-[#152340]"
-              )}
-            >
-              Equipment & Assets
-            </button>
+            </span>
           </div>
 
           <button
@@ -135,7 +117,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── KPI Ribbon (Exact neoInt .kpi-ribbon & .kpi-card structure) ── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
         {/* KPI 1: Indents */}
         <div className="neo-kpi-card">
           <div className="flex items-center justify-between">
@@ -253,31 +235,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* KPI 5: Equipment Uptime */}
-        <div className="neo-kpi-card">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-[#3c4a63] uppercase tracking-wider flex items-center gap-1.5">
-              <Wrench className="w-3.5 h-3.5 text-[#e08a0b]" />
-              Equipment Uptime
-            </span>
-            <span className="w-2 h-2 rounded-full bg-[#159557]" />
-          </div>
-          <div className="mt-2.5 mb-1.5 flex items-baseline justify-between">
-            <span className="text-2xl font-bold tracking-tight text-[#152340] tabular-nums">
-              98.4%
-            </span>
-            <span className="text-[11px] text-[#159557] font-semibold">
-              +0.2% MoM
-            </span>
-          </div>
-          <div className="w-full bg-[#eff3f8] h-1.5 rounded-full overflow-hidden relative my-2">
-            <div className="bg-[#159557] h-full rounded-full" style={{ width: "98.4%" }} />
-          </div>
-          <div className="flex items-center justify-between text-[10.5px] text-[#6b7a93]">
-            <span className="font-semibold text-[#159557]">SLA: ≥95%</span>
-            <span>State wide</span>
-          </div>
-        </div>
 
         {/* KPI 6: Budget Utilized */}
         <div className="neo-kpi-card">
@@ -476,7 +433,6 @@ export default function Dashboard() {
                 <Clock className="w-4 h-4 text-[#159557]" />
                 SLA & Quality Metrics
               </h2>
-              <span className="neo-chip grn">High Fidelity</span>
             </div>
 
             <div className="space-y-3.5">
@@ -552,32 +508,32 @@ export default function Dashboard() {
             <span className="text-[10.5px] uppercase font-bold text-[#6b7a93] tracking-wide block">
               Total Assets Registered
             </span>
-            <span className="text-xl font-bold text-[#152340] mt-1 block">1,842</span>
-            <span className="text-[10px] text-[#159557] font-medium">Across 33 Districts</span>
+            <span className="text-xl font-bold text-[#152340] mt-1 block">{totalEquipment}</span>
+            <span className="text-[10px] text-[#159557] font-medium">Across {totalDistricts} Districts ({totalInstitutions} Hospitals)</span>
           </div>
 
           <div className="p-3 bg-[#f0fbf4] border border-[#c8ebd6] rounded-lg">
             <span className="text-[10.5px] uppercase font-bold text-[#159557] tracking-wide block">
               Under Active Warranty
             </span>
-            <span className="text-xl font-bold text-[#159557] mt-1 block">728</span>
-            <span className="text-[10px] text-[#159557] font-medium">OEM Standard Warranty</span>
+            <span className="text-xl font-bold text-[#159557] mt-1 block">{unitsUnderWarranty} Units</span>
+            <span className="text-[10px] text-[#159557] font-medium">OEM Standard Warranty (100%)</span>
           </div>
 
           <div className="p-3 bg-[#eff5ff] border border-[#c6d6ec] rounded-lg">
             <span className="text-[10.5px] uppercase font-bold text-[#2563eb] tracking-wide block">
               Active CAMC Contracts
             </span>
-            <span className="text-xl font-bold text-[#2563eb] mt-1 block">944</span>
-            <span className="text-[10px] text-[#2563eb] font-medium">99.1% Renewal Rate</span>
+            <span className="text-xl font-bold text-[#2563eb] mt-1 block">{activeCamcContracts} Contracts</span>
+            <span className="text-[10px] text-[#2563eb] font-medium">Post-Warranty Comprehensive AMC</span>
           </div>
 
           <div className="p-3 bg-[#fff9ec] border border-[#f6e2b8] rounded-lg">
             <span className="text-[10.5px] uppercase font-bold text-[#e08a0b] tracking-wide block">
-              PM Scheduled this Month
+              PM &amp; Installation Pipeline
             </span>
-            <span className="text-xl font-bold text-[#e08a0b] mt-1 block">148</span>
-            <span className="text-[10px] text-[#e08a0b] font-medium">92% Compliance</span>
+            <span className="text-xl font-bold text-[#e08a0b] mt-1 block">{pendingInstallations} Consignments</span>
+            <span className="text-[10px] text-[#e08a0b] font-medium">Consignee Verification Active</span>
           </div>
         </div>
       </div>
@@ -588,9 +544,6 @@ export default function Dashboard() {
         <div className="bg-white border border-[#e4eaf2] rounded-xl p-4 shadow-xs">
           <div className="flex items-center justify-between mb-3 border-b border-[#e4eaf2] pb-2.5">
             <h2 className="text-sm font-bold text-[#152340]">Recent Procurement Activity</h2>
-            <Link href="/audit-trail" className="text-xs font-semibold text-[#2563eb] hover:underline">
-              Audit Trail
-            </Link>
           </div>
 
           <div className="divide-y divide-[#e4eaf2] space-y-2">

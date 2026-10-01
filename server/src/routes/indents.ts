@@ -458,18 +458,13 @@ router.post("/indents", async (req, res): Promise<void> => {
       approvalSteps: [],
     });
 
-    /* Build approval chain */
-    const isHighValue = totalEstVal >= 500000;
-
+    /* Build approval chain — Standard 4-tier TGMSIDC Indent approval workflow */
     const steps: any[] = [
       { stepNumber: 1, requiredRole: "deo", roleLabel: "DEO (Initiator)", assignedUserName: digitisedBy, assignedUserId: createdByUserId || "sys", status: "approved", actionedAt: new Date(), comments: "Indent submitted." },
       { stepNumber: 2, requiredRole: "tgmsidc_user", roleLabel: "TGMSIDC User", assignedUserName: "K. Srinivas", assignedUserId: "u2", status: "pending", actionedAt: null, comments: "" },
       { stepNumber: 3, requiredRole: "gm_equipment", roleLabel: "GM Equipment", assignedUserName: "P. Narayan", assignedUserId: "u3", status: "pending", actionedAt: null, comments: "" },
       { stepNumber: 4, requiredRole: "so_equipment", roleLabel: "SO Equipment", assignedUserName: "R. Sharma", assignedUserId: "u4", status: "pending", actionedAt: null, comments: "" },
     ];
-    if (isHighValue) {
-      steps.push({ stepNumber: 5, requiredRole: "executive_director", roleLabel: "Executive Director", assignedUserName: "D. Venkatesh", assignedUserId: "u5", status: "pending", actionedAt: null, comments: "" });
-    }
 
     indent.approvalSteps = steps;
     await indent.save();
