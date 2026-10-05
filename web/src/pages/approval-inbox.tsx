@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "wouter";
-import { useListIndents } from "@/lib/api-hooks";
+import { useListIndents, useListPurchaseOrders } from "@/lib/api-hooks";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,7 @@ import { BASE_URL } from "@/lib/api";
 import {
   Clock, FileText, CheckCircle2, XCircle, AlertTriangle,
   Eye, Inbox, RotateCcw, GitBranch, Building2, Wrench,
-  ShieldCheck, User, Loader2,
+  ShieldCheck, User, Loader2, ShoppingCart, Send,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -89,8 +89,15 @@ export default function ApprovalInbox() {
   const queryClient = useQueryClient();
 
   const { data: allIndents = [] } = useListIndents({});
+  const { data: allPOs = [] } = useListPurchaseOrders({});
 
   if (!user) return null;
+
+  const pendingPOs = (allPOs as any[]).filter((po) =>
+    po.status === "pending_approval" ||
+    po.approvalStatus === "pending_gm_approval" ||
+    (user.role === "tgmsidc_user" && (po.status === "draft" || po.approvalStatus === "draft"))
+  );
 
   const pendingItems: InboxItem[] = allIndents.flatMap((indent) => {
     const steps = (indent.approvalSteps && indent.approvalSteps.length > 0) ? indent.approvalSteps : getSteps(indent.id);
@@ -136,6 +143,8 @@ export default function ApprovalInbox() {
   const [tab, setTab] = useState("pending");
   const [actionDialog, setActionDialog] = useState<{ item: InboxItem; action: "approve" | "return" | "reject" } | null>(null);
   const [comments, setComments] = useState("");
+  const [approvedQtys, setApprovedQtys] = useState<Record<number, number>>({});
+  const [partialReasons, setPartialReasons] = useState<Record<number, string>>({});
   const [procurementMode, setProcurementMode] = useState("rate_contract");
   const [processing, setProcessing] = useState(false);
   const [specProduct, setSpecProduct] = useState<{ equipmentId: string; equipmentCode?: string; name: string } | null>(null);
@@ -147,6 +156,7 @@ export default function ApprovalInbox() {
       status: "approved" | "returned" | "rejected";
       comments: string;
       procurementMode?: string;
+      lineItemApprovals?: any[];
     }) => {
       setProcessing(true);
       const res = await fetch(`${BASE_URL}/indents/${payload.indentId}/approval-steps/${payload.stepNumber}`, {
@@ -157,6 +167,7 @@ export default function ApprovalInbox() {
           comments: payload.comments,
           approvedBy: user.fullName,
           procurementMode: payload.procurementMode,
+          lineItemApprovals: payload.lineItemApprovals,
         }),
       });
       if (!res.ok) {
@@ -185,8 +196,16 @@ export default function ApprovalInbox() {
     const needsMode = action === "approve" && (
       (item.step.requiredRole === "gm" && totalSteps === 3) ||
       (item.step.requiredRole === "so_equipment" && isLastStep) ||
-      (item.step.requiredRole === "director" && isLastStep)
+      (item.step.requiredRole === "director" && isLastStep) ||
+      (item.step.requiredRole === "executive_director" && isLastStep) ||
+      isLastStep
     );
+
+    const lineItemApprovals = item.indent.lineItems?.map((li: any, idx: number) => ({
+      lineItemIndex: idx,
+      approvedQty: approvedQtys[idx] ?? li.requestedQty ?? li.qty ?? 1,
+      partialReason: partialReasons[idx] || undefined,
+    }));
 
     actionMutation.mutate({
       indentId: item.indent.id,
@@ -194,6 +213,7 @@ export default function ApprovalInbox() {
       status: action === "approve" ? "approved" : action === "return" ? "returned" : "rejected",
       comments: comments.trim() || (action === "approve" ? "Approved." : action === "return" ? "Returned for revision." : "Rejected."),
       procurementMode: needsMode ? procurementMode : undefined,
+      lineItemApprovals,
     });
   }
 
@@ -219,13 +239,13 @@ export default function ApprovalInbox() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card className="bg-white border border-[#e4eaf2] shadow-xs">
           <CardContent className="p-4 flex items-center gap-3">
             <Clock className={cn("h-5 w-5", breachedCount > 0 ? "text-red-600" : "text-amber-600")} />
             <div>
               <p className={cn("text-2xl font-bold", breachedCount > 0 ? "text-red-700" : "text-amber-700")}>{pendingCount}</p>
-              <p className="text-xs text-muted-foreground">Pending — {roleLabel}</p>
+              <p className="text-xs text-muted-foreground">Indent Verifications</p>
             </div>
           </CardContent>
         </Card>
@@ -243,22 +263,37 @@ export default function ApprovalInbox() {
             <CheckCircle2 className="h-5 w-5 text-emerald-600" />
             <div>
               <p className="text-2xl font-bold text-emerald-700">{completedCount}</p>
-              <p className="text-xs text-muted-foreground">Actioned</p>
+              <p className="text-xs text-muted-foreground">Actioned Items</p>
             </div>
           </CardContent>
         </Card>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="pending">
-            Pending
+        <TabsList className="bg-slate-100 p-1 flex-wrap h-auto gap-1">
+          <TabsTrigger value="pending" className="gap-2 text-xs">
+            <Inbox className="h-4 w-4 text-amber-700" />
+            Indent Verifications
             {pendingCount > 0 && (
-              <Badge className="ml-1.5 h-4 min-w-4 text-[10px] px-1 bg-primary/80">{pendingCount}</Badge>
+              <Badge className="ml-1.5 h-4 min-w-4 text-[10px] px-1 bg-amber-600 text-white">{pendingCount}</Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="completed">Actioned ({completedCount})</TabsTrigger>
+          {(user.role === "admin" || user.role === "gm_equipment" || user.role === "tgmsidc_user") && (
+            <TabsTrigger value="purchase_orders" className="gap-2 text-xs">
+              <ShoppingCart className="h-4 w-4 text-blue-700" />
+              PO Scrutiny &amp; Approvals
+              {pendingPOs.length > 0 && (
+                <Badge className="ml-1.5 h-4 min-w-4 text-[10px] px-1 bg-blue-600 text-white">{pendingPOs.length}</Badge>
+              )}
+            </TabsTrigger>
+          )}
+          <TabsTrigger value="completed" className="gap-2 text-xs">
+            <CheckCircle2 className="h-4 w-4 text-emerald-700" />
+            Actioned History ({completedCount})
+          </TabsTrigger>
         </TabsList>
+
+
 
         <TabsContent value="pending" className="mt-4 space-y-3">
           {pendingItems.length === 0 && (
@@ -280,7 +315,16 @@ export default function ApprovalInbox() {
               <InboxCard
                 key={item.indent.id}
                 item={item}
-                onApprove={() => { setActionDialog({ item, action: "approve" }); setComments(""); }}
+                onApprove={() => { 
+                  setActionDialog({ item, action: "approve" }); 
+                  setComments(""); 
+                  const initialQtys: Record<number, number> = {};
+                  item.indent.lineItems?.forEach((li: any, idx: number) => {
+                    initialQtys[idx] = li.requestedQty ?? li.qty ?? 1;
+                  });
+                  setApprovedQtys(initialQtys);
+                  setPartialReasons({});
+                }}
                 onReturn={() => { setActionDialog({ item, action: "return" }); setComments(""); }}
                 onReject={() => { setActionDialog({ item, action: "reject" }); setComments(""); }}
                 onViewSpecs={(ind) => setSpecProduct({
@@ -312,6 +356,64 @@ export default function ApprovalInbox() {
               })}
             />
           ))}
+
+        </TabsContent>
+
+        <TabsContent value="purchase_orders" className="mt-4 space-y-3">
+          {pendingPOs.length === 0 ? (
+            <Card>
+              <CardContent className="py-16 text-center">
+                <ShoppingCart className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+                <p className="text-muted-foreground font-medium">No purchase orders awaiting review</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  All drafted and forwarded purchase orders have been processed.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            pendingPOs.map((po: any) => (
+              <Card key={po.id} className="border border-indigo-100 hover:border-indigo-300 transition-colors shadow-2xs">
+                <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="space-y-1.5 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono font-bold text-sm text-blue-700">{po.poNumber}</span>
+                      <Badge variant="outline" className={
+                        po.approvalStatus === "pending_gm_approval" || po.status === "pending_approval"
+                          ? "bg-amber-50 text-amber-800 border-amber-300 text-[10px]"
+                          : "bg-blue-50 text-blue-800 border-blue-300 text-[10px]"
+                      }>
+                        {po.approvalStatus === "pending_gm_approval" || po.status === "pending_approval" ? "Awaiting GM Equipment Approval" : "Draft PO"}
+                      </Badge>
+                      {po.rcNumber && (
+                        <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 text-[10px] font-mono">
+                          RC #{po.rcNumber}
+                        </Badge>
+                      )}
+                      {po.indentNumber && (
+                        <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 text-[10px] font-mono">
+                          Indent #{po.indentNumber}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-700">
+                      <strong>{po.equipmentName}</strong> · Qty: <strong>{po.quantity || 1}</strong> · Awarded Vendor: <strong>{po.vendorName}</strong>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Total Sanction Value: <strong className="text-slate-900 font-mono">₹{(po.totalAmount || 0).toLocaleString("en-IN")}</strong>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Link href={`/purchase-orders/${po.id}`}>
+                      <Button size="sm" className="text-xs gap-1.5 shadow-xs cursor-pointer">
+                        <Eye className="h-3.5 w-3.5" />
+                        Scrutinize RC &amp; PO
+                      </Button>
+                    </Link>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
         </TabsContent>
       </Tabs>
 
@@ -360,6 +462,71 @@ export default function ApprovalInbox() {
                     </div>
                   </div>
 
+                  {/* Line Items Table for partial approval */}
+                  {isApprove && item.indent.lineItems && item.indent.lineItems.length > 0 && (
+                    <div className="border rounded-lg overflow-x-auto">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-slate-50 border-b">
+                          <tr>
+                            <th className="px-2 py-2 font-semibold">Equipment</th>
+                            <th className="px-2 py-2 font-semibold">Category</th>
+                            <th className="px-2 py-2 font-semibold text-center">Req Qty</th>
+                            <th className="px-2 py-2 font-semibold text-center">App Qty</th>
+                            <th className="px-2 py-2 font-semibold text-right">Unit Price</th>
+                            <th className="px-2 py-2 font-semibold text-right">Est Cost</th>
+                            <th className="px-2 py-2 font-semibold">Reason (if partial)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {item.indent.lineItems.map((li: any, idx: number) => {
+                            const reqQty = li.requestedQty ?? li.qty ?? 1;
+                            const appQty = approvedQtys[idx] ?? reqQty;
+                            const rate = li.estimatedUnitCost ?? li.estimatedUnitRate ?? (EQUIPMENT_UNIT_PRICE[Number(li.equipmentId)] ?? 200000);
+                            const cost = appQty * rate;
+                            const isPartial = appQty < reqQty;
+                            return (
+                              <tr key={idx}>
+                                <td className="px-2 py-2 font-medium">{li.equipmentName}</td>
+                                <td className="px-2 py-2 text-slate-600">{li.category || "General"}</td>
+                                <td className="px-2 py-2 text-center">{reqQty}</td>
+                                <td className="px-2 py-2 text-center">
+                                  <input 
+                                    type="number"
+                                    min="0"
+                                    max={reqQty}
+                                    value={appQty}
+                                    onChange={(e) => {
+                                      const v = parseInt(e.target.value);
+                                      if (!isNaN(v)) {
+                                        setApprovedQtys(prev => ({...prev, [idx]: Math.min(Math.max(v, 0), reqQty)}));
+                                      }
+                                    }}
+                                    className="h-8 w-16 text-center rounded-lg border border-slate-300"
+                                  />
+                                </td>
+                                <td className="px-2 py-2 text-right">{formatINR(rate)}</td>
+                                <td className="px-2 py-2 text-right">{formatINR(cost)}</td>
+                                <td className="px-2 py-2">
+                                  {isPartial ? (
+                                    <input 
+                                      type="text"
+                                      placeholder="Reason for partial approval..."
+                                      value={partialReasons[idx] || ""}
+                                      onChange={(e) => setPartialReasons(prev => ({...prev, [idx]: e.target.value}))}
+                                      className="h-8 text-xs rounded-lg border border-slate-300 px-2 w-full min-w-[120px]"
+                                    />
+                                  ) : (
+                                    <span className="text-slate-400 italic text-[10px]">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
                   {/* Equipment Technical Specifications Bar */}
                   <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs">
                     <div className="flex items-center gap-2">
@@ -380,6 +547,33 @@ export default function ApprovalInbox() {
                       Inspect Tech Specs
                     </Button>
                   </div>
+
+                  {/* Draft PO Scrutiny Banner */}
+                  {(() => {
+                    const liWithPO = (item.indent.lineItems || []).find((li: any) => li.poNumber);
+                    const attachedPONumber = item.indent.poNumber || liWithPO?.poNumber;
+                    const attachedPOId = liWithPO?.poId;
+                    if (!attachedPONumber) return null;
+                    return (
+                      <div className="flex items-center justify-between p-2.5 rounded-lg bg-blue-50/70 border border-blue-200 text-xs">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-blue-600 shrink-0" />
+                          <div>
+                            <span className="font-semibold text-blue-950">Draft PO Attached: </span>
+                            <span className="font-mono text-blue-900 font-bold">{attachedPONumber}</span>
+                            <span className="text-[11px] text-blue-700 ml-1.5">(Under scrutiny · Issues upon ED sanction)</span>
+                          </div>
+                        </div>
+                        {attachedPOId && (
+                          <Link href={`/purchase-orders/${attachedPOId}`} target="_blank">
+                            <Button type="button" size="sm" variant="outline" className="h-6 text-[11px] gap-1 bg-white border-blue-300 text-blue-700 hover:bg-blue-50">
+                              <Eye className="h-3 w-3" /> View PO
+                            </Button>
+                          </Link>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Procurement mode — only for final approvals */}
                   {needsMode && (
@@ -427,7 +621,11 @@ export default function ApprovalInbox() {
                   <Button variant="outline" disabled={processing} onClick={() => { setActionDialog(null); setComments(""); }}>Cancel</Button>
                   <Button
                     className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold"
-                    disabled={processing || ((isReject || isReturn) && !comments.trim())}
+                    disabled={processing || ((isReject || isReturn) && !comments.trim()) || (isApprove && (item.indent.lineItems || []).some((li: any, idx: number) => {
+                      const req = li.requestedQty ?? li.qty ?? 1;
+                      const app = approvedQtys[idx] ?? req;
+                      return app < req && !(partialReasons[idx] || "").trim();
+                    }))}
                     onClick={submitAction}
                   >
                     {processing ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> :
@@ -444,6 +642,8 @@ export default function ApprovalInbox() {
           })()}
         </DialogContent>
       </Dialog>
+
+
 
       {/* Product Technical Specifications Slide-Over Sheet */}
       <Sheet open={!!specProduct} onOpenChange={(open) => { if (!open) setSpecProduct(null); }}>

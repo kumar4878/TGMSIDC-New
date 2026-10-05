@@ -12,6 +12,7 @@ import deliveriesRouter from "./deliveries.js";
 import dashboardRouter from "./dashboard.js";
 import masterDataRouter from "./master-data.js";
 import notificationsRouter from "./notifications.js";
+import assetReportRouter from "./asset-report.js";
 
 const router = Router();
 
@@ -28,5 +29,6 @@ router.use(deliveriesRouter);
 router.use(dashboardRouter);
 router.use(masterDataRouter);
 router.use(notificationsRouter);
+router.use(assetReportRouter);
 
 export default router;

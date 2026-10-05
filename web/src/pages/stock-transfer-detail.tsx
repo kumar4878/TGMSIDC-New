@@ -50,10 +50,10 @@ export default function StockTransferDetail() {
 
   const currentIdx = STATUS_IDX[transfer.status] ?? 0;
 
-  const nextAction = transfer.status === "pending_approval" ? { label: "Approve Transfer", color: "bg-emerald-600 hover:bg-emerald-700" }
-    : transfer.status === "approved" ? { label: "Confirm Dispatch", color: "bg-blue-600 hover:bg-blue-700" }
-    : transfer.status === "dispatched" ? { label: "Confirm Receipt", color: "bg-emerald-600 hover:bg-emerald-700" }
-    : transfer.status === "received" ? { label: "Close Transfer", color: "bg-slate-600 hover:bg-slate-700" }
+  const nextAction = transfer.status === "pending_approval" ? { label: "Approve Transfer", color: "bg-emerald-600 hover:bg-emerald-700 text-white" }
+    : transfer.status === "approved" ? { label: "Confirm Dispatch", color: "bg-primary hover:bg-primary/90 text-primary-foreground" }
+    : transfer.status === "dispatched" ? { label: "Confirm Receipt", color: "bg-primary hover:bg-primary/90 text-primary-foreground" }
+    : transfer.status === "received" ? { label: "Close Transfer", color: "bg-primary hover:bg-primary/90 text-primary-foreground" }
     : null;
 
   return (
@@ -187,7 +187,7 @@ export default function StockTransferDetail() {
                   <Label className="text-xs">Remarks / Notes</Label>
                   <Textarea value={remarks} onChange={e => setRemarks(e.target.value)} rows={3} className="mt-1 resize-none text-sm" placeholder="Add remarks (optional)" />
                 </div>
-                <Button className={`w-full gap-2 text-white ${nextAction.color}`} onClick={() => setActionDone(true)}>
+                <Button className={`w-full gap-2 ${nextAction.color}`} onClick={() => setActionDone(true)}>
                   <CheckCircle2 className="h-4 w-4" /> {nextAction.label}
                 </Button>
                 {transfer.status === "pending_approval" && (

@@ -159,21 +159,21 @@ export default function TenderDetail() {
       </div>
 
       {/* Info Banner */}
-      <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-        <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
-        <div className="text-sm text-blue-800">
+      <div className="flex items-start gap-2 p-3 bg-slate-50 border border-slate-200 rounded-lg shadow-xs">
+        <Info className="h-4 w-4 text-slate-600 shrink-0 mt-0.5" />
+        <div className="text-sm text-slate-800">
           <span className="font-semibold">e-Procurement:</span> External tendering is conducted on {" "}
-          <a href={nitFields.eprocPortal} target="_blank" rel="noreferrer" className="underline font-medium">{nitFields.eprocPortal}</a>.
+          <a href={nitFields.eprocPortal} target="_blank" rel="noreferrer" className="underline font-medium text-slate-900">{nitFields.eprocPortal}</a>.
           Update milestones and upload documents here as they are completed.
-          Published in <span className="font-medium">{nitFields.publicationNewspaper}</span>.
+          Published in <span className="font-medium text-slate-900">{nitFields.publicationNewspaper}</span>.
         </div>
       </div>
 
       {/* ── NIT / TID Details ─────────────────────────────────────── */}
-      <Card>
+      <Card className="border-slate-200 shadow-xs">
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
           <CardTitle className="text-base flex items-center gap-2">
-            <FileText className="h-4 w-4 text-primary" />
+            <FileText className="h-4 w-4 text-slate-700" />
             Notice Inviting Tender (NIT) — TID Details
           </CardTitle>
           <Button variant="ghost" size="sm" onClick={() => setEditingNIT(!editingNIT)}>
@@ -220,14 +220,14 @@ export default function TenderDetail() {
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Key Dates</p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[
-                    { label: "Bid Calling Date", value: nitFields.bidCallingDate, color: "bg-blue-50 border-blue-200" },
-                    { label: "Pre-Bid Meeting", value: `${nitFields.preBidDate} ${nitFields.preBidTime} IST`, color: "bg-amber-50 border-amber-200" },
-                    { label: "Bid Closing", value: `${nitFields.bidClosingDate} ${nitFields.bidClosingTime} IST`, color: "bg-red-50 border-red-200" },
-                    { label: "Tech. Bids Opening", value: `${nitFields.techBidsOpenDate} ${nitFields.techBidsOpenTime} IST`, color: "bg-emerald-50 border-emerald-200" },
+                    { label: "Bid Calling Date", value: nitFields.bidCallingDate },
+                    { label: "Pre-Bid Meeting", value: `${nitFields.preBidDate} ${nitFields.preBidTime} IST` },
+                    { label: "Bid Closing", value: `${nitFields.bidClosingDate} ${nitFields.bidClosingTime} IST` },
+                    { label: "Tech. Bids Opening", value: `${nitFields.techBidsOpenDate} ${nitFields.techBidsOpenTime} IST` },
                   ].map(d => (
-                    <div key={d.label} className={`p-3 rounded-lg border ${d.color}`}>
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase">{d.label}</p>
-                      <p className="text-sm font-bold mt-1">
+                    <div key={d.label} className="p-3 rounded-lg border border-slate-200 bg-slate-50/70">
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase">{d.label}</p>
+                      <p className="text-sm font-semibold text-slate-800 mt-1">
                         {d.value.includes("-") && !d.value.includes(" ") ? format(new Date(d.value), "dd MMM yyyy") : d.value.split(" ")[0].includes("-") ? `${format(new Date(d.value.split(" ")[0]), "dd MMM yyyy")} ${d.value.split(" ").slice(1).join(" ")}` : d.value}
                       </p>
                     </div>
@@ -259,58 +259,58 @@ export default function TenderDetail() {
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Financial Requirements</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* EMD Card */}
-                  <div className="border rounded-lg p-3 space-y-2">
+                  <div className="border border-slate-200 rounded-lg p-3 space-y-2 bg-white shadow-xs">
                     <div className="flex items-center gap-2">
-                      <div className="h-8 w-8 rounded-full bg-amber-100 flex items-center justify-center"><IndianRupee className="h-4 w-4 text-amber-700" /></div>
+                      <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center"><IndianRupee className="h-4 w-4 text-slate-700" /></div>
                       <div>
-                        <p className="text-xs font-semibold text-amber-700">EMD (Earnest Money Deposit)</p>
+                        <p className="text-xs font-semibold text-slate-800">EMD (Earnest Money Deposit)</p>
                         <p className="text-xs text-muted-foreground">As per Annexure-1</p>
                       </div>
                     </div>
                     <p className="text-lg font-bold">₹{parseFloat(nitFields.emdAmount || "0").toLocaleString("en-IN")}</p>
                     <p className="text-[10px] text-muted-foreground">{nitFields.emdMode}</p>
                     <p className="text-[10px] text-muted-foreground">Validity: {nitFields.emdValidity}</p>
-                    <div className="text-[10px] p-2 bg-amber-50 rounded border border-amber-100">
-                      <span className="font-semibold">MSME Exemption:</span> {nitFields.msmeExemption}
+                    <div className="text-[10px] p-2 bg-slate-50 rounded border border-slate-200 text-slate-700">
+                      <span className="font-semibold text-slate-800">MSME Exemption:</span> {nitFields.msmeExemption}
                     </div>
                   </div>
 
                   {/* Tender Processing Fee */}
-                  <div className="border rounded-lg p-3 space-y-2">
+                  <div className="border border-slate-200 rounded-lg p-3 space-y-2 bg-white shadow-xs">
                     <div className="flex items-center gap-2">
-                      <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center"><IndianRupee className="h-4 w-4 text-blue-700" /></div>
+                      <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center"><IndianRupee className="h-4 w-4 text-slate-700" /></div>
                       <div>
-                        <p className="text-xs font-semibold text-blue-700">Tender Processing Fee</p>
+                        <p className="text-xs font-semibold text-slate-800">Tender Processing Fee</p>
                         <p className="text-xs text-muted-foreground">Non-refundable, online remittance</p>
                       </div>
                     </div>
                     <p className="text-lg font-bold">₹{parseFloat(nitFields.tenderProcessingFee || "0").toLocaleString("en-IN")}</p>
                     <p className="text-[10px] text-muted-foreground">{nitFields.tenderProcessingFeeNote}</p>
-                    <div className="text-[10px] p-2 bg-blue-50 rounded border border-blue-100 space-y-0.5">
-                      <p><span className="font-semibold">A/C No.:</span> {nitFields.bankAccount}</p>
-                      <p><span className="font-semibold">Bank:</span> {nitFields.bankName}</p>
-                      <p><span className="font-semibold">IFSC:</span> {nitFields.ifscCode}</p>
+                    <div className="text-[10px] p-2 bg-slate-50 rounded border border-slate-200 space-y-0.5 text-slate-700">
+                      <p><span className="font-semibold text-slate-800">A/C No.:</span> {nitFields.bankAccount}</p>
+                      <p><span className="font-semibold text-slate-800">Bank:</span> {nitFields.bankName}</p>
+                      <p><span className="font-semibold text-slate-800">IFSC:</span> {nitFields.ifscCode}</p>
                     </div>
                   </div>
 
                   {/* Performance Security */}
-                  <div className="border rounded-lg p-3 space-y-2">
+                  <div className="border border-slate-200 rounded-lg p-3 space-y-2 bg-white shadow-xs">
                     <div className="flex items-center gap-2">
-                      <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center"><ShieldCheck className="h-4 w-4 text-emerald-700" /></div>
+                      <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center"><ShieldCheck className="h-4 w-4 text-slate-700" /></div>
                       <div>
-                        <p className="text-xs font-semibold text-emerald-700">Performance Security (PSD)</p>
+                        <p className="text-xs font-semibold text-slate-800">Performance Security (PSD)</p>
                         <p className="text-xs text-muted-foreground">Ref: GIT Cl. 36 / Annexure-4</p>
                       </div>
                     </div>
                     <p className="text-lg font-bold">{nitFields.psdPercent}% of Contract Value</p>
                     <p className="text-[10px] text-muted-foreground">Due within <span className="font-semibold">{nitFields.psdDueDays} days</span> from date of receipt of PO</p>
-                    <p className="text-[10px] p-2 bg-emerald-50 rounded border border-emerald-100">Validity: Not less than warranty period + 90 days (as specified in PO)</p>
+                    <p className="text-[10px] p-2 bg-slate-50 rounded border border-slate-200 text-slate-700">Validity: Not less than warranty period + 90 days (as specified in PO)</p>
                   </div>
                 </div>
               </div>
 
               {/* Contact */}
-              <div className="border rounded-lg p-3 bg-muted/20">
+              <div className="border border-slate-200 rounded-lg p-3 bg-muted/20">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Contact for Tendering Process</p>
                 <div className="flex flex-wrap gap-4 text-sm">
                   <div className="flex items-center gap-1.5"><Building2 className="h-4 w-4 text-muted-foreground" /><span>{nitFields.contactName}</span></div>
@@ -323,8 +323,8 @@ export default function TenderDetail() {
         </CardContent>
       </Card>
 
-      <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-        <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+      <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700">
+        <AlertCircle className="h-4 w-4 text-slate-600 shrink-0" />
         <span>All times are as per IST. Dates are fixed and will not be relaxed unless extended by official notification or if the day is a public holiday.</span>
       </div>
 
@@ -411,10 +411,10 @@ export default function TenderDetail() {
 
           {/* Notes from tender */}
           {tender.notes && (
-            <Card className="border-blue-200 bg-blue-50/30">
-              <CardHeader className="pb-2"><CardTitle className="text-sm text-blue-800">Tender Notes</CardTitle></CardHeader>
+            <Card className="border-slate-200 bg-slate-50/50">
+              <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-800">Tender Notes</CardTitle></CardHeader>
               <CardContent>
-                <p className="text-xs text-blue-900 leading-relaxed">{tender.notes}</p>
+                <p className="text-xs text-slate-700 leading-relaxed">{tender.notes}</p>
               </CardContent>
             </Card>
           )}
@@ -422,11 +422,11 @@ export default function TenderDetail() {
 
         {/* Document Management */}
         <div className="col-span-2 space-y-4">
-          <Card>
+          <Card className="border-slate-200 shadow-xs">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Upload className="h-4 w-4" />Tender Documents
-                <Badge variant="outline" className="ml-auto text-xs">{docs.length} files</Badge>
+                <Upload className="h-4 w-4 text-slate-700" />Tender Documents
+                <Badge variant="outline" className="ml-auto text-xs bg-slate-50 text-slate-700 border-slate-200">{docs.length} files</Badge>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -434,17 +434,17 @@ export default function TenderDetail() {
                 const uploaded = uploadedByType(slot.key);
                 return (
                   <label key={slot.key} className="block cursor-pointer">
-                    <div className={`flex items-center gap-2 p-2.5 rounded-lg border transition-colors hover:bg-muted/20 ${uploaded.length > 0 ? "border-emerald-200 bg-emerald-50" : "border-dashed border-muted-foreground/30"}`}>
+                    <div className={`flex items-center gap-2 p-2.5 rounded-lg border transition-colors hover:bg-muted/20 ${uploaded.length > 0 ? "border-slate-300 bg-slate-50" : "border-dashed border-muted-foreground/30"}`}>
                       {uploaded.length > 0
-                        ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                        ? <CheckCircle2 className="h-4 w-4 text-slate-700 shrink-0" />
                         : <Upload className="h-4 w-4 text-muted-foreground shrink-0" />}
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium truncate">{slot.label}</p>
+                        <p className="text-xs font-medium truncate text-slate-900">{slot.label}</p>
                         {uploaded.length > 0
-                          ? <p className="text-[10px] text-emerald-700">{uploaded.length} file{uploaded.length > 1 ? "s" : ""}</p>
+                          ? <p className="text-[10px] text-slate-600">{uploaded.length} file{uploaded.length > 1 ? "s" : ""}</p>
                           : <p className="text-[10px] text-muted-foreground">{slot.hint}</p>}
                       </div>
-                      <span className="text-[10px] text-primary border border-primary/30 rounded px-1.5 py-0.5 shrink-0">
+                      <span className="text-[10px] text-slate-700 border border-slate-300 rounded px-1.5 py-0.5 shrink-0 bg-white">
                         {uploaded.length > 0 ? "Add" : "Upload"}
                       </span>
                     </div>

@@ -7,6 +7,7 @@ import {
   Clock, ArrowRight, Building2, Filter, AlertCircle,
 } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const MILESTONE_KEYS = [
@@ -67,10 +68,10 @@ export default function Tenders() {
 
         <div className="flex items-center gap-2">
           <Link href="/tenders/workbench">
-            <button className="flex items-center gap-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white px-3.5 py-1.5 rounded-md text-xs font-semibold shadow-xs transition-colors cursor-pointer">
+            <Button size="sm" className="gap-1.5 cursor-pointer">
               <Layers className="w-3.5 h-3.5" />
               <span>Tender Workbench</span>
-            </button>
+            </Button>
           </Link>
         </div>
       </div>

@@ -304,7 +304,7 @@ export default function Consolidation() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPreviewOpen(false)}>Cancel</Button>
-            <Button onClick={handleConsolidate} className="gap-1.5 bg-primary">
+            <Button onClick={handleConsolidate} className="gap-1.5">
               <Merge className="h-4 w-4" />Confirm Consolidation
             </Button>
           </DialogFooter>

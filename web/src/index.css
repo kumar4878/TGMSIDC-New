@@ -241,15 +241,10 @@
   .neo-nav-i.on:hover,
   .neo-nav-i[data-active="true"],
   .neo-nav-i[data-active="true"]:hover {
-    background-color: #186812 !important;
+    background-color: #1f7e17 !important;
     color: #ffffff !important;
     font-weight: 600;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  }
-  .neo-nav-i.active:hover,
-  .neo-nav-i.on:hover,
-  .neo-nav-i[data-active="true"]:hover {
-    background-color: #1f7e17 !important;
   }
 
   .neo-kpi-card {

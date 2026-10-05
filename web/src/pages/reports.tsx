@@ -28,9 +28,10 @@ import {
 } from "lucide-react";
 import { differenceInDays, format } from "date-fns";
 import { mockEquipment, mockRateContracts, mockTenders, mockDistributionData, mockIndents, mockBudgetByProgramme, mockVendorPerformance } from "@/mocks/data";
+import AssetReport from "./asset-report";
 
 /* ── Period hierarchy options (FY, Quarterly, Monthly) ── */
-const FY_OPTIONS = ["FY 2025-26", "FY 2024-25", "FY 2023-24"];
+const FY_OPTIONS = ["FY 2026-27", "FY 2025-26", "FY 2024-25"];
 
 const QUARTERS = [
   { id: "all", label: "All Quarters", months: ["April", "May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March"] },
@@ -42,6 +43,7 @@ const QUARTERS = [
 
 /* ── Tabs (Process Book §13 Statutory Suite) ─────────────────── */
 const TABS = [
+  { id: "asset_report",  label: "Asset Report (FR-RPT-001)",           icon: Activity },
   { id: "overview",      label: "Executive Overview (R-1)",            icon: BarChart3 },
   { id: "indent_aging",  label: "Indent Aging & Pendency (R-2)",       icon: Clock },
   { id: "rc_expiry",     label: "RC Expiry & Renewal (R-5)",           icon: ShieldAlert },
@@ -309,7 +311,7 @@ function OverviewTab({ pipeline, sla }: any) {
         <CardHeader className="pb-2 flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Procurement Pipeline Register (Process Book §13 R-1)
+              Procurement Pipeline Register (R-1)
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
               Live tracking of all active equipment requisitions across statutory milestones
@@ -399,7 +401,7 @@ function FinancialTab() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
-            Programme &amp; Account Head Budget Utilisation (Process Book §13 R-7)
+            Programme &amp; Account Head Budget Utilisation (R-7)
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Breakdown of capital sanctions, commitments, and actual expenditures per government scheme
@@ -711,7 +713,7 @@ function VendorTab() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
-            Vendor Statutory Performance &amp; Contractual Compliance (Process Book §13 R-3)
+            Vendor Statutory Performance &amp; Contractual Compliance (R-3)
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Composite evaluation: On-time Delivery (40%) + QA Acceptance (35%) + Contractual Compliance (25%)
@@ -745,7 +747,7 @@ function VendorTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Statutory Weighted Score Breakdown (Process Book §13 R-3)
+              Statutory Weighted Score Breakdown (R-3)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -794,7 +796,7 @@ function VendorTab() {
             </div>
           </CardContent>
           <div className="pb-3 text-center text-xs text-muted-foreground border-t pt-2">
-            Process Book §9 SLA: Consignee site delivery within 30 calendar days of PO
+            SLA Benchmark: Consignee site delivery within 30 calendar days of PO
           </div>
         </Card>
       </div>
@@ -803,7 +805,7 @@ function VendorTab() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            Empanelled Supplier Performance Register (§13 R-3)
+            Empanelled Supplier Performance Register (R-3)
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -934,7 +936,7 @@ function SlaTab({ sla }: any) {
         <div className="flex items-center gap-2">
           <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-xs gap-1.5 py-1">
             <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            Live Statutory SLA Tracking (Process Book §13 R-10)
+            Live Statutory SLA Tracking (R-10)
           </Badge>
           <span className="text-xs text-muted-foreground">Target Compliance: ≥95% across all 6 stages</span>
         </div>
@@ -951,7 +953,7 @@ function SlaTab({ sla }: any) {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            Stage-wise Turnaround Time (Days) vs Statutory SLA Benchmark (§13 R-10)
+            Stage-wise Turnaround Time (Days) vs Statutory SLA Benchmark (R-10)
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -989,7 +991,7 @@ function SlaTab({ sla }: any) {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              SLA Breach &amp; Turnaround by Stage (§13 R-10)
+              SLA Breach &amp; Turnaround by Stage (R-10)
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -1554,7 +1556,7 @@ function IndentAgingTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Statutory Aging Buckets (Process Book §13 R-2)
+              Statutory Aging Buckets (R-2)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1621,7 +1623,7 @@ function IndentAgingTab() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            Active Indent Pendency Register (Process Book §13 R-2)
+            Active Indent Pendency Register (R-2)
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -1714,7 +1716,7 @@ function RCExpiryTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Rate Contract Expiry Horizon (Process Book §13 R-5)
+              Rate Contract Expiry Horizon (R-5)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1789,10 +1791,10 @@ function RCExpiryTab() {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Rate Contract Expiry &amp; Statutory Renewal Status (Process Book §13 R-5)
+              Rate Contract Expiry &amp; Statutory Renewal Status (R-5)
             </CardTitle>
             <Badge variant="outline" className="text-xs">
-              Rule BR-02: Retender before expiration
+              Retender before expiration
             </Badge>
           </div>
         </CardHeader>
@@ -1955,7 +1957,7 @@ function POStatusTab() {
             </div>
           </CardContent>
           <div className="pb-3 text-center text-xs text-muted-foreground border-t pt-2">
-            Process Book §0 Standard: Treasury UTR tracking verified
+            Treasury UTR tracking verified
           </div>
         </Card>
       </div>
@@ -1964,10 +1966,10 @@ function POStatusTab() {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Purchase Order Milestones &amp; Payment Status (Process Book §13 R-6)
+              Purchase Order Milestones &amp; Payment Status (R-6)
             </CardTitle>
             <Badge variant="outline" className="text-xs bg-slate-100">
-              Process Book §0: Manual Paid / Not-Paid Tracking
+              Manual Paid / Not-Paid Tracking
             </Badge>
           </div>
         </CardHeader>
@@ -2072,7 +2074,7 @@ function DeliveryQATab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Consignment Lead-Time vs 30-Day Statutory SLA (Process Book §13 R-8)
+              Consignment Lead-Time vs 30-Day Statutory SLA (R-8)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -2102,7 +2104,7 @@ function DeliveryQATab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Consignee QA &amp; Acceptance Outcomes (Process Book §13 R-9)
+              Consignee QA &amp; Acceptance Outcomes (R-9)
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row items-center gap-4">
@@ -2141,7 +2143,7 @@ function DeliveryQATab() {
             </div>
           </CardContent>
           <div className="pb-3 text-center text-xs text-muted-foreground border-t pt-2">
-            Process Book §10: 15-day rectification window triggered on conditional acceptance
+            15-day rectification window triggered on conditional acceptance
           </div>
         </Card>
       </div>
@@ -2151,7 +2153,7 @@ function DeliveryQATab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Delivery Compliance &amp; Lead-Time (Process Book §13 R-8)
+              Delivery Compliance &amp; Lead-Time (R-8)
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -2207,7 +2209,7 @@ function DeliveryQATab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Consignee QA &amp; Acceptance Summary (Process Book §13 R-9)
+              Consignee QA &amp; Acceptance Summary (R-9)
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -2307,7 +2309,7 @@ function EquipmentInventoryTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Equipment Deployed by Major Health Facility (Process Book §13 R-4)
+              Equipment Deployed by Major Health Facility (R-4)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -2373,7 +2375,7 @@ function EquipmentInventoryTab() {
             </div>
           </CardContent>
           <div className="pb-3 text-center text-xs text-muted-foreground border-t pt-2">
-            Process Book §12: Automatic transition to 5-year Comprehensive AMC
+            Automatic transition to 5-year Comprehensive AMC
           </div>
         </Card>
       </div>
@@ -2400,7 +2402,7 @@ function EquipmentInventoryTab() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            Equipment Master Catalog &amp; Hospital Deployed Inventory (Process Book §13 R-4)
+            Equipment Master Catalog &amp; Hospital Deployed Inventory (R-4)
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -2508,7 +2510,7 @@ function TenderAuditTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Tender Progression &amp; Evaluation Funnel (Process Book §13 R-15)
+              Tender Progression &amp; Evaluation Funnel (R-15)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -2597,14 +2599,14 @@ function TenderAuditTab() {
           </select>
         </div>
         <Badge variant="outline" className="text-xs">
-          Process Book §13 R-15 Mandatory Audit Log
+          Mandatory Audit Log (R-15)
         </Badge>
       </div>
 
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            Tender Statutory Audit Register (Process Book §13 R-15)
+            Tender Statutory Audit Register (R-15)
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -2622,6 +2624,7 @@ function TenderAuditTab() {
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">Tech Qual</th>
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">L1 Price (₹)</th>
                   <th className="px-3 py-2 text-left font-medium text-muted-foreground">Status / Cancellation Reason</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Re-tender Ref</th>
                   <th className="px-3 py-2 text-center font-medium text-muted-foreground">Action</th>
                 </tr>
               </thead>
@@ -2630,10 +2633,10 @@ function TenderAuditTab() {
                   const bfcApprovalDate = "2025-12-28";
                   const totalDuration = t.status === "contract_awarded" ? "66d" : t.isCancelled ? "34d" : "42d";
                   const cancellationDetail = t.isCancelled
-                    ? "Stage 4 (Tech Eval) · Single non-responsive bid · Re-tender: TID-721894"
+                    ? `Stage ${t.cancellationStage || 'N/A'} · ${t.cancellationReason || 'Reason not recorded'} · Re-tender: ${t.reTenderRef || 'Not yet re-tendered'}`
                     : t.status === "contract_awarded"
-                    ? "Awarded vide G.O. Rt. No. 4521/DM&HS"
-                    : "Technical Evaluation in Progress";
+                    ? `Awarded · RC: ${t.rcRef || 'RC pending creation'}`
+                    : `In Progress · Stage ${t.currentStageNumber} of 10`;
 
                   return (
                     <tr key={t.id || idx} className="hover:bg-muted/20">
@@ -2657,6 +2660,7 @@ function TenderAuditTab() {
                           <span className="text-slate-600">{cancellationDetail}</span>
                         )}
                       </td>
+                      <td className="px-3 py-2.5 font-mono text-xs">{t.reTenderRef || '—'}</td>
                       <td className="px-3 py-2.5 text-center">
                         <Link href={`/tenders/${t.id}`}>
                           <span className="text-[11px] text-primary hover:underline cursor-pointer font-semibold">Open NIT →</span>
@@ -2704,7 +2708,7 @@ function DEOAccuracyTab() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard title="Total Indents Digitized" value={totalDigitized} sub="DEO / Facility Uploads" icon={FileText} color={C.blue} />
         <StatCard title="First-Pass Data Accuracy" value={`${overallAccuracy}%`} sub="Zero corrections required" icon={ShieldCheck} color={C.emerald} />
-        <StatCard title="Reviewer Corrections" value={totalCorrections} sub="Process Book §1 Step 11 Edits" icon={AlertTriangle} color={C.amber} />
+        <StatCard title="Reviewer Corrections" value={totalCorrections} sub="Scrutiny Edits" icon={AlertTriangle} color={C.amber} />
         <StatCard title="Write-ins Resolved" value={totalWriteIns} sub="Mapped to Official Catalog" icon={CheckCircle2} color={C.sky} />
       </div>
 
@@ -2714,7 +2718,7 @@ function DEOAccuracyTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              DEO Unit Accuracy % vs Statutory Benchmark (Process Book §13 R-14)
+              DEO Unit Accuracy % vs Statutory Benchmark (R-14)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -2736,7 +2740,7 @@ function DEOAccuracyTab() {
             </div>
           </CardContent>
           <div className="pb-3 text-center text-xs text-muted-foreground border-t pt-2">
-            Process Book §1 Step 11: Digitization quality threshold set at 85% first-pass accuracy
+            Digitization quality threshold set at 85% first-pass accuracy
           </div>
         </Card>
 
@@ -2744,7 +2748,7 @@ function DEOAccuracyTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Scrutiny Correction Categories (Process Book §1 Step 11)
+              Scrutiny Correction Categories (R-14)
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row items-center gap-4">
@@ -2792,7 +2796,7 @@ function DEOAccuracyTab() {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              DEO / Digitization Unit Accuracy &amp; Corrections Report (Process Book §13 R-14)
+              DEO / Digitization Unit Accuracy &amp; Corrections Report (R-14)
             </CardTitle>
             <Badge variant="outline" className="text-xs bg-blue-50 text-blue-800 border-blue-200">
               Statutory Quality Benchmark: 85% Accuracy
@@ -2804,13 +2808,13 @@ function DEOAccuracyTab() {
             <table className="w-full text-xs">
               <thead className="bg-muted/30">
                 <tr className="border-b">
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Digitizing DEO / Unit</th>
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Total Indents</th>
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Indents Corrected</th>
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Total Corrections</th>
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Write-ins Resolved</th>
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Accuracy Rate</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Statutory Quality Grade</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">DEO Name</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Total Indents Entered</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Fields Corrected by TGMSIDC</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Correction Rate %</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Write-Ins Resolved</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Accuracy Score</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Quality Grade</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -2821,8 +2825,8 @@ function DEOAccuracyTab() {
                     <tr key={idx} className="hover:bg-muted/20">
                       <td className="px-3 py-2.5 font-medium text-foreground">{d.deoName}</td>
                       <td className="px-3 py-2.5 text-right font-bold">{d.totalIndents}</td>
-                      <td className="px-3 py-2.5 text-right text-muted-foreground">{d.indentsCorrected}</td>
                       <td className="px-3 py-2.5 text-right font-semibold text-amber-700">{d.totalCorrections}</td>
+                      <td className="px-3 py-2.5 text-right text-muted-foreground">{((d.totalCorrections / d.totalIndents) * 100).toFixed(1)}%</td>
                       <td className="px-3 py-2.5 text-right text-blue-700 font-semibold">{d.writeInsResolved}</td>
                       <td className="px-3 py-2.5 text-right font-bold text-foreground">{d.accuracyRate}%</td>
                       <td className="px-3 py-2.5">
@@ -2843,8 +2847,14 @@ function DEOAccuracyTab() {
 }
 
 export default function Reports() {
-  const [tab, setTab] = useState("overview");
-  const [selectedFY, setSelectedFY] = useState("FY 2025-26");
+  const [tab, setTab] = useState(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search).get("tab");
+      if (p) return p;
+    }
+    return "asset_report";
+  });
+  const [selectedFY, setSelectedFY] = useState("FY 2026-27");
   const [selectedQuarter, setSelectedQuarter] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState("all");
 
@@ -2963,6 +2973,7 @@ export default function Reports() {
       </div>
 
       {/* Tab content */}
+      {tab === "asset_report"   && <AssetReport />}
       {tab === "overview"       && <OverviewTab     pipeline={pipeline} sla={sla} />}
       {tab === "indent_aging"   && <IndentAgingTab />}
       {tab === "rc_expiry"      && <RCExpiryTab />}

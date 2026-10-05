@@ -81,7 +81,7 @@ export default function RateContractDetail() {
               </Button>
             </Link>
             <Link href="/indents">
-              <Button size="sm" className="text-xs gap-1.5 bg-[#2563eb] hover:bg-[#1d4ed8]">
+              <Button size="sm" className="text-xs gap-1.5">
                 View All Indents
               </Button>
             </Link>
@@ -144,7 +144,7 @@ export default function RateContractDetail() {
         <div className="flex items-center gap-2">
           {isExpired && (
             <Link href={`/tenders?equipment=${encodeURIComponent(rc.equipmentName)}`}>
-              <Button size="sm" className="bg-[#186812] hover:bg-[#124e0d] text-white text-xs gap-1.5 shadow-xs">
+              <Button size="sm" className="text-xs gap-1.5 shadow-xs">
                 <Plus className="w-3.5 h-3.5" />
                 <span>Initiate Replacement Tender</span>
               </Button>
@@ -152,7 +152,7 @@ export default function RateContractDetail() {
           )}
           {rc.status === "active" && (
             <Link href={`/purchase-orders/new?rcId=${rc.id}`}>
-              <Button size="sm" className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs gap-1.5 shadow-xs">
+              <Button size="sm" className="text-xs gap-1.5 shadow-xs">
                 <Send className="w-3.5 h-3.5" />
                 <span>Create Purchase Order</span>
               </Button>
@@ -192,7 +192,7 @@ export default function RateContractDetail() {
               Consider initiating extension approval via Board Finance Committee (BFC) or issuing fresh tender enquiry.
             </p>
           </div>
-          <Button size="sm" onClick={() => setRenewOpen(true)} className="bg-amber-600 hover:bg-amber-700 text-white text-xs shrink-0">
+          <Button size="sm" onClick={() => setRenewOpen(true)} className="text-xs shrink-0">
             Renew Contract
           </Button>
         </div>
@@ -337,7 +337,7 @@ export default function RateContractDetail() {
           </CardHeader>
           <CardContent className="p-4">
             <div className="flex flex-wrap items-center gap-3">
-              <Button onClick={() => setRenewOpen(true)} className="bg-[#186812] hover:bg-[#124e0d] text-white text-xs gap-1.5">
+              <Button onClick={() => setRenewOpen(true)} className="text-xs gap-1.5">
                 <RefreshCw className="w-3.5 h-3.5" /> Renew / Extend Contract Validity
               </Button>
               <Button variant="outline" onClick={() => setCloseOpen(true)} className="text-xs border-[#e4eaf2] text-[#dc2f3c] hover:bg-red-50">
@@ -389,7 +389,7 @@ export default function RateContractDetail() {
             <Button variant="outline" size="sm" onClick={() => setRenewOpen(false)} className="text-xs">
               Cancel
             </Button>
-            <Button size="sm" onClick={handleRenew} disabled={updateRC.isPending || !newEndDate} className="bg-[#186812] hover:bg-[#124e0d] text-white text-xs">
+            <Button size="sm" onClick={handleRenew} disabled={updateRC.isPending || !newEndDate} className="text-xs">
               {updateRC.isPending ? "Renewing..." : "Apply Extension"}
             </Button>
           </DialogFooter>

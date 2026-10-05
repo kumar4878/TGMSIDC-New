@@ -153,7 +153,7 @@ function ProcurementKPIView({ period }: { period: Period }) {
               <ScoreRing score={compositeScoreProc} color={scoreColorProc} />
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
-                  Procurement Governance Health (12 KPIs · §13)
+                  Procurement Governance Health (12 KPIs)
                 </p>
                 <div className="flex items-center gap-2 mt-1">
                   <Badge className={`border text-sm px-3 py-0.5 bg-${scoreColorProc}-100 text-${scoreColorProc}-700 border-${scoreColorProc}-200`}>
@@ -162,7 +162,7 @@ function ProcurementKPIView({ period }: { period: Period }) {
                   <span className="text-xs text-muted-foreground">Period: {period}</span>
                 </div>
                 <p className="text-xs text-slate-600 mt-1.5 max-w-md">
-                  Real-time statutory tracking against Process Book §13 benchmarks for Equipment Wing.
+                  Real-time statutory tracking against benchmarks for Equipment Wing.
                 </p>
               </div>
             </div>
@@ -332,7 +332,7 @@ function ProcurementKPIView({ period }: { period: Period }) {
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <BarChart3 className="h-4 w-4 text-emerald-600" />
-                KPI-7: Budget Utilisation by Programme (§13 R-7)
+                KPI-7: Budget Utilisation by Programme (R-7)
               </CardTitle>
               <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">
                 Overall 78.4%
@@ -372,7 +372,7 @@ function ProcurementKPIView({ period }: { period: Period }) {
       {/* 12 Procurement KPI Cards Grid */}
       <div>
         <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-3">
-          All 12 Procurement KPI Cards (Process Book §13)
+          All 12 Procurement KPI Cards
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {mockProcurementKPIs.map(kpi => {
@@ -455,7 +455,7 @@ function ProcurementKPIView({ period }: { period: Period }) {
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-primary" />
-              KPI-10: Empanelled Vendor Performance Scorecard (§13 R-3/KPI-10)
+              KPI-10: Empanelled Vendor Performance Scorecard (R-3/KPI-10)
             </CardTitle>
             <Badge variant="outline" className="text-xs">
               Statutory Benchmark: ≥80/100
@@ -513,7 +513,7 @@ function ProcurementKPIView({ period }: { period: Period }) {
           <CardTitle className="text-base flex items-center gap-2">
             <Activity className="h-4 w-4 text-muted-foreground" />
             12 Procurement KPIs Statutory Scorecard
-            <span className="text-xs text-muted-foreground font-normal ml-1">· Process Book §13 Standard</span>
+            <span className="text-xs text-muted-foreground font-normal ml-1">· Official Benchmarks</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -901,7 +901,7 @@ export default function KPIDashboard() {
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold tracking-tight">Enterprise KPI Dashboard</h1>
             <Badge className="bg-primary/10 text-primary border-primary/20 text-xs">
-              Process Book §13 Suite
+              Executive Suite
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
@@ -921,7 +921,7 @@ export default function KPIDashboard() {
               }`}
             >
               <Target className="h-3.5 w-3.5 text-primary" />
-              12 Procurement KPIs (§13)
+              12 Procurement KPIs
             </button>
             <button
               onClick={() => setDomain("supply_chain")}

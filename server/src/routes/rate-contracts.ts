@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { RateContract } from "../models/RateContract.js";
 import { Equipment } from "../models/Equipment.js";
 import { Vendor } from "../models/Vendor.js";
+import { Indent } from "../models/Indent.js";
 
 const router = Router();
 
@@ -154,6 +155,43 @@ router.patch("/rate-contracts/:id/so-decision", async (req, res): Promise<void> 
   }
   const r = await RateContract.findByIdAndUpdate(req.params.id, updates, { new: true });
   if (!r) { res.status(404).json({ error: "Not found" }); return; }
+
+  // Step 15: Re-assess equipment after RC activation & automatically link RC
+  if (action === "approved") {
+    try {
+      const eqIdStr = r.equipmentId ? String(r.equipmentId) : null;
+      const matchingIndents = await Indent.find({
+        $or: [
+          ...(eqIdStr ? [{ "lineItems.equipmentId": eqIdStr }] : []),
+          ...(r.equipmentName ? [{ "lineItems.equipmentName": r.equipmentName }] : []),
+        ],
+      });
+
+      for (const ind of matchingIndents) {
+        let modified = false;
+        for (const li of (ind.lineItems || [])) {
+          const match = (eqIdStr && li.equipmentId && String(li.equipmentId) === eqIdStr) ||
+                        (r.equipmentName && li.equipmentName && li.equipmentName.toLowerCase() === r.equipmentName.toLowerCase());
+          if (match && li.lineStatus !== "po_drafted") {
+            li.rateContractId = r._id;
+            li.rateContractNumber = r.contractNumber;
+            li.rateContractVendor = r.vendorName;
+            li.rateContractUnitPrice = r.unitPrice;
+            li.procurementMode = "rate_contract";
+            li.lineStatus = "active_rc_matched_po_eligible";
+            modified = true;
+          }
+        }
+        if (modified) {
+          ind.markModified("lineItems");
+          await ind.save();
+        }
+      }
+    } catch (hookErr) {
+      console.error("[RC ACTIVATION RE-ASSESSMENT ERROR]", hookErr);
+    }
+  }
+
   res.json(await fmt(r));
 });
 

@@ -10,6 +10,7 @@ import {
   Building2, Filter, ArrowRight, FileCheck, CheckCircle2, Clock
 } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
@@ -70,7 +71,7 @@ export default function RateContracts() {
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#152340]">
               Rate Contracts (RC)
             </h1>
-            <span className="neo-chip grn">Fixed-Price Master Agreements</span>
+            <span className="neo-chip gry">Fixed-Price Master Agreements</span>
           </div>
           <p className="text-xs text-[#6b7a93] mt-0.5">
             Pre-negotiated statutory pricing and OEM supply terms governing institutional healthcare equipment orders
@@ -79,10 +80,10 @@ export default function RateContracts() {
 
         <div className="flex items-center gap-2">
           <Link href="/rate-contracts/new">
-            <button className="flex items-center gap-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white px-3.5 py-1.5 rounded-md text-xs font-semibold shadow-xs transition-colors cursor-pointer">
+            <Button size="sm" className="gap-1.5 cursor-pointer">
               <Plus className="w-3.5 h-3.5" />
               <span>New Contract</span>
-            </button>
+            </Button>
           </Link>
         </div>
       </div>

@@ -28,11 +28,12 @@ export function getIndentLifecycleData(
   indentId: string | number,
   currentIndent?: any,
   livePOs?: any[],
-  liveDeliveries?: any[]
+  liveDeliveries?: any[],
+  dbAuditLogs?: any[]
 ): IndentLifecycleData {
   const indent = currentIndent || mockIndents.find((i) => String(i.id) === String(indentId) || i.indentNumber === String(indentId));
 
-  // 1. Resolve Purchase Orders
+  // 1. Resolve Purchase Orders (strict: only real POs matching this indent)
   let pos: any[] = [];
   if (livePOs && livePOs.length > 0) {
     pos = livePOs.filter((po) =>
@@ -41,7 +42,8 @@ export function getIndentLifecycleData(
       (indent && po.indentNumber === indent.indentNumber)
     );
   }
-  if (pos.length === 0) {
+  // Only check mockPurchaseOrders if livePOs was not provided (e.g. offline mock environment)
+  if (pos.length === 0 && (!livePOs || livePOs.length === 0)) {
     pos = mockPurchaseOrders.filter((po) =>
       String(po.indentId) === String(indentId) ||
       (indent && String(po.indentId) === String(indent.id)) ||
@@ -49,195 +51,174 @@ export function getIndentLifecycleData(
     );
   }
 
-  // Fallback synthetic PO if indent is approved or po_issued
-  if (pos.length === 0 && indent && (indent.status === "po_issued" || indent.status === "delivered" || indent.status === "completed" || indent.status === "linked_to_rc")) {
-    const estVal = indent.estimatedTotalValue || 500000;
-    const vendorName = indent.rateContractVendor || "M/s. Sri Srinivasa Agencies";
-    const poNum = `PO-${(indent.financialYear || "2025-26").replace("-", "")}-${String(indent.indentNumber || "001").slice(-4)}`;
-    pos = [
-      {
-        id: `po-${indent.id}`,
-        poNumber: poNum,
-        indentId: indent.id,
-        indentNumber: indent.indentNumber,
-        rateContractId: indent.rateContractId || "rc-1",
-        rcNumber: indent.rateContractNumber || "RC/HPC/EQU/2025-26/0001",
-        vendorId: "v-1",
-        vendorName,
-        equipmentId: indent.equipmentId,
-        equipmentName: indent.equipmentName || (indent.lineItems?.[0]?.equipmentName ?? "Medical Equipment"),
-        quantity: indent.quantity || 1,
-        unitPrice: Math.round(estVal / (indent.quantity || 1)),
-        gstRate: 12,
-        totalAmount: estVal,
-        status: indent.status === "po_issued" ? "approved" : "delivered",
-        deliveryAddress: indent.facilityName,
-        createdAt: indent.updatedAt || indent.createdAt,
-        updatedAt: indent.updatedAt || indent.createdAt,
-      },
-    ];
-  }
-
   const poIds = new Set(pos.map((po) => String(po.id)));
 
-  // 2. Resolve Deliveries
+  // 2. Resolve Deliveries (strict: only real deliveries matching linked POs)
   let delivs: any[] = [];
   if (liveDeliveries && liveDeliveries.length > 0) {
     delivs = liveDeliveries.filter((d) => poIds.has(String(d.purchaseOrderId)));
   }
-  if (delivs.length === 0) {
+  if (delivs.length === 0 && (!liveDeliveries || liveDeliveries.length === 0) && poIds.size > 0) {
     delivs = mockDeliveries.filter((d) =>
       poIds.has(String(d.purchaseOrderId)) ||
       (pos.length > 0 && String(d.purchaseOrderId) === String(pos[0].id))
     );
   }
 
-  // Fallback synthetic delivery if indent is delivered/completed
-  if (delivs.length === 0 && pos.length > 0 && (indent?.status === "delivered" || indent?.status === "completed" || indent?.status === "po_issued")) {
-    delivs = [
-      {
-        id: `del-${pos[0].id}`,
-        deliveryTrackingId: `DEL-${pos[0].poNumber.replace(/[^a-zA-Z0-9]/g, "-")}`,
-        qrCode: `DN-${pos[0].poNumber.slice(-4)}`,
-        purchaseOrderId: pos[0].id,
-        poNumber: pos[0].poNumber,
-        vendorId: pos[0].vendorId,
-        vendorName: pos[0].vendorName,
-        facilityId: indent?.facilityId,
-        facilityName: indent?.facilityName,
-        equipmentName: pos[0].equipmentName,
-        quantity: pos[0].quantity,
-        status: "accepted",
-        dispatchDate: indent?.updatedAt ? indent.updatedAt.split("T")[0] : "2026-03-08",
-        deliveredDate: indent?.updatedAt ? indent.updatedAt.split("T")[0] : "2026-03-14",
-        qaComplianceScore: 100,
-        qaNotes: "Inspection completed and verified against official specifications. 100% compliant.",
-        acceptanceCertificateIssued: true,
-        documentsUploaded: true,
-        createdAt: pos[0].createdAt,
-        updatedAt: pos[0].updatedAt,
-      },
-    ];
-  }
-
-  // 3. Resolve Invoices
-  let invoices = mockInvoices.filter((inv) =>
+  // 3. Resolve Invoices (strict: only real invoices matching linked POs)
+  const invoices = mockInvoices.filter((inv) =>
     poIds.has(String(inv.poId)) ||
     (pos.length > 0 && pos.some((p) => p.poNumber === inv.poNumber))
   );
 
-  if (invoices.length === 0 && pos.length > 0) {
-    invoices = [
-      {
-        id: 100 + Number(String(indentId).replace(/\D/g, "").slice(0, 3) || 1),
-        invoiceNumber: `INV/${pos[0].vendorName.split(" ")[0]?.toUpperCase() || "VND"}/2025-26/044`,
-        poId: pos[0].id,
-        poNumber: pos[0].poNumber,
-        vendorName: pos[0].vendorName,
-        amount: pos[0].totalAmount || 500000,
-        status: (indent?.status === "completed" || delivs.some((d) => d.acceptanceCertificateIssued)) ? "paid" : "pending",
-        invoiceDate: pos[0].createdAt ? pos[0].createdAt.split("T")[0] : "2026-03-16",
-        paidDate: (indent?.status === "completed" || delivs.some((d) => d.acceptanceCertificateIssued)) ? (pos[0].updatedAt ? pos[0].updatedAt.split("T")[0] : "2026-04-02") : null,
-      },
-    ];
-  }
-
-  // 4. Construct Comprehensive Audit Log
+  // 4. Construct Clean, Meaningful Audit Log (No fake deliveries, no junk field edits)
   const approvalSteps = (indent?.approvalSteps && indent.approvalSteps.length > 0)
     ? indent.approvalSteps
     : getSteps(indentId);
 
   const log: AuditLogEntry[] = [];
+  const processedKeys = new Set<string>();
 
+  // A. Indent Creation & Submission milestone
   if (indent) {
+    const qty = indent.quantity || indent.lineItems?.reduce((sum: number, li: any) => sum + (li.requestedQty || 0), 0) || 1;
+    const asAmt = indent.asAmount || indent.revisedAsAmount || 0;
+    const estVal = indent.estimatedTotalProcurementValue || indent.estimatedTotalValue || 0;
     log.push({
       id: `indent-created-${indent.id || indentId}`,
       timestamp: indent.createdAt,
       actor: indent.digitisedBy || "DEO Initiator",
       role: "Indent Initiator",
-      event: `Indent ${indent.indentNumber} initiated & digitized — ${indent.equipmentName || "Requisition"} × ${indent.quantity || 1} for ${indent.facilityName}`,
+      event: `Indent ${indent.indentNumber || indentId} submitted by ${indent.digitisedBy || "DEO"} for ${indent.facilityName || "Requesting Facility"}. Requisition: ${indent.equipmentName || "Medical Equipment"} × ${qty} (Estimated: ₹${estVal.toLocaleString("en-IN")}, Sanctioned AS: ₹${asAmt.toLocaleString("en-IN")}).`,
       eventType: "indent",
       entityRef: indent.indentNumber,
     });
+    processedKeys.add(`created_${indent.createdAt}`);
   }
 
-  // Reviewer edit audit trail events
-  if (indent?.editAuditTrail && Array.isArray(indent.editAuditTrail)) {
-    indent.editAuditTrail.forEach((edit: any, idx: number) => {
-      log.push({
-        id: `edit-audit-${idx}`,
-        timestamp: edit.correctedAt || edit.editedAt || indent.updatedAt,
-        actor: edit.correctedBy || edit.editedBy || "Procurement Reviewer",
-        role: "Verification Officer",
-        event: `Data Verified & Corrected: ${edit.field} from "${edit.originalValue ?? "—"}" to "${edit.correctedValue ?? "—"}"`,
-        eventType: "indent",
-        entityRef: indent.indentNumber,
-      });
+  // B. Database Audit Log Records (Reprioritization, Revalidation, Scrutiny)
+  if (dbAuditLogs && Array.isArray(dbAuditLogs) && dbAuditLogs.length > 0) {
+    dbAuditLogs.forEach((entry: any, idx: number) => {
+      let roleLabel = "Authorized Officer";
+      if (entry.userRole === "deo") roleLabel = "DEO Initiator";
+      else if (entry.userRole === "tgmsidc_user") roleLabel = "TGMSIDC User";
+      else if (entry.userRole === "gm_equipment") roleLabel = "GM Equipment";
+      else if (entry.userRole === "so_equipment") roleLabel = "SO Equipment";
+      else if (entry.userRole === "executive_director") roleLabel = "Executive Director";
+      else if (entry.userRole) roleLabel = entry.userRole;
+
+      let eventLabel = entry.afterValue || entry.action;
+      let eventType: AuditEventType = "approval";
+
+      if (entry.action === "REPRIORITIZATION_SUBMITTED") {
+        eventType = "indent";
+        eventLabel = `Reprioritization Submitted: ${entry.afterValue || "Revised quantities and AS details submitted to TGMSIDC."}`;
+      } else if (entry.action === "BUDGET_REVALIDATED_APPROVED") {
+        eventType = "approval";
+        eventLabel = `Budget Revalidation Approved: ${entry.afterValue || "Validated within AS. Procurement routing unlocked."}`;
+      } else if (entry.action === "BUDGET_REVALIDATION_SHORTFALL") {
+        eventType = "approval";
+        eventLabel = `Budget Revalidation Shortfall: ${entry.afterValue || "Requirement exceeds AS. Returned to DEO."}`;
+      }
+
+      const dedupeKey = `${entry.timestamp}_${entry.action}`;
+      if (!processedKeys.has(dedupeKey)) {
+        processedKeys.add(dedupeKey);
+        log.push({
+          id: entry._id || `db-audit-${idx}`,
+          timestamp: entry.timestamp,
+          actor: entry.userName || "Authorised Officer",
+          role: roleLabel,
+          event: eventLabel,
+          eventType,
+          entityRef: entry.entityId || indent?.indentNumber,
+        });
+      }
     });
   }
 
-  // Approval step events
+  // C. Fallback: Reprioritization history events (if not already captured in dbAuditLogs)
+  if (indent?.reprioritizationHistory && Array.isArray(indent.reprioritizationHistory)) {
+    indent.reprioritizationHistory.forEach((rev: any, idx: number) => {
+      const alreadyCaptured = log.some((l) =>
+        l.event.includes("Reprioritization") &&
+        Math.abs(new Date(l.timestamp).getTime() - new Date(rev.revisedAt).getTime()) < 10000
+      );
+      if (!alreadyCaptured) {
+        const lineSummary = Array.isArray(rev.lineChanges) && rev.lineChanges.length > 0
+          ? rev.lineChanges.map((lc: any) => `${lc.equipmentName}: Qty ${lc.previousQty}→${lc.newQty}${lc.newDeferred ? ' (Deferred)' : ''}`).join(", ")
+          : "";
+        log.push({
+          id: `reprioritize-audit-${idx}`,
+          timestamp: rev.revisedAt || indent.updatedAt,
+          actor: rev.revisedBy || "DEO User",
+          role: "DEO Initiator",
+          event: `Requisition Reprioritized (Revision #${idx + 1}): Est. Value ₹${(rev.previousEstimatedTotal || 0).toLocaleString("en-IN")} → ₹${(rev.newEstimatedTotal || 0).toLocaleString("en-IN")}, AS ₹${(rev.previousAsAmount || 0).toLocaleString("en-IN")} → ₹${(rev.newAsAmount || 0).toLocaleString("en-IN")}.${lineSummary ? ` Item Details: [${lineSummary}].` : ""}${rev.notes ? ` Justification: "${rev.notes}"` : ""}`,
+          eventType: "indent",
+          entityRef: indent?.indentNumber,
+        });
+      }
+    });
+  }
+
+  // D. Official Approval Steps actioned
   approvalSteps.forEach((step: any) => {
     if (step.actionedAt && step.status !== "pending" && step.status !== "skipped") {
       const eventLabel =
         step.status === "approved" ? "Approved" :
         step.status === "rejected" ? "Rejected" :
         step.status === "returned" ? "Returned for revision" : step.status;
-      log.push({
-        id: `approval-step-${indent?.id || indentId}-${step.stepNumber}`,
-        timestamp: step.actionedAt,
-        actor: step.assignedUserName,
-        role: step.roleLabel,
-        event: `Step ${step.stepNumber} (${step.roleLabel}) — ${eventLabel}${step.comments ? `: ${step.comments}` : ""}`,
-        eventType: "approval",
-        entityRef: `Step ${step.stepNumber}`,
-      });
+      const dedupeKey = `step_${step.stepNumber}_${step.actionedAt}`;
+      if (!processedKeys.has(dedupeKey)) {
+        processedKeys.add(dedupeKey);
+        log.push({
+          id: `approval-step-${indent?.id || indentId}-${step.stepNumber}`,
+          timestamp: step.actionedAt,
+          actor: step.assignedUserName || step.roleLabel,
+          role: step.roleLabel,
+          event: `Step ${step.stepNumber} (${step.roleLabel}) — ${eventLabel}${step.comments ? `: ${step.comments}` : ""}`,
+          eventType: "approval",
+          entityRef: `Step ${step.stepNumber}`,
+        });
+      }
     }
   });
 
-  // Rate contract / Tender events
-  if (indent?.rateContractNumber || indent?.procurementMode === "rate_contract") {
-    log.push({
-      id: `rc-linked-${indent.id || indentId}`,
-      timestamp: indent.updatedAt || indent.createdAt,
-      actor: indent.approvedBy || "GM Equipment",
-      role: "Procurement Wing",
-      event: `Linked to Active Rate Contract: ${indent.rateContractNumber || "Standard RC Agreement"} (${indent.rateContractVendor || "Empanelled Vendor"})`,
-      eventType: "po",
-      entityRef: indent.rateContractNumber || "RC",
-    });
-  } else if (indent?.tenderNumber || indent?.status === "tender_initiated") {
+  // E. Tendering Workflow Initiated (only if tender actually exists or was initiated)
+  if (indent?.tenderInitiated || (indent?.tenderNumber && (indent?.status === "tender_initiated" || indent?.tenderId))) {
     log.push({
       id: `tender-routed-${indent.id || indentId}`,
-      timestamp: indent.updatedAt || indent.createdAt,
-      actor: indent.approvedBy || "GM Equipment",
+      timestamp: indent.tenderInvitedDate || indent.updatedAt || indent.createdAt,
+      actor: indent.approvedBy || "TGMSIDC User",
       role: "Tender Cell",
-      event: `Routed to Open Tendering: Tender Ref ${indent.tenderNumber || "TND-2025-001"} under Rule BR-02`,
+      event: `Routed to Open Tendering: Tender Ref ${indent.tenderNumber || "TND-2026-001"} under Rule BR-02`,
       eventType: "approval",
       entityRef: indent.tenderNumber || "Tender",
     });
   }
 
+  // F. Actual Purchase Orders
   pos.forEach((po) => {
     log.push({
       id: `po-created-${po.id}`,
       timestamp: po.createdAt,
-      actor: po.approvedBy || "SO Equipment",
+      actor: po.approvedBy || po.generatedBy || "SO Equipment",
       role: "Finance & Sanction Wing",
-      event: `Purchase Order ${po.poNumber} sanctioned & issued to ${po.vendorName} — ₹${(po.totalAmount || 0).toLocaleString("en-IN")}`,
+      event: `Purchase Order ${po.poNumber} issued to ${po.vendorName} — ₹${(po.totalAmount || 0).toLocaleString("en-IN")}`,
       eventType: "po",
       entityRef: po.poNumber,
     });
   });
 
+  // G. Actual Deliveries & QA (only if real delivery records exist)
   delivs.forEach((d) => {
     if (d.dispatchDate) {
       log.push({
         id: `delivery-dispatched-${d.id}`,
         timestamp: d.dispatchDate + "T08:00:00Z",
-        actor: d.vendorName,
+        actor: d.vendorName || "Vendor Logistics",
         role: "Vendor Logistics",
-        event: `Consignment dispatched by ${d.vendorName} — Note: ${d.deliveryTrackingId || d.qrCode}`,
+        event: `Consignment dispatched by ${d.vendorName || "Vendor"} — Note: ${d.deliveryTrackingId || d.qrCode || "Consignment Note"}`,
         eventType: "delivery",
         entityRef: d.deliveryTrackingId || d.qrCode,
       });
@@ -248,7 +229,7 @@ export function getIndentLifecycleData(
         timestamp: d.deliveredDate + "T12:00:00Z",
         actor: d.receivedBy || "Store Keeper",
         role: "Consignee Stores",
-        event: `${d.quantity} unit${d.quantity !== 1 ? "s" : ""} received in good condition at ${d.facilityName}`,
+        event: `${d.quantity} unit${d.quantity !== 1 ? "s" : ""} received in good condition at ${d.facilityName || indent?.facilityName || "Hospital"}`,
         eventType: "delivery",
         entityRef: d.deliveryTrackingId || d.qrCode,
       });
@@ -277,6 +258,7 @@ export function getIndentLifecycleData(
     }
   });
 
+  // H. Actual Invoices
   invoices.forEach((inv) => {
     log.push({
       id: `invoice-${inv.id}`,
@@ -300,6 +282,7 @@ export function getIndentLifecycleData(
     }
   });
 
+  // Sort chronological descending (latest event first)
   log.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
   return {

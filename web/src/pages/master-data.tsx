@@ -5,11 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   useDistricts, useFundingSources, useProgrammes, useAccountHeads, useTaxSlabs,
-  useInstitutions,
+  useInstitutions, useListRateContracts,
 } from "@/lib/api-hooks";
 import {
   MapPin, Landmark, FolderKanban, Receipt, Percent, Building2,
-  Search, Shield, CheckCircle2,
+  Search, Shield, CheckCircle2, FileCheck, FileText
 } from "lucide-react";
 
 export default function MasterData() {
@@ -22,6 +22,7 @@ export default function MasterData() {
   const { data: accountHeads = [] } = useAccountHeads();
   const { data: taxSlabs = [] } = useTaxSlabs();
   const { data: institutions = [] } = useInstitutions();
+  const { data: rcs = [] } = useListRateContracts();
 
   // Strictly official hospital master dataset
   const hospitals = institutions.filter((i: any) =>
@@ -44,6 +45,20 @@ export default function MasterData() {
       ? `₹${(n / 100000).toFixed(2)} L`
       : `₹${(n || 0).toLocaleString("en-IN")}`;
 
+  const tcTemplates = [
+    { id: "TC-001", poType: "RC-Based Equipment PO", clauseCount: 18, lockedClauses: 12, editableClauses: 6, version: "v2.1", effectiveDate: "2026-04-01", status: "Active" },
+    { id: "TC-002", poType: "GeM Direct Purchase", clauseCount: 14, lockedClauses: 10, editableClauses: 4, version: "v1.3", effectiveDate: "2026-04-01", status: "Active" },
+    { id: "TC-003", poType: "Local Purchase (< ₹25K)", clauseCount: 8, lockedClauses: 6, editableClauses: 2, version: "v1.0", effectiveDate: "2025-10-15", status: "Active" },
+    { id: "TC-004", poType: "CAMC / AMC Service Contract", clauseCount: 22, lockedClauses: 16, editableClauses: 6, version: "v1.1", effectiveDate: "2026-04-01", status: "Active" },
+  ];
+
+  const authorities = [
+    { id: "AUTH-001", name: "SO Equipment", designation: "Section Officer", department: "Equipment Wing", approvalLevel: "Level 3", thresholdAmount: 5000000, canApproveIndents: true, canApprovePOs: true, canApproveRCs: true },
+    { id: "AUTH-002", name: "GM Equipment", designation: "General Manager", department: "Equipment Wing", approvalLevel: "Level 2", thresholdAmount: 20000000, canApproveIndents: true, canApprovePOs: true, canApproveRCs: true },
+    { id: "AUTH-003", name: "Executive Director", designation: "ED", department: "TGMSIDC", approvalLevel: "Level 1", thresholdAmount: 100000000, canApproveIndents: true, canApprovePOs: true, canApproveRCs: true },
+    { id: "AUTH-004", name: "Managing Director", designation: "MD", department: "TGMSIDC", approvalLevel: "Escalation", thresholdAmount: null, canApproveIndents: false, canApprovePOs: false, canApproveRCs: false },
+  ];
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -54,12 +69,12 @@ export default function MasterData() {
             <h1 className="text-2xl font-bold text-foreground">Statutory Master Data</h1>
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Government of Telangana — Equipment Procurement Masters per V9 Process Book
+            Government of Telangana — Equipment Procurement Master Registries
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1.5 py-1 px-3">
-            <CheckCircle2 className="h-3.5 w-3.5" /> 6 Statutory Master Registries Synchronised
+            <CheckCircle2 className="h-3.5 w-3.5" /> 9 Statutory Master Registries Synchronised
           </Badge>
         </div>
       </div>
@@ -96,6 +111,15 @@ export default function MasterData() {
           </TabsTrigger>
           <TabsTrigger value="tax-slabs" className="gap-1.5 text-xs">
             <Percent className="h-3.5 w-3.5" /> GST / Tax Slabs ({taxSlabs.length})
+          </TabsTrigger>
+          <TabsTrigger value="rate-contracts" className="gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50/70 border border-emerald-200/50">
+            <FileCheck className="h-3.5 w-3.5 text-emerald-600" /> Rate Contracts ({rcs.length})
+          </TabsTrigger>
+          <TabsTrigger value="tc-templates" className="gap-1.5 text-xs">
+            <FileText className="h-3.5 w-3.5" /> T&C Templates (4)
+          </TabsTrigger>
+          <TabsTrigger value="authorities" className="gap-1.5 text-xs">
+            <Shield className="h-3.5 w-3.5" /> Authority Master (4)
           </TabsTrigger>
         </TabsList>
 
@@ -248,7 +272,7 @@ export default function MasterData() {
                       <th className="p-3 text-left">Code</th>
                       <th className="p-3 text-left">Funding Agency / Source</th>
                       <th className="p-3 text-left">Type</th>
-                      <th className="p-3 text-right">FY 25-26 Budget Allocation</th>
+                      <th className="p-3 text-right">FY 26-27 Budget Allocation</th>
                       <th className="p-3 text-left">Status</th>
                     </tr>
                   </thead>
@@ -383,6 +407,169 @@ export default function MasterData() {
                         <td className="p-3 text-center font-mono text-xs">{t.sgstPercent}%</td>
                         <td className="p-3 text-center font-mono text-xs font-semibold text-blue-600">{t.igstPercent}%</td>
                         <td className="p-3 text-xs text-muted-foreground">01-Apr-2023</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* 7. Rate Contracts Master */}
+        <TabsContent value="rate-contracts">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center justify-between">
+                <span>Active Rate Contracts Master Registry</span>
+                <span className="text-xs font-normal text-muted-foreground">Synchronized contracted benchmark rates &amp; validity schedules</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-md border overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b text-xs text-muted-foreground uppercase font-semibold">
+                    <tr>
+                      <th className="p-3 text-left">Contract No.</th>
+                      <th className="p-3 text-left">Equipment Name</th>
+                      <th className="p-3 text-left">Category</th>
+                      <th className="p-3 text-left">Approved Vendor</th>
+                      <th className="p-3 text-right">RC Unit Rate (₹)</th>
+                      <th className="p-3 text-center">GST %</th>
+                      <th className="p-3 text-right">Landed Rate (₹)</th>
+                      <th className="p-3 text-left">Validity Period</th>
+                      <th className="p-3 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filter(rcs, ["contractNumber", "equipmentName", "vendorName", "equipmentCategory"]).map((r: any) => {
+                      const isActive = r.status === "active";
+                      return (
+                        <tr key={r.id || r.contractNumber} className="hover:bg-slate-50/60">
+                          <td className="p-3 font-mono text-xs font-bold text-primary">{r.contractNumber}</td>
+                          <td className="p-3 font-semibold text-foreground">{r.equipmentName}</td>
+                          <td className="p-3 text-xs text-muted-foreground">{r.equipmentCategory || "Medical Equipment"}</td>
+                          <td className="p-3 text-xs font-medium text-slate-700">{r.vendorName}</td>
+                          <td className="p-3 text-right font-mono font-bold text-emerald-700">
+                            ₹{(r.unitPrice || 0).toLocaleString("en-IN")}
+                          </td>
+                          <td className="p-3 text-center font-mono text-xs">{r.gstRate || 12}%</td>
+                          <td className="p-3 text-right font-mono font-bold text-foreground">
+                            ₹{(r.unitPriceInclTax || Math.round((r.unitPrice || 0) * (1 + (r.gstRate || 12) / 100))).toLocaleString("en-IN")}
+                          </td>
+                          <td className="p-3 text-xs text-muted-foreground">
+                            {r.startDate ? new Date(r.startDate).toLocaleDateString("en-IN", { month: "short", year: "numeric" }) : "—"} to {r.endDate ? new Date(r.endDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                          </td>
+                          <td className="p-3">
+                            <Badge variant={isActive ? "default" : "outline"} className={isActive ? "bg-emerald-600 text-white" : "text-red-700 border-red-300 bg-red-50"}>
+                              {isActive ? "Active" : "Expired"}
+                            </Badge>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* 8. T&C Templates Master */}
+        <TabsContent value="tc-templates">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center justify-between">
+                <span>Terms &amp; Conditions Templates Registry</span>
+                <span className="text-xs font-normal text-muted-foreground">Standardized PO and Contract Clauses</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-md border overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b text-xs text-muted-foreground uppercase font-semibold">
+                    <tr>
+                      <th className="p-3 text-left">Template ID</th>
+                      <th className="p-3 text-left">PO Type</th>
+                      <th className="p-3 text-center">Total Clauses</th>
+                      <th className="p-3 text-center">Locked (🔒)</th>
+                      <th className="p-3 text-center">Editable (✏️)</th>
+                      <th className="p-3 text-left">Version</th>
+                      <th className="p-3 text-left">Effective Date</th>
+                      <th className="p-3 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filter(tcTemplates, ["id", "poType"]).map((tc: any) => (
+                      <tr key={tc.id} className="hover:bg-slate-50/60">
+                        <td className="p-3 font-mono text-xs font-bold text-primary">{tc.id}</td>
+                        <td className="p-3 font-medium text-foreground">{tc.poType}</td>
+                        <td className="p-3 text-center font-mono font-medium">{tc.clauseCount}</td>
+                        <td className="p-3 text-center font-mono text-slate-500">{tc.lockedClauses}</td>
+                        <td className="p-3 text-center font-mono text-slate-500">{tc.editableClauses}</td>
+                        <td className="p-3 text-xs text-muted-foreground font-mono">{tc.version}</td>
+                        <td className="p-3 text-xs text-muted-foreground">{new Date(tc.effectiveDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                        <td className="p-3">
+                          <Badge className="bg-emerald-100 text-emerald-700 border-0 text-[10px]">
+                            {tc.status}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* 9. Authority Master */}
+        <TabsContent value="authorities">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center justify-between">
+                <span>Delegation of Financial Powers (DoFP) Authority Master</span>
+                <span className="text-xs font-normal text-muted-foreground">Approval hierarchy &amp; thresholds</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-md border overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b text-xs text-muted-foreground uppercase font-semibold">
+                    <tr>
+                      <th className="p-3 text-left">Authority ID</th>
+                      <th className="p-3 text-left">Name</th>
+                      <th className="p-3 text-left">Designation</th>
+                      <th className="p-3 text-left">Department</th>
+                      <th className="p-3 text-left">Approval Level</th>
+                      <th className="p-3 text-right">Threshold (₹)</th>
+                      <th className="p-3 text-center">Indent Appr.</th>
+                      <th className="p-3 text-center">PO Appr.</th>
+                      <th className="p-3 text-center">RC Appr.</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filter(authorities, ["id", "name", "designation", "department"]).map((a: any) => (
+                      <tr key={a.id} className="hover:bg-slate-50/60">
+                        <td className="p-3 font-mono text-xs font-bold text-primary">{a.id}</td>
+                        <td className="p-3 font-medium text-foreground">{a.name}</td>
+                        <td className="p-3 text-xs text-muted-foreground">{a.designation}</td>
+                        <td className="p-3 text-xs text-muted-foreground">{a.department}</td>
+                        <td className="p-3">
+                          <Badge variant="outline" className="text-[10px] bg-slate-50">{a.approvalLevel}</Badge>
+                        </td>
+                        <td className="p-3 text-right font-mono font-semibold text-foreground">
+                          {a.thresholdAmount === null ? "Unlimited" : formatINR(a.thresholdAmount)}
+                        </td>
+                        <td className="p-3 text-center text-xs">
+                          {a.canApproveIndents ? <span className="text-emerald-600 font-bold">✓</span> : <span className="text-red-500 font-bold">✗</span>}
+                        </td>
+                        <td className="p-3 text-center text-xs">
+                          {a.canApprovePOs ? <span className="text-emerald-600 font-bold">✓</span> : <span className="text-red-500 font-bold">✗</span>}
+                        </td>
+                        <td className="p-3 text-center text-xs">
+                          {a.canApproveRCs ? <span className="text-emerald-600 font-bold">✓</span> : <span className="text-red-500 font-bold">✗</span>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

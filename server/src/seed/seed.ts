@@ -16,6 +16,7 @@ import { Programme } from "../models/Programme.js";
 import { AccountHead } from "../models/AccountHead.js";
 import { TaxSlab } from "../models/TaxSlab.js";
 import { Notification } from "../models/Notification.js";
+import { EquipmentAsset } from "../models/EquipmentAsset.js";
 
 const hash = (p: string) => bcrypt.hashSync(p, 10);
 const d = (s: string) => new Date(s);
@@ -39,17 +40,44 @@ async function main() {
    * USERS
    * ════════════════════════════════════════════════════════════════════════ */
   const users = await User.insertMany([
-    { username: "deo_user", password: hash("password123"), fullName: "DEO User", role: "deo", roleLabel: "Data Entry Operator", designation: "Data Entry Operator", department: "Hospital Procurement Cell", email: "deo@tgmsidc.gov.in", phone: "9876543210", initials: "DEO", isActive: true },
-    { username: "deo_gandhi", password: hash("password123"), fullName: "DEO User", role: "deo", roleLabel: "Data Entry Operator", designation: "Data Entry Operator", department: "Hospital Procurement Cell", email: "deo@tgmsidc.gov.in", phone: "9876543210", initials: "DEO", isActive: true },
-    { username: "deo_osmania", password: hash("password123"), fullName: "DEO User", role: "deo", roleLabel: "Data Entry Operator", designation: "Data Entry Operator", department: "Hospital Procurement Cell", email: "deo@tgmsidc.gov.in", phone: "9876543211", initials: "DEO", isActive: true },
-    { username: "tgmsidc_user1", password: hash("password123"), fullName: "K. Srinivas", role: "tgmsidc_user", roleLabel: "TGMSIDC User", designation: "Sr. Biomedical Engineer, Equipment Wing", department: "TGMSIDC", email: "k.srinivas@tgmsidc.gov.in", phone: "9876543212", initials: "KS", isActive: true },
-    { username: "gm_equip", password: hash("password123"), fullName: "P. Narayan", role: "gm_equipment", roleLabel: "GM Equipment", designation: "General Manager (Equipment)", department: "TGMSIDC", email: "gm.equip@tgmsidc.gov.in", phone: "9876543213", initials: "PN", isActive: true },
-    { username: "so_equip", password: hash("password123"), fullName: "R. Sharma", role: "so_equipment", roleLabel: "SO Equipment", designation: "Section Officer (Equipment)", department: "TGMSIDC", email: "so.equip@tgmsidc.gov.in", phone: "9876543214", initials: "RS", isActive: true },
-    { username: "ed_tgmsidc", password: hash("password123"), fullName: "D. Venkatesh", role: "executive_director", roleLabel: "Executive Director", designation: "Executive Director, TGMSIDC", department: "TGMSIDC", email: "ed@tgmsidc.gov.in", phone: "9876543215", initials: "DV", isActive: true },
-    { username: "admin", password: hash("password123"), fullName: "System Administrator", role: "admin", roleLabel: "Administrator", designation: "System Administrator", department: "IT", email: "admin@tgmsidc.gov.in", phone: "9876543216", initials: "SA", isActive: true },
-    { username: "vendor_bpl", password: hash("password123"), fullName: "Rajesh Kumar", role: "vendor", roleLabel: "Vendor", designation: "Regional Manager, BPL Medical", department: "BPL Medical Technologies", facilityName: "BPL Medical Technologies Pvt Ltd", email: "rajesh@bplmed.com", phone: "9876543217", initials: "RK", isActive: true },
-    { username: "vendor_philips", password: hash("password123"), fullName: "Anand Menon", role: "vendor", roleLabel: "Vendor", designation: "Sr. Manager, Philips Healthcare", department: "Philips India", facilityName: "Philips India Ltd", email: "anand.menon@philips.com", phone: "9876543218", initials: "AM", isActive: true },
-    { username: "consignee_gandhi", password: hash("password123"), fullName: "T. Ramaiah", role: "consignee", roleLabel: "Consignee", designation: "Store Keeper, Gandhi Hospital", department: "Gandhi Hospital", facilityName: "Gandhi Hospital, Secunderabad", email: "stores.gandhi@tgmsidc.gov.in", phone: "9876543219", initials: "TR", isActive: true },
+    // 1. System Administrator
+    { username: "admin", password: hash("password123"), fullName: "System Administrator", role: "admin", roleLabel: "System Administrator / TGMSIDC Admin", designation: "System Administrator", department: "IT & Systems Cell", email: "admin@tgmsidc.telangana.gov.in", phone: "9876543216", initials: "SA", isActive: true },
+
+    // 2. Leadership
+    { username: "md_tgmsidc", password: hash("password123"), fullName: "S. Raghavendra Rao, IAS", role: "managing_director", roleLabel: "Managing Director (MD)", designation: "Managing Director, TGMSIDC", department: "Executive Directorate", email: "md@tgmsidc.telangana.gov.in", phone: "9876543220", initials: "SR", isActive: true },
+    { username: "ed_tgmsidc", password: hash("password123"), fullName: "D. Venkatesh", role: "executive_director", roleLabel: "Executive Director (ED)", designation: "Executive Director, TGMSIDC", department: "Executive Directorate", email: "ed@tgmsidc.telangana.gov.in", phone: "9876543215", initials: "DV", isActive: true },
+
+    // 3. Equipment Wing
+    { username: "gm_equipment", password: hash("password123"), fullName: "P. Narayan", role: "gm_equipment", roleLabel: "General Manager (Equipment)", designation: "General Manager (Equipment)", department: "Equipment Wing", email: "gm.equip@tgmsidc.telangana.gov.in", phone: "9876543213", initials: "PN", isActive: true },
+    { username: "gm_equip", password: hash("password123"), fullName: "P. Narayan", role: "gm_equipment", roleLabel: "General Manager (Equipment)", designation: "General Manager (Equipment)", department: "Equipment Wing", email: "gm.equip.alt@tgmsidc.telangana.gov.in", phone: "9876543213", initials: "PN", isActive: true },
+    { username: "so_equipment", password: hash("password123"), fullName: "R. Sharma", role: "so_equipment", roleLabel: "Section Officer (Equipment)", designation: "Section Officer (Equipment)", department: "Equipment Wing", email: "so.equip@tgmsidc.telangana.gov.in", phone: "9876543214", initials: "RS", isActive: true },
+    { username: "so_equip", password: hash("password123"), fullName: "R. Sharma", role: "so_equipment", roleLabel: "Section Officer (Equipment)", designation: "Section Officer (Equipment)", department: "Equipment Wing", email: "so.equip.alt@tgmsidc.telangana.gov.in", phone: "9876543214", initials: "RS", isActive: true },
+
+    // 4. TGMSIDC Users / Technical & Biomedical Engineers
+    { username: "tgmsidc_user", password: hash("password123"), fullName: "K. Srinivas", role: "tgmsidc_user", roleLabel: "TGMSIDC User / Biomedical Engineer", designation: "Sr. Biomedical Engineer, Equipment Wing", department: "Technical Wing", email: "k.srinivas@tgmsidc.telangana.gov.in", phone: "9876543212", initials: "KS", isActive: true },
+    { username: "tgmsidc_user1", password: hash("password123"), fullName: "K. Srinivas", role: "tgmsidc_user", roleLabel: "TGMSIDC User / Biomedical Engineer", designation: "Sr. Biomedical Engineer, Equipment Wing", department: "Technical Wing", email: "k.srinivas.alt@tgmsidc.telangana.gov.in", phone: "9876543212", initials: "KS", isActive: true },
+    { username: "tgmsidc_qa", password: hash("password123"), fullName: "Dr. M. Anuradha", role: "tgmsidc_user", roleLabel: "TGMSIDC User / Biomedical Engineer", designation: "Quality Assurance Lead", department: "Technical Wing", email: "anuradha.qa@tgmsidc.telangana.gov.in", phone: "9876543231", initials: "MA", isActive: true },
+
+    // 5. Consignees (Hospital In-Charge / Store Keepers)
+    { username: "consignee_gandhi", password: hash("password123"), fullName: "T. Ramaiah", role: "consignee", roleLabel: "Hospital Consignee / Store In-Charge", designation: "Store Keeper, Central Stores", department: "Gandhi Hospital, Secunderabad", facilityName: "Gandhi Hospital, Secunderabad", email: "stores.gandhi@tgmsidc.telangana.gov.in", phone: "9876543219", initials: "TR", isActive: true },
+    { username: "consignee_osmania", password: hash("password123"), fullName: "Dr. G. Ramesh", role: "consignee", roleLabel: "Hospital Consignee / Store In-Charge", designation: "Store In-Charge / RMO", department: "Osmania General Hospital", facilityName: "Osmania General Hospital, Afzalgunj", email: "stores.osmania@tgmsidc.telangana.gov.in", phone: "9876543221", initials: "GR", isActive: true },
+    { username: "consignee_warangal", password: hash("password123"), fullName: "K. Venu Gopal", role: "consignee", roleLabel: "Hospital Consignee / Store In-Charge", designation: "Central Store Officer", department: "MGM Hospital, Warangal", facilityName: "MGM Hospital, Warangal", email: "stores.mgm@tgmsidc.telangana.gov.in", phone: "9876543222", initials: "KV", isActive: true },
+    { username: "consignee_adilabad", password: hash("password123"), fullName: "M. Santosh Kumar", role: "consignee", roleLabel: "Hospital Consignee / Store In-Charge", designation: "Hospital Store In-charge", department: "RIMS Adilabad", facilityName: "RIMS Adilabad", email: "stores.rims@tgmsidc.telangana.gov.in", phone: "9876543223", initials: "MS", isActive: true },
+    { username: "consignee_niloufer", password: hash("password123"), fullName: "S. Pratibha", role: "consignee", roleLabel: "Hospital Consignee / Store In-Charge", designation: "Equipment In-Charge", department: "Niloufer Hospital", facilityName: "Niloufer Hospital for Women and Children", email: "stores.niloufer@tgmsidc.telangana.gov.in", phone: "9876543224", initials: "SP", isActive: true },
+
+    // 6. DEOs (Data Entry Operators)
+    { username: "deo_user", password: hash("password123"), fullName: "DEO Initiator", role: "deo", roleLabel: "Data Entry Operator (DEO)", designation: "Data Entry Operator", department: "Hospital Procurement Cell", email: "deo@tgmsidc.telangana.gov.in", phone: "9876543210", initials: "DEO", isActive: true },
+    { username: "deo_gandhi", password: hash("password123"), fullName: "P. Suresh", role: "deo", roleLabel: "Data Entry Operator (DEO)", designation: "DEO, Central Store", department: "Gandhi Hospital, Secunderabad", facilityName: "Gandhi Hospital, Secunderabad", email: "deo.gandhi@tgmsidc.telangana.gov.in", phone: "9876543225", initials: "PS", isActive: true },
+    { username: "deo_osmania", password: hash("password123"), fullName: "K. Sandeep", role: "deo", roleLabel: "Data Entry Operator (DEO)", designation: "DEO, Biomedical Store", department: "Osmania General Hospital", facilityName: "Osmania General Hospital, Afzalgunj", email: "deo.osmania@tgmsidc.telangana.gov.in", phone: "9876543226", initials: "KS", isActive: true },
+    { username: "deo_warangal", password: hash("password123"), fullName: "N. Raju", role: "deo", roleLabel: "Data Entry Operator (DEO)", designation: "DEO, Hospital Cell", department: "MGM Hospital, Warangal", facilityName: "MGM Hospital, Warangal", email: "deo.mgm@tgmsidc.telangana.gov.in", phone: "9876543227", initials: "NR", isActive: true },
+    { username: "deo_adilabad", password: hash("password123"), fullName: "Ch. Mahesh", role: "deo", roleLabel: "Data Entry Operator (DEO)", designation: "DEO, Stores", department: "RIMS Adilabad", facilityName: "RIMS Adilabad", email: "deo.rims@tgmsidc.telangana.gov.in", phone: "9876543228", initials: "CM", isActive: true },
+
+    // 7. Vendors / Suppliers
+    { username: "vendor_bpl", password: hash("password123"), fullName: "Rajesh Kumar", role: "vendor", roleLabel: "Empanelled Vendor / Supplier", designation: "Regional Manager, BPL Medical", department: "BPL Medical Technologies Pvt Ltd", facilityName: "BPL Medical Technologies Pvt Ltd", email: "rajesh@bplmed.com", phone: "9876543217", initials: "RK", isActive: true },
+    { username: "vendor_philips", password: hash("password123"), fullName: "Anand Menon", role: "vendor", roleLabel: "Empanelled Vendor / Supplier", designation: "Sr. Key Account Manager", department: "Philips India Ltd", facilityName: "Philips India Ltd", email: "anand.menon@philips.com", phone: "9876543218", initials: "AM", isActive: true },
+    { username: "vendor_mindray", password: hash("password123"), fullName: "Vikrant Saxena", role: "vendor", roleLabel: "Empanelled Vendor / Supplier", designation: "Territory Sales Lead", department: "Mindray Medical India Pvt Ltd", facilityName: "Mindray Medical India Pvt Ltd", email: "vikrant.saxena@mindray.com", phone: "9876543229", initials: "VS", isActive: true },
+    { username: "vendor_ge", password: hash("password123"), fullName: "Sunita Rao", role: "vendor", roleLabel: "Empanelled Vendor / Supplier", designation: "Government Business Lead", department: "Wipro GE Healthcare Pvt Ltd", facilityName: "Wipro GE Healthcare Pvt Ltd", email: "sunita.rao@ge.com", phone: "9876543230", initials: "SR", isActive: true },
+    { username: "vendor_siemens", password: hash("password123"), fullName: "Arindam Das", role: "vendor", roleLabel: "Empanelled Vendor / Supplier", designation: "Public Health Director", department: "Siemens Healthcare Pvt Ltd", facilityName: "Siemens Healthcare Pvt Ltd", email: "arindam.das@siemens-healthineers.com", phone: "9876543232", initials: "AD", isActive: true },
   ]);
   console.log(`  → ${users.length} users`);
 
@@ -458,7 +486,7 @@ async function main() {
       specifications: "Rugged laptop-style point-of-care portable colour Doppler ultrasound system with 15-inch anti-glare display, dual active probe ports, and 2.5-hour battery operation.",
       hsnCode: "9018",
       gstRate: 12,
-      estimatedUnitCost: 1600000,
+      estimatedUnitCost: 1450000,
       standardised: true,
     },
     {
@@ -484,7 +512,7 @@ async function main() {
       specifications: "Advanced turbine-driven critical care ICU ventilator for adult and paediatric patients, comprehensive invasive/NIV modes, high flow O2 therapy, and 15-inch touch screen.",
       hsnCode: "9018",
       gstRate: 12,
-      estimatedUnitCost: 1150000,
+      estimatedUnitCost: 1050000,
       standardised: true,
     },
     {
@@ -601,7 +629,7 @@ async function main() {
       specifications: "12.1-inch color touchscreen modular patient monitor with ECG, SpO2, NIBP, Dual IBP, Dual Temp, and Sidestream/Microstream EtCO2 capnography module with 4-hr battery.",
       hsnCode: "9018",
       gstRate: 12,
-      estimatedUnitCost: 240000,
+      estimatedUnitCost: 215000,
       standardised: true,
     },
     {
@@ -614,7 +642,7 @@ async function main() {
       specifications: "Biphasic manual/AED defibrillator with non-invasive transcutaneous pacing, 3/5-lead ECG, SpO2, pediatric convert paddles, 50mm strip chart recorder, and shock-resistant casing.",
       hsnCode: "9018",
       gstRate: 12,
-      estimatedUnitCost: 380000,
+      estimatedUnitCost: 340000,
       standardised: true,
     },
     {
@@ -649,11 +677,13 @@ async function main() {
    * RATE CONTRACTS
    * ════════════════════════════════════════════════════════════════════════ */
   const rcs = await RateContract.insertMany([
-    { contractNumber: "RC-2526-0001", financialYear: "2025-26", equipmentId: equipment[17]._id, equipmentName: equipment[17].name, equipmentCategory: equipment[17].category, vendorId: vendors[0]._id, vendorName: "BPL Medical Technologies Pvt Ltd", l1VendorName: "BPL Medical Technologies Pvt Ltd", l2VendorName: "Mindray Medical India Pvt Ltd", l3VendorName: "Schiller Healthcare India Pvt Ltd", unitPrice: 215000, gstRate: 12, unitPriceInclTax: 240800, maxOrderQty: 200, warrantyMonths: 36, supplyPeriodDays: 45, awardDate: ago(180), startDate: ago(150), endDate: future(215), camcApplicable: true, camcPeriodYears: 3, camcRatePerYear: 12000, specsConfirmed: true, specsApproverNames: "Dr. K. Manohar, Dr. P. Shankar", approvalStatus: "approved", approvedBy: "R. Sharma (SO Equipment)", bfcApprovalRef: "BFC/2025/EQ/042", status: "active", totalPOsIssued: 3, totalQtyOrdered: 45, totalValueOrdered: 10836000 },
-    { contractNumber: "RC-2526-0002", financialYear: "2025-26", equipmentId: equipment[8]._id, equipmentName: equipment[8].name, equipmentCategory: equipment[8].category, vendorId: vendors[1]._id, vendorName: "Philips India Ltd", l1VendorName: "Philips India Ltd", l2VendorName: "BPL Medical Technologies Pvt Ltd", unitPrice: 1050000, gstRate: 12, unitPriceInclTax: 1176000, maxOrderQty: 50, warrantyMonths: 36, supplyPeriodDays: 60, awardDate: ago(120), startDate: ago(90), endDate: future(275), camcApplicable: true, camcPeriodYears: 5, camcRatePerYear: 48000, specsConfirmed: true, approvalStatus: "approved", approvedBy: "R. Sharma (SO Equipment)", bfcApprovalRef: "BFC/2025/EQ/051", status: "active", totalPOsIssued: 2, totalQtyOrdered: 12, totalValueOrdered: 14112000 },
-    { contractNumber: "RC-2526-0003", financialYear: "2025-26", equipmentId: equipment[6]._id, equipmentName: equipment[6].name, equipmentCategory: equipment[6].category, vendorId: vendors[2]._id, vendorName: "Mindray Medical India Pvt Ltd", l1VendorName: "Mindray Medical India Pvt Ltd", unitPrice: 1450000, gstRate: 12, unitPriceInclTax: 1624000, maxOrderQty: 100, warrantyMonths: 36, supplyPeriodDays: 30, startDate: ago(200), endDate: future(165), specsConfirmed: true, approvalStatus: "approved", status: "active", totalPOsIssued: 1, totalQtyOrdered: 20, totalValueOrdered: 32480000 },
-    { contractNumber: "RC-2526-0004", financialYear: "2025-26", equipmentId: equipment[18]._id, equipmentName: equipment[18].name, equipmentCategory: equipment[18].category, vendorId: vendors[0]._id, vendorName: "BPL Medical Technologies Pvt Ltd", l1VendorName: "BPL Medical Technologies Pvt Ltd", l2VendorName: "Schiller Healthcare India Pvt Ltd", unitPrice: 340000, gstRate: 12, unitPriceInclTax: 380800, maxOrderQty: 100, warrantyMonths: 36, supplyPeriodDays: 45, startDate: ago(60), endDate: future(30), camcApplicable: false, specsConfirmed: true, approvalStatus: "approved", status: "active", totalPOsIssued: 1, totalQtyOrdered: 10, totalValueOrdered: 3808000 },
-    { contractNumber: "RC-2425-0012", financialYear: "2024-25", equipmentId: equipment[13]._id, equipmentName: equipment[13].name, equipmentCategory: equipment[13].category, vendorId: vendors[3]._id, vendorName: "Trivitron Healthcare Pvt Ltd", l1VendorName: "Trivitron Healthcare Pvt Ltd", unitPrice: 780000, gstRate: 18, unitPriceInclTax: 920400, warrantyMonths: 36, startDate: ago(400), endDate: ago(35), specsConfirmed: true, approvalStatus: "approved", status: "expired", totalPOsIssued: 2, totalQtyOrdered: 8 },
+    { contractNumber: "RC-2627-0001", financialYear: "2026-27", equipmentId: equipment[17]._id, equipmentName: equipment[17].name, equipmentCategory: equipment[17].category, vendorId: vendors[0]._id, vendorName: "BPL Medical Technologies Pvt Ltd", l1VendorName: "BPL Medical Technologies Pvt Ltd", l2VendorName: "Mindray Medical India Pvt Ltd", l3VendorName: "Schiller Healthcare India Pvt Ltd", unitPrice: 215000, gstRate: 12, unitPriceInclTax: 240800, maxOrderQty: 200, warrantyMonths: 36, supplyPeriodDays: 45, awardDate: ago(180), startDate: ago(150), endDate: future(215), camcApplicable: true, camcPeriodYears: 3, camcRatePerYear: 12000, specsConfirmed: true, specsApproverNames: "Dr. K. Manohar, Dr. P. Shankar", approvalStatus: "approved", approvedBy: "R. Sharma (SO Equipment)", bfcApprovalRef: "BFC/2026/EQ/042", status: "active", totalPOsIssued: 3, totalQtyOrdered: 45, totalValueOrdered: 10836000 },
+    { contractNumber: "RC-2627-0002", financialYear: "2026-27", equipmentId: equipment[8]._id, equipmentName: equipment[8].name, equipmentCategory: equipment[8].category, vendorId: vendors[1]._id, vendorName: "Philips India Ltd", l1VendorName: "Philips India Ltd", l2VendorName: "BPL Medical Technologies Pvt Ltd", unitPrice: 1050000, gstRate: 12, unitPriceInclTax: 1176000, maxOrderQty: 50, warrantyMonths: 36, supplyPeriodDays: 60, awardDate: ago(120), startDate: ago(90), endDate: future(275), camcApplicable: true, camcPeriodYears: 5, camcRatePerYear: 48000, specsConfirmed: true, approvalStatus: "approved", approvedBy: "R. Sharma (SO Equipment)", bfcApprovalRef: "BFC/2026/EQ/051", status: "active", totalPOsIssued: 2, totalQtyOrdered: 12, totalValueOrdered: 14112000 },
+    { contractNumber: "RC-2627-0003", financialYear: "2026-27", equipmentId: equipment[6]._id, equipmentName: equipment[6].name, equipmentCategory: equipment[6].category, vendorId: vendors[2]._id, vendorName: "Mindray Medical India Pvt Ltd", l1VendorName: "Mindray Medical India Pvt Ltd", unitPrice: 1450000, gstRate: 12, unitPriceInclTax: 1624000, maxOrderQty: 100, warrantyMonths: 36, supplyPeriodDays: 30, startDate: ago(200), endDate: future(165), specsConfirmed: true, approvalStatus: "approved", status: "active", totalPOsIssued: 1, totalQtyOrdered: 20, totalValueOrdered: 32480000 },
+    { contractNumber: "RC-2627-0004", financialYear: "2026-27", equipmentId: equipment[18]._id, equipmentName: equipment[18].name, equipmentCategory: equipment[18].category, vendorId: vendors[0]._id, vendorName: "BPL Medical Technologies Pvt Ltd", l1VendorName: "BPL Medical Technologies Pvt Ltd", l2VendorName: "Schiller Healthcare India Pvt Ltd", unitPrice: 340000, gstRate: 12, unitPriceInclTax: 380800, maxOrderQty: 100, warrantyMonths: 36, supplyPeriodDays: 45, startDate: ago(60), endDate: future(30), camcApplicable: false, specsConfirmed: true, approvalStatus: "approved", status: "active", totalPOsIssued: 1, totalQtyOrdered: 10, totalValueOrdered: 3808000 },
+    { contractNumber: "RC-2425-0010", financialYear: "2024-25", equipmentId: equipment[7]._id, equipmentName: equipment[7].name, equipmentCategory: equipment[7].category, vendorId: vendors[3]._id, vendorName: "Trivitron Healthcare Pvt Ltd", l1VendorName: "Trivitron Healthcare Pvt Ltd", unitPrice: 2200000, gstRate: 12, unitPriceInclTax: 2464000, warrantyMonths: 36, startDate: ago(450), endDate: ago(45), specsConfirmed: true, approvalStatus: "approved", status: "expired", totalPOsIssued: 3, totalQtyOrdered: 12, totalValueOrdered: 29568000 },
+    { contractNumber: "RC-2425-0011", financialYear: "2024-25", equipmentId: equipment[10]._id, equipmentName: equipment[10].name, equipmentCategory: equipment[10].category, vendorId: vendors[2]._id, vendorName: "Mindray Medical India Pvt Ltd", l1VendorName: "Mindray Medical India Pvt Ltd", unitPrice: 650000, gstRate: 18, unitPriceInclTax: 767000, warrantyMonths: 36, startDate: ago(420), endDate: ago(90), specsConfirmed: true, approvalStatus: "approved", status: "expired", totalPOsIssued: 4, totalQtyOrdered: 15, totalValueOrdered: 11505000 },
+    { contractNumber: "RC-2425-0012", financialYear: "2024-25", equipmentId: equipment[13]._id, equipmentName: equipment[13].name, equipmentCategory: equipment[13].category, vendorId: vendors[3]._id, vendorName: "Trivitron Healthcare Pvt Ltd", l1VendorName: "Trivitron Healthcare Pvt Ltd", unitPrice: 780000, gstRate: 18, unitPriceInclTax: 920400, warrantyMonths: 36, startDate: ago(400), endDate: ago(35), specsConfirmed: true, approvalStatus: "approved", status: "expired", totalPOsIssued: 2, totalQtyOrdered: 8, totalValueOrdered: 7363200 },
   ]);
   console.log(`  → ${rcs.length} rate contracts`);
 
@@ -664,7 +694,8 @@ async function main() {
     { stepNumber: 1, requiredRole: "deo", roleLabel: "DEO (Initiator)", assignedUserName: digitisedBy, assignedUserId: "u1", status: "approved", actionedAt: ago(20), comments: "Indent submitted." },
     { stepNumber: 2, requiredRole: "tgmsidc_user", roleLabel: "TGMSIDC User", assignedUserName: "K. Srinivas", assignedUserId: "u2", status: "approved", actionedAt: ago(18), comments: "Data verified against scanned copy." },
     { stepNumber: 3, requiredRole: "gm_equipment", roleLabel: "GM Equipment", assignedUserName: "P. Narayan", assignedUserId: "u3", status: "approved", actionedAt: ago(15), comments: procMode === "rate_contract" ? "Approved. Active RC available." : "Approved. No active RC — tender route." },
-    { stepNumber: 4, requiredRole: "so_equipment", roleLabel: "SO Equipment", assignedUserName: "R. Sharma", assignedUserId: "u4", status: "approved", actionedAt: ago(12), comments: "Final approval granted." },
+    { stepNumber: 4, requiredRole: "so_equipment", roleLabel: "SO Equipment", assignedUserName: "R. Sharma", assignedUserId: "u4", status: "approved", actionedAt: ago(12), comments: "Approved by SO Equipment." },
+    { stepNumber: 5, requiredRole: "executive_director", roleLabel: "Executive Director", assignedUserName: "D. Venkatesh", assignedUserId: "u5", status: "approved", actionedAt: ago(10), comments: "Final approval granted by Executive Director." },
   ];
 
   const pendingSteps = (digitisedBy: string) => [
@@ -672,16 +703,17 @@ async function main() {
     { stepNumber: 2, requiredRole: "tgmsidc_user", roleLabel: "TGMSIDC User", assignedUserName: "K. Srinivas", assignedUserId: "u2", status: "pending" },
     { stepNumber: 3, requiredRole: "gm_equipment", roleLabel: "GM Equipment", assignedUserName: "P. Narayan", assignedUserId: "u3", status: "pending" },
     { stepNumber: 4, requiredRole: "so_equipment", roleLabel: "SO Equipment", assignedUserName: "R. Sharma", assignedUserId: "u4", status: "pending" },
+    { stepNumber: 5, requiredRole: "executive_director", roleLabel: "Executive Director", assignedUserName: "D. Venkatesh", assignedUserId: "u5", status: "pending" },
   ];
 
   const indents = await Indent.insertMany([
-    { indentNumber: "IND-2526-0001", indentType: "go", financialYear: "2025-26", indentDate: ago(25), facilityId: gandhiInst._id, facilityName: gandhiInst.name, hodName: "Director of Medical Education", lineItems: [{ equipmentId: equipment[17]._id, equipmentName: equipment[17].name, category: equipment[17].category, specifications: "ECG, SpO2, NIBP, Temp, IBP, EtCO2 with 12.1-inch color touchscreen", requestedQty: 20, approvedQty: 20, unitOfMeasure: "No.", estimatedUnitCost: 215000, procurementMode: "rate_contract", rateContractId: rcs[0]._id }], institutions: [{ institutionId: gandhiInst._id, institutionName: gandhiInst.name, district: gandhiInst.district, quantities: [{ lineItemIndex: 0, sanctionedQty: 20 }], fundSanctionedAmount: 4816000 }], equipmentId: equipment[17]._id, quantity: 20, technicalRequirements: "Multipara patient monitors with EtCO2 for ICU and Emergency wards", estimatedTotalValue: 4816000, status: "po_issued", procurementMode: "rate_contract", rateContractId: rcs[0]._id, digitisedBy: "B. Rajeshwari", createdByUserId: users[0]._id.toString(), approvedBy: "R. Sharma", accountHeadName: "Capital Outlay — Equipment", programmeName: "Procurement of Medical Equipment 2025-26", fundingSourceName: "State Budget", approvalSteps: approvedSteps("B. Rajeshwari", "rate_contract") },
-    { indentNumber: "IND-2526-0002", indentType: "letter", financialYear: "2025-26", indentDate: ago(22), facilityId: osmaniaInst._id, facilityName: osmaniaInst.name, hodName: "Director of Medical Education", lineItems: [{ equipmentId: equipment[8]._id, equipmentName: equipment[8].name, category: equipment[8].category, specifications: "Adult & Paediatric turbine-driven critical care ICU ventilator", requestedQty: 8, approvedQty: 8, unitOfMeasure: "No.", estimatedUnitCost: 1050000, procurementMode: "rate_contract", rateContractId: rcs[1]._id }], institutions: [{ institutionId: osmaniaInst._id, institutionName: osmaniaInst.name, district: osmaniaInst.district, quantities: [{ lineItemIndex: 0, sanctionedQty: 8 }], fundSanctionedAmount: 9408000 }], equipmentId: equipment[8]._id, quantity: 8, technicalRequirements: "ICU Ventilators for newly expanded critical care block", estimatedTotalValue: 9408000, status: "approved", procurementMode: "rate_contract", rateContractId: rcs[1]._id, digitisedBy: "S. Padma", approvedBy: "R. Sharma", accountHeadName: "Capital Outlay — Equipment", programmeName: "NHM Medical Equipment Strengthening", fundingSourceName: "National Health Mission", approvalSteps: approvedSteps("S. Padma", "rate_contract") },
-    { indentNumber: "IND-2526-0003", indentType: "proceeding", financialYear: "2025-26", indentDate: ago(18), facilityId: nimsInst._id, facilityName: nimsInst.name, hodName: "Director, NIMS", lineItems: [{ equipmentId: equipment[3]._id, equipmentName: equipment[3].name, category: equipment[3].category, specifications: "500mA DR system with 17x17 flat panel detector", requestedQty: 2, approvedQty: 2, unitOfMeasure: "No.", estimatedUnitCost: 3500000, procurementMode: "tender" }], institutions: [{ institutionId: nimsInst._id, institutionName: nimsInst.name, district: nimsInst.district, quantities: [{ lineItemIndex: 0, sanctionedQty: 2 }], fundSanctionedAmount: 8260000 }], equipmentId: equipment[3]._id, quantity: 2, technicalRequirements: "500mA Digital X-Ray with DICOM for Radiology", estimatedTotalValue: 8260000, status: "tender_initiated", procurementMode: "tender", digitisedBy: "B. Rajeshwari", approvedBy: "R. Sharma", accountHeadName: "Capital Outlay — Equipment", programmeName: "TSHSP Equipment Modernisation", fundingSourceName: "World Bank — TSHSP", approvalSteps: approvedSteps("B. Rajeshwari", "tender") },
-    { indentNumber: "IND-2526-0004", indentType: "letter", financialYear: "2025-26", indentDate: ago(5), facilityId: mgmInst._id, facilityName: mgmInst.name, hodName: "Director of Medical Education", lineItems: [{ equipmentId: equipment[12]._id, equipmentName: equipment[12].name, category: equipment[12].category, specifications: "5-part differential, 60 samples/hr autoloader", requestedQty: 3, unitOfMeasure: "No.", estimatedUnitCost: 1800000 }, { equipmentId: equipment[11]._id, equipmentName: equipment[11].name, category: equipment[11].category, specifications: "400 tests/hr, ISE module, bi-directional LIS", requestedQty: 2, unitOfMeasure: "No.", estimatedUnitCost: 2500000 }], institutions: [{ institutionId: mgmInst._id, institutionName: mgmInst.name, district: mgmInst.district, quantities: [{ lineItemIndex: 0, sanctionedQty: 3 }, { lineItemIndex: 1, sanctionedQty: 2 }], fundSanctionedAmount: 12272000 }], quantity: 5, technicalRequirements: "Laboratory diagnostics modernization at MGM Warangal", estimatedTotalValue: 12272000, status: "pending_review", digitisedBy: "B. Rajeshwari", accountHeadName: "Capital Outlay — Equipment", programmeName: "NHM Medical Equipment Strengthening", fundingSourceName: "National Health Mission", approvalSteps: pendingSteps("B. Rajeshwari") },
-    { indentNumber: "IND-2526-0005", indentType: "go", financialYear: "2025-26", indentDate: ago(2), facilityId: dhKrmInst._id, facilityName: dhKrmInst.name, hodName: "Dist. Medical & Health Officer", lineItems: [{ equipmentId: equipment[18]._id, equipmentName: equipment[18].name, category: equipment[18].category, specifications: "Biphasic, AED mode, pacing, 12-lead ECG", requestedQty: 5, unitOfMeasure: "No.", estimatedUnitCost: 340000 }, { equipmentId: equipment[6]._id, equipmentName: equipment[6].name, category: equipment[6].category, specifications: "Portable Colour Doppler USG with 2 probes", requestedQty: 2, unitOfMeasure: "No.", estimatedUnitCost: 1450000 }], institutions: [{ institutionId: dhKrmInst._id, institutionName: dhKrmInst.name, district: dhKrmInst.district, quantities: [{ lineItemIndex: 0, sanctionedQty: 5 }, { lineItemIndex: 1, sanctionedQty: 2 }], fundSanctionedAmount: 5152000 }], quantity: 7, technicalRequirements: "Emergency & portable diagnostic equipment for DH Karimnagar", estimatedTotalValue: 5152000, status: "pending_review", digitisedBy: "S. Padma", approvalSteps: pendingSteps("S. Padma") },
-    { indentNumber: "IND-2526-0006", indentType: "letter", financialYear: "2025-26", indentDate: ago(30), facilityId: gandhiInst._id, facilityName: gandhiInst.name, hodName: "Director of Medical Education", lineItems: [{ equipmentId: equipment[16]._id, equipmentName: equipment[16].name, category: equipment[16].category, specifications: "4K laparoscopy tower with 300W LED light source and instruments", requestedQty: 2, approvedQty: 2, unitOfMeasure: "No.", estimatedUnitCost: 3800000, procurementMode: "tender" }], institutions: [{ institutionId: gandhiInst._id, institutionName: gandhiInst.name, district: gandhiInst.district, quantities: [{ lineItemIndex: 0, sanctionedQty: 2 }] }], equipmentId: equipment[16]._id, quantity: 2, technicalRequirements: "4K Laparoscopy system for General Surgery & OBG", estimatedTotalValue: 8512000, status: "approved", procurementMode: "tender", digitisedBy: "B. Rajeshwari", approvedBy: "R. Sharma", approvalSteps: approvedSteps("B. Rajeshwari", "tender") },
-    { indentNumber: "IND-2526-0007", indentType: "letter", financialYear: "2025-26", indentDate: ago(40), facilityId: ahNzbInst._id, facilityName: ahNzbInst.name, hodName: "Dist. Medical & Health Officer", lineItems: [{ equipmentId: equipment[13]._id, equipmentName: equipment[13].name, category: equipment[13].category, specifications: "300L horizontal autoclave with vacuum drying", requestedQty: 2, approvedQty: 2, unitOfMeasure: "No.", estimatedUnitCost: 780000 }], quantity: 2, technicalRequirements: "Autoclave for CSSD sterilization", estimatedTotalValue: 1840800, status: "rejected", rejectionReason: "Duplicate indent — already covered under IND-2425-0089", digitisedBy: "S. Padma", approvalSteps: [{ stepNumber: 1, requiredRole: "deo", roleLabel: "DEO", assignedUserName: "S. Padma", assignedUserId: "u1", status: "approved", actionedAt: ago(38) }, { stepNumber: 2, requiredRole: "tgmsidc_user", roleLabel: "TGMSIDC User", assignedUserName: "K. Srinivas", assignedUserId: "u2", status: "rejected", actionedAt: ago(36), comments: "Duplicate indent — already covered under IND-2425-0089" }] },
+    { indentNumber: "IND-2627-0001", indentType: "go", financialYear: "2026-27", indentDate: ago(25), facilityId: gandhiInst._id, facilityName: gandhiInst.name, hodName: "Director of Medical Education", lineItems: [{ equipmentId: equipment[17]._id, equipmentName: equipment[17].name, category: equipment[17].category, specifications: "ECG, SpO2, NIBP, Temp, IBP, EtCO2 with 12.1-inch color touchscreen", requestedQty: 20, approvedQty: 20, unitOfMeasure: "No.", estimatedUnitCost: 215000, procurementMode: "rate_contract", rateContractId: rcs[0]._id }], institutions: [{ institutionId: gandhiInst._id, institutionName: gandhiInst.name, district: gandhiInst.district, quantities: [{ lineItemIndex: 0, sanctionedQty: 20 }], fundSanctionedAmount: 4816000 }], equipmentId: equipment[17]._id, quantity: 20, technicalRequirements: "Multipara patient monitors with EtCO2 for ICU and Emergency wards", estimatedTotalValue: 4816000, status: "po_issued", procurementMode: "rate_contract", rateContractId: rcs[0]._id, digitisedBy: "B. Rajeshwari", createdByUserId: users[0]._id.toString(), approvedBy: "R. Sharma", accountHeadName: "Capital Outlay — Equipment", programmeName: "Procurement of Medical Equipment 2026-27", fundingSourceName: "State Budget", approvalSteps: approvedSteps("B. Rajeshwari", "rate_contract") },
+    { indentNumber: "IND-2627-0002", indentType: "letter", financialYear: "2026-27", indentDate: ago(22), facilityId: osmaniaInst._id, facilityName: osmaniaInst.name, hodName: "Director of Medical Education", lineItems: [{ equipmentId: equipment[8]._id, equipmentName: equipment[8].name, category: equipment[8].category, specifications: "Adult & Paediatric turbine-driven critical care ICU ventilator", requestedQty: 8, approvedQty: 8, unitOfMeasure: "No.", estimatedUnitCost: 1050000, procurementMode: "rate_contract", rateContractId: rcs[1]._id }], institutions: [{ institutionId: osmaniaInst._id, institutionName: osmaniaInst.name, district: osmaniaInst.district, quantities: [{ lineItemIndex: 0, sanctionedQty: 8 }], fundSanctionedAmount: 9408000 }], equipmentId: equipment[8]._id, quantity: 8, technicalRequirements: "ICU Ventilators for newly expanded critical care block", estimatedTotalValue: 9408000, status: "approved", procurementMode: "rate_contract", rateContractId: rcs[1]._id, digitisedBy: "S. Padma", approvedBy: "R. Sharma", accountHeadName: "Capital Outlay — Equipment", programmeName: "NHM Medical Equipment Strengthening", fundingSourceName: "National Health Mission", approvalSteps: approvedSteps("S. Padma", "rate_contract") },
+    { indentNumber: "IND-2627-0003", indentType: "proceeding", financialYear: "2026-27", indentDate: ago(18), facilityId: nimsInst._id, facilityName: nimsInst.name, hodName: "Director, NIMS", lineItems: [{ equipmentId: equipment[3]._id, equipmentName: equipment[3].name, category: equipment[3].category, specifications: "500mA DR system with 17x17 flat panel detector", requestedQty: 2, approvedQty: 2, unitOfMeasure: "No.", estimatedUnitCost: 3500000, procurementMode: "tender" }], institutions: [{ institutionId: nimsInst._id, institutionName: nimsInst.name, district: nimsInst.district, quantities: [{ lineItemIndex: 0, sanctionedQty: 2 }], fundSanctionedAmount: 8260000 }], equipmentId: equipment[3]._id, quantity: 2, technicalRequirements: "500mA Digital X-Ray with DICOM for Radiology", estimatedTotalValue: 8260000, status: "tender_initiated", procurementMode: "tender", digitisedBy: "B. Rajeshwari", approvedBy: "R. Sharma", accountHeadName: "Capital Outlay — Equipment", programmeName: "TSHSP Equipment Modernisation", fundingSourceName: "World Bank — TSHSP", approvalSteps: approvedSteps("B. Rajeshwari", "tender") },
+    { indentNumber: "IND-2627-0004", indentType: "letter", financialYear: "2026-27", indentDate: ago(5), facilityId: mgmInst._id, facilityName: mgmInst.name, hodName: "Director of Medical Education", lineItems: [{ equipmentId: equipment[12]._id, equipmentName: equipment[12].name, category: equipment[12].category, specifications: "5-part differential, 60 samples/hr autoloader", requestedQty: 3, unitOfMeasure: "No.", estimatedUnitCost: 1800000 }, { equipmentId: equipment[11]._id, equipmentName: equipment[11].name, category: equipment[11].category, specifications: "400 tests/hr, ISE module, bi-directional LIS", requestedQty: 2, unitOfMeasure: "No.", estimatedUnitCost: 2500000 }], institutions: [{ institutionId: mgmInst._id, institutionName: mgmInst.name, district: mgmInst.district, quantities: [{ lineItemIndex: 0, sanctionedQty: 3 }, { lineItemIndex: 1, sanctionedQty: 2 }], fundSanctionedAmount: 12272000 }], quantity: 5, technicalRequirements: "Laboratory diagnostics modernization at MGM Warangal", estimatedTotalValue: 12272000, status: "pending_review", digitisedBy: "B. Rajeshwari", accountHeadName: "Capital Outlay — Equipment", programmeName: "NHM Medical Equipment Strengthening", fundingSourceName: "National Health Mission", approvalSteps: pendingSteps("B. Rajeshwari") },
+    { indentNumber: "IND-2627-0005", indentType: "go", financialYear: "2026-27", indentDate: ago(2), facilityId: dhKrmInst._id, facilityName: dhKrmInst.name, hodName: "Dist. Medical & Health Officer", lineItems: [{ equipmentId: equipment[18]._id, equipmentName: equipment[18].name, category: equipment[18].category, specifications: "Biphasic, AED mode, pacing, 12-lead ECG", requestedQty: 5, unitOfMeasure: "No.", estimatedUnitCost: 340000 }, { equipmentId: equipment[6]._id, equipmentName: equipment[6].name, category: equipment[6].category, specifications: "Portable Colour Doppler USG with 2 probes", requestedQty: 2, unitOfMeasure: "No.", estimatedUnitCost: 1450000 }], institutions: [{ institutionId: dhKrmInst._id, institutionName: dhKrmInst.name, district: dhKrmInst.district, quantities: [{ lineItemIndex: 0, sanctionedQty: 5 }, { lineItemIndex: 1, sanctionedQty: 2 }], fundSanctionedAmount: 5152000 }], quantity: 7, technicalRequirements: "Emergency & portable diagnostic equipment for DH Karimnagar", estimatedTotalValue: 5152000, status: "pending_review", digitisedBy: "S. Padma", approvalSteps: pendingSteps("S. Padma") },
+    { indentNumber: "IND-2627-0006", indentType: "letter", financialYear: "2026-27", indentDate: ago(30), facilityId: gandhiInst._id, facilityName: gandhiInst.name, hodName: "Director of Medical Education", lineItems: [{ equipmentId: equipment[16]._id, equipmentName: equipment[16].name, category: equipment[16].category, specifications: "4K laparoscopy tower with 300W LED light source and instruments", requestedQty: 2, approvedQty: 2, unitOfMeasure: "No.", estimatedUnitCost: 3800000, procurementMode: "tender" }], institutions: [{ institutionId: gandhiInst._id, institutionName: gandhiInst.name, district: gandhiInst.district, quantities: [{ lineItemIndex: 0, sanctionedQty: 2 }] }], equipmentId: equipment[16]._id, quantity: 2, technicalRequirements: "4K Laparoscopy system for General Surgery & OBG", estimatedTotalValue: 8512000, status: "approved", procurementMode: "tender", digitisedBy: "B. Rajeshwari", approvedBy: "R. Sharma", approvalSteps: approvedSteps("B. Rajeshwari", "tender") },
+    { indentNumber: "IND-2627-0007", indentType: "letter", financialYear: "2026-27", indentDate: ago(40), facilityId: ahNzbInst._id, facilityName: ahNzbInst.name, hodName: "Dist. Medical & Health Officer", lineItems: [{ equipmentId: equipment[13]._id, equipmentName: equipment[13].name, category: equipment[13].category, specifications: "300L horizontal autoclave with vacuum drying", requestedQty: 2, approvedQty: 2, unitOfMeasure: "No.", estimatedUnitCost: 780000 }], quantity: 2, technicalRequirements: "Autoclave for CSSD sterilization", estimatedTotalValue: 1840800, status: "rejected", rejectionReason: "Duplicate indent — already covered under IND-2526-0089", digitisedBy: "S. Padma", approvalSteps: [{ stepNumber: 1, requiredRole: "deo", roleLabel: "DEO", assignedUserName: "S. Padma", assignedUserId: "u1", status: "approved", actionedAt: ago(38) }, { stepNumber: 2, requiredRole: "tgmsidc_user", roleLabel: "TGMSIDC User", assignedUserName: "K. Srinivas", assignedUserId: "u2", status: "rejected", actionedAt: ago(36), comments: "Duplicate indent — already covered under IND-2526-0089" }] },
   ]);
   console.log(`  → ${indents.length} indents`);
 
@@ -701,9 +733,9 @@ async function main() {
   };
 
   const tenders = await Tender.insertMany([
-    { tenderNumber: "TND-2025-0001", indentId: indents[2]._id, equipmentName: equipment[3].name, equipmentCategory: equipment[3].category, tenderType: "open", portal: "e-procurement", financialYear: "2025-26", stages: mkStages(6), currentStageNumber: 7, specsStatus: "accepted", specsApproverNames: "Dr. K. Manohar, Dr. R. Prasad", tenderInvitedDate: ago(85), bidSubmissionStartDate: ago(80), bidSubmissionEndDate: ago(50), bidsReceivedDate: ago(50), l1VendorName: "Philips India Ltd", l1BidAmount: 3200000, l2VendorName: "BPL Medical Technologies Pvt Ltd", l2BidAmount: 3450000, l3VendorName: "Trivitron Healthcare Pvt Ltd", l3BidAmount: 3680000, status: "evaluation" },
-    { tenderNumber: "TND-2025-0002", indentId: indents[5]._id, equipmentName: equipment[16].name, equipmentCategory: equipment[16].category, tenderType: "open", portal: "e-procurement", financialYear: "2025-26", stages: mkStages(3), currentStageNumber: 4, specsStatus: "changed", tenderInvitedDate: ago(45), bidSubmissionStartDate: ago(40), bidSubmissionEndDate: ago(15), bidsReceivedDate: ago(15), status: "evaluation", notes: "7 bids received, evaluation in progress" },
-    { tenderNumber: "TND-2025-0003", equipmentName: equipment[11].name, equipmentCategory: equipment[11].category, tenderType: "open", portal: "gem", financialYear: "2025-26", stages: mkStages(0), currentStageNumber: 1, tenderInvitedDate: ago(10), bidSubmissionStartDate: ago(8), bidSubmissionEndDate: future(20), status: "invited" },
+    { tenderNumber: "TND-2026-0001", indentId: indents[2]._id, equipmentName: equipment[3].name, equipmentCategory: equipment[3].category, tenderType: "open", portal: "e-procurement", financialYear: "2026-27", stages: mkStages(6), currentStageNumber: 7, specsStatus: "accepted", specsApproverNames: "Dr. K. Manohar, Dr. R. Prasad", tenderInvitedDate: ago(85), bidSubmissionStartDate: ago(80), bidSubmissionEndDate: ago(50), bidsReceivedDate: ago(50), l1VendorName: "Philips India Ltd", l1BidAmount: 3200000, l2VendorName: "BPL Medical Technologies Pvt Ltd", l2BidAmount: 3450000, l3VendorName: "Trivitron Healthcare Pvt Ltd", l3BidAmount: 3680000, status: "evaluation" },
+    { tenderNumber: "TND-2026-0002", indentId: indents[5]._id, equipmentName: equipment[16].name, equipmentCategory: equipment[16].category, tenderType: "open", portal: "e-procurement", financialYear: "2026-27", stages: mkStages(3), currentStageNumber: 4, specsStatus: "changed", tenderInvitedDate: ago(45), bidSubmissionStartDate: ago(40), bidSubmissionEndDate: ago(15), bidsReceivedDate: ago(15), status: "evaluation", notes: "7 bids received, evaluation in progress" },
+    { tenderNumber: "TND-2026-0003", equipmentName: equipment[11].name, equipmentCategory: equipment[11].category, tenderType: "open", portal: "gem", financialYear: "2026-27", stages: mkStages(0), currentStageNumber: 1, tenderInvitedDate: ago(10), bidSubmissionStartDate: ago(8), bidSubmissionEndDate: future(20), status: "invited" },
   ]);
   console.log(`  → ${tenders.length} tenders`);
 
@@ -711,9 +743,9 @@ async function main() {
    * PURCHASE ORDERS
    * ════════════════════════════════════════════════════════════════════════ */
   const pos = await PurchaseOrder.insertMany([
-    { poNumber: "PO-2526-0001", poType: "rc_based", financialYear: "2025-26", poDate: ago(10), indentId: indents[0]._id, indentNumber: "IND-2526-0001", rateContractId: rcs[0]._id, rcNumber: "RC-2526-0001", vendorId: vendors[0]._id, vendorName: "BPL Medical Technologies Pvt Ltd", equipmentId: equipment[17]._id, equipmentName: equipment[17].name, quantity: 20, unitPrice: 215000, gstRate: 12, gstAmount: 516000, unitPriceInclTax: 240800, totalEquipmentCost: 4300000, totalAmount: 4816000, consignees: [{ institutionId: gandhiInst._id, institutionName: gandhiInst.name, district: gandhiInst.district, address: gandhiInst.address, quantity: 20, deliveryStatus: "in_progress" }], psRequired: true, psPercent: 5, psAmount: 240800, deliveryAddress: gandhiInst.name, supplyPeriodDays: 45, expectedDeliveryDate: future(35), approvalStatus: "approved", approvedBy: "R. Sharma (SO Equipment)", approvedDate: ago(8), vendorAcknowledged: true, vendorAckDate: ago(6), vendorExpectedDispatchDate: future(20), generatedBy: "K. Srinivas", status: "approved" },
-    { poNumber: "PO-2526-0002", poType: "rc_based", financialYear: "2025-26", poDate: ago(8), indentId: indents[1]._id, indentNumber: "IND-2526-0002", rateContractId: rcs[1]._id, rcNumber: "RC-2526-0002", vendorId: vendors[1]._id, vendorName: "Philips India Ltd", equipmentId: equipment[8]._id, equipmentName: equipment[8].name, quantity: 8, unitPrice: 1050000, gstRate: 12, gstAmount: 1008000, unitPriceInclTax: 1176000, totalEquipmentCost: 8400000, totalAmount: 9408000, consignees: [{ institutionId: osmaniaInst._id, institutionName: osmaniaInst.name, district: osmaniaInst.district, address: osmaniaInst.address, quantity: 8, deliveryStatus: "pending" }], psRequired: true, psPercent: 5, psAmount: 470400, deliveryAddress: osmaniaInst.name, supplyPeriodDays: 60, expectedDeliveryDate: future(52), approvalStatus: "approved", approvedBy: "R. Sharma (SO Equipment)", approvedDate: ago(6), vendorAcknowledged: true, vendorAckDate: ago(4), generatedBy: "K. Srinivas", status: "approved" },
-    { poNumber: "PO-2526-0003", poType: "rc_based", financialYear: "2025-26", poDate: ago(3), indentId: indents[0]._id, indentNumber: "IND-2526-0001", rateContractId: rcs[2]._id, rcNumber: "RC-2526-0003", vendorId: vendors[2]._id, vendorName: "Mindray Medical India Pvt Ltd", equipmentId: equipment[6]._id, equipmentName: equipment[6].name, quantity: 10, unitPrice: 1450000, gstRate: 12, gstAmount: 1740000, unitPriceInclTax: 1624000, totalEquipmentCost: 14500000, totalAmount: 16240000, consignees: [{ institutionId: gandhiInst._id, institutionName: gandhiInst.name, quantity: 5 }, { institutionId: mgmInst._id, institutionName: mgmInst.name, quantity: 5 }], deliveryAddress: `${gandhiInst.name} / ${mgmInst.name}`, supplyPeriodDays: 30, expectedDeliveryDate: future(27), approvalStatus: "pending", generatedBy: "K. Srinivas", status: "draft" },
+    { poNumber: "PO-2627-0001", poType: "rc_based", financialYear: "2026-27", poDate: ago(10), indentId: indents[0]._id, indentNumber: "IND-2627-0001", rateContractId: rcs[0]._id, rcNumber: "RC-2627-0001", vendorId: vendors[0]._id, vendorName: "BPL Medical Technologies Pvt Ltd", equipmentId: equipment[17]._id, equipmentName: equipment[17].name, quantity: 20, unitPrice: 215000, gstRate: 12, gstAmount: 516000, unitPriceInclTax: 240800, totalEquipmentCost: 4300000, totalAmount: 4816000, consignees: [{ institutionId: gandhiInst._id, institutionName: gandhiInst.name, district: gandhiInst.district, address: gandhiInst.address, quantity: 20, deliveryStatus: "in_progress" }], psRequired: true, psPercent: 5, psAmount: 240800, deliveryAddress: gandhiInst.name, supplyPeriodDays: 45, expectedDeliveryDate: future(35), approvalStatus: "approved", approvedBy: "R. Sharma (SO Equipment)", approvedDate: ago(8), vendorAcknowledged: true, vendorAckDate: ago(6), vendorExpectedDispatchDate: future(20), generatedBy: "K. Srinivas", status: "approved" },
+    { poNumber: "PO-2627-0002", poType: "rc_based", financialYear: "2026-27", poDate: ago(8), indentId: indents[1]._id, indentNumber: "IND-2627-0002", rateContractId: rcs[1]._id, rcNumber: "RC-2627-0002", vendorId: vendors[1]._id, vendorName: "Philips India Ltd", equipmentId: equipment[8]._id, equipmentName: equipment[8].name, quantity: 8, unitPrice: 1050000, gstRate: 12, gstAmount: 1008000, unitPriceInclTax: 1176000, totalEquipmentCost: 8400000, totalAmount: 9408000, consignees: [{ institutionId: osmaniaInst._id, institutionName: osmaniaInst.name, district: osmaniaInst.district, address: osmaniaInst.address, quantity: 8, deliveryStatus: "pending" }], psRequired: true, psPercent: 5, psAmount: 470400, deliveryAddress: osmaniaInst.name, supplyPeriodDays: 60, expectedDeliveryDate: future(52), approvalStatus: "approved", approvedBy: "R. Sharma (SO Equipment)", approvedDate: ago(6), vendorAcknowledged: true, vendorAckDate: ago(4), generatedBy: "K. Srinivas", status: "approved" },
+    { poNumber: "PO-2627-0003", poType: "rc_based", financialYear: "2026-27", poDate: ago(3), indentId: indents[0]._id, indentNumber: "IND-2627-0001", rateContractId: rcs[2]._id, rcNumber: "RC-2627-0003", vendorId: vendors[2]._id, vendorName: "Mindray Medical India Pvt Ltd", equipmentId: equipment[6]._id, equipmentName: equipment[6].name, quantity: 10, unitPrice: 1450000, gstRate: 12, gstAmount: 1740000, unitPriceInclTax: 1624000, totalEquipmentCost: 14500000, totalAmount: 16240000, consignees: [{ institutionId: gandhiInst._id, institutionName: gandhiInst.name, quantity: 5 }, { institutionId: mgmInst._id, institutionName: mgmInst.name, quantity: 5 }], deliveryAddress: `${gandhiInst.name} / ${mgmInst.name}`, supplyPeriodDays: 30, expectedDeliveryDate: future(27), approvalStatus: "pending", generatedBy: "K. Srinivas", status: "draft" },
   ]);
   console.log(`  → ${pos.length} purchase orders`);
 
@@ -721,9 +753,9 @@ async function main() {
    * DELIVERIES
    * ════════════════════════════════════════════════════════════════════════ */
   const deliveries = await Delivery.insertMany([
-    { deliveryTrackingId: "DEL-00001", purchaseOrderId: pos[0]._id, poNumber: "PO-2526-0001", vendorId: vendors[0]._id, vendorName: "BPL Medical Technologies Pvt Ltd", facilityId: gandhiInst._id, facilityName: gandhiInst.name, equipmentId: equipment[17]._id, equipmentName: equipment[17].name, orderedQty: 20, quantity: 20, receivedQty: 12, dispatchDate: ago(5), transporterName: "Blue Dart Express", transporterVehicle: "TS 09 AB 1234", lrGrNumber: "LR-BD-2025-78543", challanNumber: "DC/BPL/2025/0456", invoiceNumber: "INV/BPL/2025-26/0123", expectedDeliveryDate: future(35), deliveredDate: ago(2), receivedBy: "T. Ramaiah", condition: "good", serialNumbers: ["BPL-MPM-10001", "BPL-MPM-10002", "BPL-MPM-10003", "BPL-MPM-10004", "BPL-MPM-10005", "BPL-MPM-10006", "BPL-MPM-10007", "BPL-MPM-10008", "BPL-MPM-10009", "BPL-MPM-10010", "BPL-MPM-10011", "BPL-MPM-10012"], isOnTime: true, delayDays: 0, deliveryCertUploaded: true, deliveryCertDate: ago(1), qaCommitteeName: "Dr. K. Manohar (Chair), Er. K. Srinivas, T. Ramaiah", qaInspectionDate: ago(1), qaInspectionItems: [{ parameterName: "Display clarity (≥12 inch)", result: "pass" }, { parameterName: "ECG waveform accuracy", result: "pass" }, { parameterName: "SpO2 sensor response", result: "pass" }, { parameterName: "NIBP cuff operation", result: "pass" }, { parameterName: "Alarm functionality", result: "pass" }, { parameterName: "Battery backup (≥2 hrs)", result: "pass" }], qaDecision: "accepted", qaComplianceScore: 100, qaNotes: "All 12 units passed QA inspection", acceptanceCertificateIssued: true, acceptanceCertDate: ago(1), installationRequired: true, installationStatus: "pending", warrantyMonths: 36, documentsUploaded: true, status: "accepted" },
-    { deliveryTrackingId: "DEL-00002", purchaseOrderId: pos[0]._id, poNumber: "PO-2526-0001", vendorId: vendors[0]._id, vendorName: "BPL Medical Technologies Pvt Ltd", facilityId: gandhiInst._id, facilityName: gandhiInst.name, equipmentId: equipment[17]._id, equipmentName: equipment[17].name, orderedQty: 20, quantity: 8, receivedQty: 0, expectedDeliveryDate: future(15), status: "expected", condition: "pending_inspection", warrantyMonths: 36 },
-    { deliveryTrackingId: "DEL-00003", purchaseOrderId: pos[1]._id, poNumber: "PO-2526-0002", vendorId: vendors[1]._id, vendorName: "Philips India Ltd", facilityId: osmaniaInst._id, facilityName: osmaniaInst.name, equipmentId: equipment[8]._id, equipmentName: equipment[8].name, orderedQty: 8, quantity: 8, receivedQty: 0, dispatchDate: ago(1), transporterName: "DTDC Logistics", challanNumber: "DC/PHI/2025/0891", expectedDeliveryDate: future(4), status: "dispatched", installationRequired: true, installationStatus: "pending", warrantyMonths: 36 },
+    { deliveryTrackingId: "DEL-00001", purchaseOrderId: pos[0]._id, poNumber: "PO-2627-0001", vendorId: vendors[0]._id, vendorName: "BPL Medical Technologies Pvt Ltd", facilityId: gandhiInst._id, facilityName: gandhiInst.name, equipmentId: equipment[17]._id, equipmentName: equipment[17].name, orderedQty: 20, quantity: 20, receivedQty: 12, dispatchDate: ago(5), transporterName: "Blue Dart Express", transporterVehicle: "TS 09 AB 1234", lrGrNumber: "LR-BD-2025-78543", challanNumber: "DC/BPL/2025/0456", invoiceNumber: "INV/BPL/2026-27/0123", expectedDeliveryDate: future(35), deliveredDate: ago(2), receivedBy: "T. Ramaiah", condition: "good", serialNumbers: ["BPL-MPM-10001", "BPL-MPM-10002", "BPL-MPM-10003", "BPL-MPM-10004", "BPL-MPM-10005", "BPL-MPM-10006", "BPL-MPM-10007", "BPL-MPM-10008", "BPL-MPM-10009", "BPL-MPM-10010", "BPL-MPM-10011", "BPL-MPM-10012"], isOnTime: true, delayDays: 0, deliveryCertUploaded: true, deliveryCertDate: ago(1), qaCommitteeName: "Dr. K. Manohar (Chair), Er. K. Srinivas, T. Ramaiah", qaInspectionDate: ago(1), qaInspectionItems: [{ parameterName: "Display clarity (≥12 inch)", result: "pass" }, { parameterName: "ECG waveform accuracy", result: "pass" }, { parameterName: "SpO2 sensor response", result: "pass" }, { parameterName: "NIBP cuff operation", result: "pass" }, { parameterName: "Alarm functionality", result: "pass" }, { parameterName: "Battery backup (≥2 hrs)", result: "pass" }], qaDecision: "accepted", qaComplianceScore: 100, qaNotes: "All 12 units passed QA inspection", acceptanceCertificateIssued: true, acceptanceCertDate: ago(1), installationRequired: true, installationStatus: "pending", warrantyMonths: 36, documentsUploaded: true, status: "accepted" },
+    { deliveryTrackingId: "DEL-00002", purchaseOrderId: pos[0]._id, poNumber: "PO-2627-0001", vendorId: vendors[0]._id, vendorName: "BPL Medical Technologies Pvt Ltd", facilityId: gandhiInst._id, facilityName: gandhiInst.name, equipmentId: equipment[17]._id, equipmentName: equipment[17].name, orderedQty: 20, quantity: 8, receivedQty: 0, expectedDeliveryDate: future(15), status: "expected", condition: "pending_inspection", warrantyMonths: 36 },
+    { deliveryTrackingId: "DEL-00003", purchaseOrderId: pos[1]._id, poNumber: "PO-2627-0002", vendorId: vendors[1]._id, vendorName: "Philips India Ltd", facilityId: osmaniaInst._id, facilityName: osmaniaInst.name, equipmentId: equipment[8]._id, equipmentName: equipment[8].name, orderedQty: 8, quantity: 8, receivedQty: 0, dispatchDate: ago(1), transporterName: "DTDC Logistics", challanNumber: "DC/PHI/2025/0891", expectedDeliveryDate: future(4), status: "dispatched", installationRequired: true, installationStatus: "pending", warrantyMonths: 36 },
   ]);
   console.log(`  → ${deliveries.length} deliveries`);
 
@@ -731,13 +763,410 @@ async function main() {
    * NOTIFICATIONS
    * ════════════════════════════════════════════════════════════════════════ */
   await Notification.insertMany([
-    { type: "indent_submitted", title: "New Indent Received", message: "Indent IND-2526-0004 from MGM Hospital, Warangal requires review.", userId: users[2]._id.toString(), entityType: "indent", entityId: indents[3]._id.toString(), priority: "high" },
-    { type: "indent_submitted", title: "New Indent Received", message: "Indent IND-2526-0005 from DH Karimnagar requires review.", userId: users[2]._id.toString(), entityType: "indent", entityId: indents[4]._id.toString(), priority: "high" },
-    { type: "delivery_dispatched", title: "Equipment Dispatched", message: "Philips India dispatched 8 ICU Ventilators (PO-2526-0002). Expected arrival in 5 days.", userId: users[9]._id.toString(), entityType: "delivery", entityId: deliveries[2]._id.toString(), priority: "normal" },
-    { type: "rc_expiring", title: "Rate Contract Expiring Soon", message: "RC-2526-0004 for Defibrillator expires in 30 days. Initiate renewal or new tender.", userId: users[3]._id.toString(), entityType: "rate_contract", entityId: rcs[3]._id.toString(), priority: "high" },
-    { type: "po_pending_approval", title: "PO Awaiting Approval", message: "PO-2526-0003 for Syringe Infusion Pump (₹18,81,600) is pending approval.", userId: users[4]._id.toString(), entityType: "purchase_order", entityId: pos[2]._id.toString(), priority: "normal" },
+    { type: "indent_submitted", title: "New Indent Received", message: "Indent IND-2627-0004 from MGM Hospital, Warangal requires review.", userId: users[2]._id.toString(), entityType: "indent", entityId: indents[3]._id.toString(), priority: "high" },
+    { type: "indent_submitted", title: "New Indent Received", message: "Indent IND-2627-0005 from DH Karimnagar requires review.", userId: users[2]._id.toString(), entityType: "indent", entityId: indents[4]._id.toString(), priority: "high" },
+    { type: "delivery_dispatched", title: "Equipment Dispatched", message: "Philips India dispatched 8 ICU Ventilators (PO-2627-0002). Expected arrival in 5 days.", userId: users[9]._id.toString(), entityType: "delivery", entityId: deliveries[2]._id.toString(), priority: "normal" },
+    { type: "rc_expiring", title: "Rate Contract Expiring Soon", message: "RC-2627-0004 for Defibrillator expires in 30 days. Initiate renewal or new tender.", userId: users[3]._id.toString(), entityType: "rate_contract", entityId: rcs[3]._id.toString(), priority: "high" },
+    { type: "po_pending_approval", title: "PO Awaiting Approval", message: "PO-2627-0003 for Syringe Infusion Pump (₹18,81,600) is pending approval.", userId: users[4]._id.toString(), entityType: "purchase_order", entityId: pos[2]._id.toString(), priority: "normal" },
   ]);
   console.log("  → 5 notifications");
+
+  /* ════════════════════════════════════════════════════════════════════════
+   * STATEWIDE EQUIPMENT ASSETS (FR-RPT-ASSET-001)
+   * ════════════════════════════════════════════════════════════════════════ */
+  const assetSpecs = [
+    {
+      eq: equipment[0] || { name: "CT Scan Machine - 16 Slice", category: "Diagnostic Imaging", estimatedUnitCost: 18500000 },
+      make: "GE Healthcare",
+      model: "Revolution ACTs 16",
+      dept: "Radiology",
+      vendor: vendors[1] || vendors[0],
+      poNo: "PO-2425-0018",
+      fy: "2024-25",
+      qty: 3,
+      snPrefix: "GE-CT16-",
+      unitCost: 18500000,
+    },
+    {
+      eq: equipment[1] || { name: "1.5T MRI Scanner System", category: "Diagnostic Imaging", estimatedUnitCost: 45000000 },
+      make: "Philips Healthcare",
+      model: "Ingenia 1.5T S",
+      dept: "Radiology / MRI Centre",
+      vendor: vendors[1] || vendors[0],
+      poNo: "PO-2324-0005",
+      fy: "2023-24",
+      qty: 2,
+      snPrefix: "PHI-MRI15-",
+      unitCost: 45000000,
+    },
+    {
+      eq: equipment[2] || { name: "Color Doppler Ultrasound System", category: "Diagnostic Imaging", estimatedUnitCost: 2800000 },
+      make: "Mindray Medical",
+      model: "DC-70 X-Insight",
+      dept: "Radiology / OBG",
+      vendor: vendors[2] || vendors[0],
+      poNo: "PO-2526-0032",
+      fy: "2025-26",
+      qty: 6,
+      snPrefix: "MDR-USG-",
+      unitCost: 2800000,
+    },
+    {
+      eq: equipment[3] || { name: "Digital Radiography X-Ray (500mA)", category: "Diagnostic Imaging", estimatedUnitCost: 3200000 },
+      make: "Allengers Medical",
+      model: "Pride HP 500mA",
+      dept: "Radiology",
+      vendor: vendors[3] || vendors[0],
+      poNo: "PO-2526-0041",
+      fy: "2025-26",
+      qty: 8,
+      snPrefix: "ALL-XRAY-",
+      unitCost: 3200000,
+    },
+    {
+      eq: equipment[6] || { name: "ICU Ventilator — Advanced", category: "Critical Care", estimatedUnitCost: 1450000 },
+      make: "Mindray Medical",
+      model: "SV300 Pro",
+      dept: "Intensive Care Unit (ICU)",
+      vendor: vendors[2] || vendors[0],
+      poNo: "PO-2526-0077",
+      fy: "2025-26",
+      qty: 15,
+      snPrefix: "MDR-VENT-",
+      unitCost: 1450000,
+    },
+    {
+      eq: equipment[8] || { name: "ICU Ventilator — Invasive / Non-Invasive", category: "Critical Care", estimatedUnitCost: 1050000 },
+      make: "Philips Healthcare",
+      model: "Trilogy EV300",
+      dept: "Respiratory ICU",
+      vendor: vendors[1] || vendors[0],
+      poNo: "PO-2627-0002",
+      fy: "2026-27",
+      qty: 12,
+      snPrefix: "PHI-VENT-",
+      unitCost: 1050000,
+    },
+    {
+      eq: equipment[17] || { name: "Multipara Patient Monitor 5-Para", category: "Critical Care", estimatedUnitCost: 215000 },
+      make: "BPL Medical Technologies",
+      model: "Excello 12",
+      dept: "Emergency & ICU",
+      vendor: vendors[0],
+      poNo: "PO-2627-0001",
+      fy: "2026-27",
+      qty: 24,
+      snPrefix: "BPL-MPM-",
+      unitCost: 215000,
+    },
+    {
+      eq: equipment[18] || { name: "12-Channel ECG Machine", category: "Cardiology", estimatedUnitCost: 340000 },
+      make: "BPL Medical Technologies",
+      model: "Cardiart 9108D",
+      dept: "Cardiology / OPD",
+      vendor: vendors[0],
+      poNo: "PO-2526-0089",
+      fy: "2025-26",
+      qty: 16,
+      snPrefix: "BPL-ECG-",
+      unitCost: 340000,
+    },
+    {
+      eq: equipment[7] || { name: "Haemodialysis Machine", category: "Nephrology", estimatedUnitCost: 2200000 },
+      make: "Fresenius Medical Care",
+      model: "4008 S V10",
+      dept: "Nephrology / Dialysis Unit",
+      vendor: vendors[3] || vendors[0],
+      poNo: "PO-2425-0062",
+      fy: "2024-25",
+      qty: 10,
+      snPrefix: "FMC-DIA-",
+      unitCost: 2200000,
+    },
+    {
+      eq: equipment[14] || { name: "High-End Surgical C-Arm System", category: "Operation Theatre", estimatedUnitCost: 2800000 },
+      make: "Siemens Healthineers",
+      model: "Cios Select",
+      dept: "Operation Theatre / Ortho",
+      vendor: vendors[4] || vendors[1],
+      poNo: "PO-2425-0044",
+      fy: "2024-25",
+      qty: 6,
+      snPrefix: "SIE-CARM-",
+      unitCost: 2800000,
+    },
+    {
+      eq: equipment[11] || { name: "ABG and Electrolyte Analyser", category: "Laboratory", estimatedUnitCost: 650000 },
+      make: "Instrumentation Laboratory",
+      model: "GEM Premier 3500",
+      dept: "Central Pathology Lab",
+      vendor: vendors[2] || vendors[0],
+      poNo: "PO-2526-0091",
+      fy: "2025-26",
+      qty: 8,
+      snPrefix: "IL-ABG-",
+      unitCost: 650000,
+    },
+    {
+      eq: equipment[12] || { name: "Fully Automated Biochemistry Analyser", category: "Laboratory", estimatedUnitCost: 2500000 },
+      make: "Mindray Medical",
+      model: "BS-480 Chemistry Analyser",
+      dept: "Biochemistry Lab",
+      vendor: vendors[2] || vendors[0],
+      poNo: "PO-2324-0088",
+      fy: "2023-24",
+      qty: 5,
+      snPrefix: "MDR-BIO-",
+      unitCost: 2500000,
+    },
+    {
+      eq: equipment[13] || { name: "5-Part Haematology Analyser", category: "Laboratory", estimatedUnitCost: 1800000 },
+      make: "Mindray Medical",
+      model: "BC-5150 5-Part",
+      dept: "Pathology Lab",
+      vendor: vendors[2] || vendors[0],
+      poNo: "PO-2425-0095",
+      fy: "2024-25",
+      qty: 6,
+      snPrefix: "MDR-HEM-",
+      unitCost: 1800000,
+    },
+  ];
+
+  const selectedHospitals = [
+    { inst: gandhiInst, dist: "Hyderabad", hod: "DME", room: "Block-A, Gr Floor" },
+    { inst: osmaniaInst, dist: "Hyderabad", hod: "DME", room: "Main Surgical Block" },
+    { inst: mgmInst, dist: "Warangal", hod: "DME", room: "Emergency & Trauma Centre" },
+    { inst: dhKrmInst, dist: "Karimnagar", hod: "DH", room: "MCH Wing, 1st Floor" },
+    { inst: ahNzbInst, dist: "Nizamabad", hod: "DME", room: "ICU Complex" },
+    { inst: institutions.find(i => i.name.toLowerCase().includes("adilab")) || institutions[6] || gandhiInst, dist: "Adilabad", hod: "DME", room: "Central Diagnostic Wing" },
+    { inst: institutions.find(i => i.name.toLowerCase().includes("mahabub")) || institutions[7] || osmaniaInst, dist: "Mahabubnagar", hod: "TVVP", room: "Operation Theatre Complex" },
+    { inst: institutions.find(i => i.name.toLowerCase().includes("khammam")) || institutions[8] || mgmInst, dist: "Khammam", hod: "TVVP", room: "Specialty Care Ward" },
+    { inst: institutions.find(i => i.name.toLowerCase().includes("siddipet")) || institutions[9] || gandhiInst, dist: "Siddipet", hod: "DME", room: "Super Specialty Block" },
+  ];
+
+  const statusesDist: Array<{ status: any; weight: number }> = [
+    { status: "active", weight: 75 },
+    { status: "under_maintenance", weight: 10 },
+    { status: "under_repair", weight: 8 },
+    { status: "breakdown", weight: 6 },
+    { status: "inactive", weight: 5 },
+    { status: "transferred", weight: 4 },
+    { status: "decommissioned", weight: 3 },
+    { status: "disposed", weight: 2 },
+  ];
+
+  function pickStatus(seq: number): any {
+    if (seq % 35 === 0) return "disposed";
+    if (seq % 29 === 0) return "decommissioned";
+    if (seq % 23 === 0) return "transferred";
+    if (seq % 17 === 0) return "inactive";
+    if (seq % 13 === 0) return "breakdown";
+    if (seq % 9 === 0) return "under_repair";
+    if (seq % 7 === 0) return "under_maintenance";
+    return "active";
+  }
+
+  const assetDocs: any[] = [];
+  let globalAssetSeq = 1;
+
+  for (let specIdx = 0; specIdx < assetSpecs.length; specIdx++) {
+    const spec = assetSpecs[specIdx];
+    const totalUnits = spec.qty;
+
+    for (let u = 0; u < totalUnits; u++) {
+      const assetSeq = globalAssetSeq++;
+      const assetTag = `AST-2026-${String(assetSeq).padStart(5, "0")}`;
+      const serialNumber = `${spec.snPrefix}${String(1000 + assetSeq)}`;
+      const hospMeta = selectedHospitals[assetSeq % selectedHospitals.length];
+      const status = pickStatus(assetSeq);
+
+      // Financial year & date calculations
+      const isCurrentFY = spec.fy === "2026-27";
+      const isPrevFY = spec.fy === "2025-26";
+      const daysBack = isCurrentFY ? (15 + (assetSeq % 80)) : isPrevFY ? (180 + (assetSeq % 180)) : (400 + (assetSeq % 300));
+      const receiptDate = ago(daysBack);
+      const installDate = new Date(receiptDate.getTime() + 4 * 86400000);
+      const commDate = new Date(receiptDate.getTime() + 7 * 86400000);
+
+      // Warranty calculation (typically 36 months)
+      const warrantyMonths = 36;
+      const warrantyStartDate = installDate;
+      const warrantyEndDate = new Date(warrantyStartDate.getTime() + warrantyMonths * 30 * 86400000);
+      const isWarrantyExpired = warrantyEndDate.getTime() < Date.now();
+      const isWarrantyExpiringSoon = !isWarrantyExpired && (warrantyEndDate.getTime() - Date.now() < 30 * 86400000);
+      const warrantyStatus = isWarrantyExpired ? "expired" : isWarrantyExpiringSoon ? "expiring_soon" : "active";
+
+      // CAMC calculation (applicable especially if warranty is nearing expiry or expired)
+      const camcApplicable = (assetSeq % 2 === 0) || isWarrantyExpired;
+      let camcStatus = "not_applicable";
+      let camcStartDate: Date | undefined;
+      let camcEndDate: Date | undefined;
+      let camcVendor: string | undefined;
+
+      if (camcApplicable) {
+        camcVendor = spec.vendor?.name || "Authorized OEM Service Provider";
+        if (isWarrantyExpired) {
+          camcStartDate = warrantyEndDate;
+          camcEndDate = new Date(camcStartDate.getTime() + 365 * 86400000 * 2);
+          const isCamcExp = camcEndDate.getTime() < Date.now();
+          const isCamcSoon = !isCamcExp && (camcEndDate.getTime() - Date.now() < 30 * 86400000);
+          camcStatus = isCamcExp ? "expired" : isCamcSoon ? "expiring_soon" : "active";
+        } else {
+          camcStatus = "active";
+          camcStartDate = warrantyEndDate;
+          camcEndDate = new Date(warrantyEndDate.getTime() + 365 * 86400000 * 3);
+        }
+      }
+
+      // Lifecycle history
+      const history: any[] = [
+        {
+          event: "PO Issued",
+          timestamp: new Date(receiptDate.getTime() - 30 * 86400000),
+          user: "R. Sharma (SO Equipment)",
+          role: "so_equipment",
+          remarks: `Issued under ${spec.poNo} for ${spec.eq.name}`,
+        },
+        {
+          event: "Consignment Delivered",
+          timestamp: receiptDate,
+          user: hospMeta.inst.contactPerson || "Consignee Store Keeper",
+          role: "consignee",
+          remarks: `Received physically in sound condition at ${hospMeta.inst.name}`,
+        },
+        {
+          event: "GRN Confirmed",
+          timestamp: new Date(receiptDate.getTime() + 2 * 86400000),
+          user: hospMeta.inst.superintendentName || "Medical Superintendent",
+          role: "consignee",
+          remarks: `GRN confirmed against PO line. Unit serial verified: ${serialNumber}`,
+        },
+        {
+          event: "Asset Record Generated",
+          timestamp: new Date(receiptDate.getTime() + 2 * 86400000),
+          user: "TGMSIDC Asset Engine",
+          role: "admin",
+          remarks: `Individual physical asset created with ID ${assetTag}`,
+        },
+        {
+          event: "QA Accepted",
+          timestamp: installDate,
+          user: "Hospital QA Committee",
+          role: "tgmsidc_user",
+          remarks: "100% parameter inspection passed. Electrical safety test certified.",
+        },
+        {
+          event: "Installed & Commissioned",
+          timestamp: commDate,
+          user: "Biomedical Engineer & OEM Engineer",
+          role: "tgmsidc_user",
+          remarks: `Installed at ${hospMeta.room}. Training provided to hospital clinical staff.`,
+        },
+      ];
+
+      if (status === "under_maintenance" || status === "under_repair") {
+        history.push({
+          event: status === "under_maintenance" ? "Routine Preventive Maintenance" : "Breakdown Ticket Logged",
+          timestamp: ago(3),
+          user: "Biomedical Engineer",
+          role: "tgmsidc_user",
+          remarks: status === "under_maintenance" ? "Quarterly OEM preventive maintenance calibration in progress." : "Error code E-42 logged. Service engineer attending.",
+        });
+      } else if (status === "breakdown") {
+        history.push({
+          event: "Out of Service / Breakdown",
+          timestamp: ago(5),
+          user: "Department In-Charge",
+          role: "consignee",
+          remarks: "Component failure reported. Awaiting critical replacement PCB module from OEM.",
+        });
+      } else if (status === "transferred") {
+        history.push({
+          event: "Inter-Hospital Transfer",
+          timestamp: ago(15),
+          user: "P. Narayan (GM Equipment)",
+          role: "gm_equipment",
+          remarks: `Formally transferred from District Hospital to ${hospMeta.inst.name} per DME order.`,
+        });
+      } else if (status === "decommissioned" || status === "disposed") {
+        history.push({
+          event: status === "decommissioned" ? "Decommissioning Approved" : "Asset Disposal Completed",
+          timestamp: ago(10),
+          user: "Executive Director, TGMSIDC",
+          role: "executive_director",
+          remarks: status === "decommissioned" ? "Equipment reached end of economic clinical lifespan. Condemnation committee certified." : "Public auction disposal protocol executed as per statutory guidelines.",
+        });
+      }
+
+      assetDocs.push({
+        assetTag,
+        serialNumber,
+        equipmentId: spec.eq._id || new mongoose.Types.ObjectId(),
+        equipmentName: spec.eq.name,
+        category: spec.eq.category || "Medical Equipment",
+        department: spec.dept,
+        make: spec.make,
+        model: spec.model,
+        status,
+        institutionId: hospMeta.inst._id,
+        institutionName: hospMeta.inst.name,
+        district: hospMeta.dist,
+        hodDirectorate: hospMeta.hod,
+        currentLocation: `${spec.dept} — ${hospMeta.room}`,
+        previousLocations: status === "transferred" ? [
+          {
+            institutionName: "District Hospital, Medak",
+            district: "Medak",
+            transferredDate: ago(25),
+            reason: "Surplus redistribution to tertiary facility under DME instruction",
+            transferDocRef: "TGMSIDC/TR/2026/089",
+          }
+        ] : [],
+        vendorId: spec.vendor._id,
+        vendorName: spec.vendor.name,
+        rateContractId: rcs[0]?._id,
+        rcNumber: isCurrentFY ? "RC-2627-0001" : isPrevFY ? "RC-2526-0014" : "RC-2425-0010",
+        tenderRef: `TND-${spec.fy}-001`,
+        purchaseOrderId: pos[0]?._id,
+        poNumber: spec.poNo,
+        poDate: new Date(receiptDate.getTime() - 35 * 86400000),
+        orderedQuantity: totalUnits,
+        procurementValue: spec.unitCost,
+        financialYear: spec.fy,
+        indentNumber: `IND-${spec.fy}-0012`,
+        deliveryTrackingId: `DEL-${spec.fy.replace("-", "")}-${String(assetSeq).padStart(4, "0")}`,
+        deliveryDate: receiptDate,
+        grnNumber: `GRN-${spec.fy.replace("-", "")}-${String(assetSeq).padStart(4, "0")}`,
+        grnDate: new Date(receiptDate.getTime() + 2 * 86400000),
+        qaStatus: "accepted",
+        qaDate: installDate,
+        qaCertificateUrl: `/docs/qa/${assetTag}_qa_cert.pdf`,
+        qaObservations: "Verified conforming to TGMSIDC technical specifications.",
+        installationDate: installDate,
+        commissioningDate: commDate,
+        trainingCompleted: true,
+        trainingDate: commDate,
+        warrantyStartDate,
+        warrantyEndDate,
+        warrantyMonths,
+        warrantyStatus,
+        camcApplicable,
+        camcVendor,
+        camcStartDate,
+        camcEndDate,
+        camcStatus,
+        registeredBy: "TGMSIDC Equipment Wing",
+        registeredDate: receiptDate,
+        lastUpdatedDate: new Date(),
+        remarks: `Physical equipment unit ${assetSeq} procured under ${spec.poNo} and deployed at ${hospMeta.inst.name}.`,
+        lifecycleHistory: history,
+      });
+    }
+  }
+
+  const seededAssets = await EquipmentAsset.insertMany(assetDocs);
+  console.log(`  → ${seededAssets.length} Statewide Equipment Assets (FR-RPT-ASSET-001)`);
 
   console.log("\n✅ Seed complete!");
   await mongoose.disconnect();

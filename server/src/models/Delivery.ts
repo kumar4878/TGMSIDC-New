@@ -31,6 +31,11 @@ export interface IDelivery extends Document {
   orderedQty: number;
   quantity: number;
   receivedQty: number;
+  acceptedQty: number;
+  shortageQty: number;
+  damagedQty: number;
+  rejectedQty: number;
+  returnedQty: number;
 
   /* Dispatch info */
   dispatchDate?: Date;
@@ -49,22 +54,35 @@ export interface IDelivery extends Document {
   isOnTime: boolean;
   delayDays: number;
 
-  /* Delivery certificate */
+  /* Delivery certificate (DCC) */
   deliveryCertUploaded: boolean;
   deliveryCertDate?: Date;
   deliveryCertFilename: string;
+  dccVerified?: boolean;
+  dccVerifiedBy?: string;
+  dccVerifiedDate?: Date;
+  dccVerificationNotes?: string;
 
   /* Discrepancies */
   discrepancies: any[];
   discrepancyNotes: string;
 
-  /* QA / Inspection */
+  /* QA / Inspection & Reinspection */
   qaInspectionItems: any[];
   qaCommitteeName: string;
   qaInspectionDate?: Date;
   qaDecision: string;
   qaComplianceScore: number;
   qaNotes: string;
+  isReinspection?: boolean;
+  reinspectionCount?: number;
+  reinspectionDecision?: string;
+  reinspectionDate?: Date;
+  reinspectionNotes?: string;
+
+  /* Asset Registration */
+  equipmentRegistered?: boolean;
+  registeredAssetTags?: string[];
 
   /* Acceptance */
   acceptanceCertificateIssued: boolean;
@@ -85,6 +103,11 @@ export interface IDelivery extends Document {
 
   /* Payment */
   paymentStatus: string;
+
+  /* GRN & Annexure 6 */
+  grnNumber?: string;
+  grnDate?: Date;
+  annexure6?: any;
 
   documentsUploaded: boolean;
   status: string;
@@ -107,6 +130,11 @@ const DeliverySchema = new Schema<IDelivery>(
     orderedQty: { type: Number, default: 0 },
     quantity: { type: Number, required: true },
     receivedQty: { type: Number, default: 0 },
+    acceptedQty: { type: Number, default: 0 },
+    shortageQty: { type: Number, default: 0 },
+    damagedQty: { type: Number, default: 0 },
+    rejectedQty: { type: Number, default: 0 },
+    returnedQty: { type: Number, default: 0 },
 
     dispatchDate: { type: Date },
     transporterName: { type: String, default: "" },
@@ -118,7 +146,7 @@ const DeliverySchema = new Schema<IDelivery>(
     expectedDeliveryDate: { type: Date },
     deliveredDate: { type: Date },
     receivedBy: { type: String, default: "" },
-    condition: { type: String, default: "good", enum: ["good", "damaged", "shortage", "pending_inspection"] },
+    condition: { type: String, default: "good" },
     serialNumbers: [{ type: String }],
     isOnTime: { type: Boolean, default: true },
     delayDays: { type: Number, default: 0 },
@@ -126,6 +154,10 @@ const DeliverySchema = new Schema<IDelivery>(
     deliveryCertUploaded: { type: Boolean, default: false },
     deliveryCertDate: { type: Date },
     deliveryCertFilename: { type: String, default: "" },
+    dccVerified: { type: Boolean, default: false },
+    dccVerifiedBy: { type: String, default: "" },
+    dccVerifiedDate: { type: Date },
+    dccVerificationNotes: { type: String, default: "" },
 
     discrepancies: [DiscrepancySchema],
     discrepancyNotes: { type: String, default: "" },
@@ -133,9 +165,18 @@ const DeliverySchema = new Schema<IDelivery>(
     qaInspectionItems: [QAInspectionSchema],
     qaCommitteeName: { type: String, default: "" },
     qaInspectionDate: { type: Date },
-    qaDecision: { type: String, default: "pending", enum: ["pending", "accepted", "conditional", "rejected"] },
+    qaDecision: { type: String, default: "pending" },
     qaComplianceScore: { type: Number, default: 0 },
     qaNotes: { type: String, default: "" },
+
+    isReinspection: { type: Boolean, default: false },
+    reinspectionCount: { type: Number, default: 0 },
+    reinspectionDecision: { type: String, default: "" },
+    reinspectionDate: { type: Date },
+    reinspectionNotes: { type: String, default: "" },
+
+    equipmentRegistered: { type: Boolean, default: false },
+    registeredAssetTags: [{ type: String }],
 
     acceptanceCertificateIssued: { type: Boolean, required: true, default: false },
     acceptanceCertDate: { type: Date },
@@ -152,6 +193,10 @@ const DeliverySchema = new Schema<IDelivery>(
     warrantyMonths: { type: Number, default: 12 },
 
     paymentStatus: { type: String, default: "not_paid", enum: ["not_paid", "partial", "paid"] },
+
+    grnNumber: { type: String, default: "" },
+    grnDate: { type: Date },
+    annexure6: { type: Schema.Types.Mixed },
 
     documentsUploaded: { type: Boolean, required: true, default: false },
     status: { type: String, required: true, default: "expected" },

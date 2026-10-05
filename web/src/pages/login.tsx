@@ -33,6 +33,8 @@ export default function Login() {
         navigate("/indents");
       } else if (loggedInUser.role === "consignee") {
         navigate("/deliveries");
+      } else if (loggedInUser.role === "tgmsidc_user" || uname.includes("tgmsidc")) {
+        navigate("/indents");
       } else {
         navigate("/");
       }
@@ -169,6 +171,8 @@ export default function Login() {
                 )}
               </Button>
             </form>
+
+
           </div>
         </div>
       </div>

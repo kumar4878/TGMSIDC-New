@@ -33,7 +33,7 @@ const INIT_WORKFLOWS: ApprovalWorkflow[] = [
   {
     id: "indent_approval",
     name: "Indent Approval Workflow",
-    description: "End-to-end statutory approval chain for procurement indents raised by HoD/institutions per V9 Process Book",
+    description: "End-to-end statutory approval chain for procurement indents raised by HoD/institutions",
     entityType: "indent",
     levels: [
       { id: 1, level: 1, role: "deo", roleLabel: "DEO (Initiator)", minAmount: 0, maxAmount: null, required: true, slaHours: 24, escalationHours: 48 },

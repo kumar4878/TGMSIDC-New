@@ -1,4 +1,5 @@
-import { useState } from "react";
+import React, { useState } from "react";
+import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,8 +15,8 @@ import * as api from "@/lib/api";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Truck, ShoppingCart, CheckCircle2, Clock, Upload, ShieldCheck, AlertCircle,
-  FileText, IndianRupee, ArrowRight, Building2, Eye, MessageSquare, AlertTriangle,
+  Truck, ShoppingCart, CheckCircle2, Clock, Upload, ShieldCheck, AlertCircle, Lock,
+  FileText, IndianRupee, ArrowRight, Building2, Eye, MessageSquare, AlertTriangle, ShieldAlert,
   FileCheck, BarChart3, Award, TrendingUp, TrendingDown, Minus, Star, Loader2,
 } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
@@ -51,7 +52,7 @@ function VendorPOSummaryReport() {
   return (
     <div className="space-y-5">
       <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
-        <strong>R-11: Vendor PO Summary Report (Process Book §13)</strong> — Self-service view of all POs allocated to your firm with acknowledgement, dispatch, fulfilment, and payment status.
+        <strong>R-11: Vendor PO Summary Report</strong> — Self-service view of all POs allocated to your firm with acknowledgement, dispatch, fulfilment, and payment status.
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -81,7 +82,7 @@ function VendorPOSummaryReport() {
         <CardHeader className="pb-2 bg-muted/20 border-b">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Purchase Order Register — Vendor Self-View (§13 R-11)
+              Purchase Order Register — Vendor Self-View (R-11)
             </CardTitle>
             <Badge variant="outline" className="text-xs">Rule: Acknowledge within 7 calendar days</Badge>
           </div>
@@ -172,7 +173,7 @@ function VendorCertStatusReport() {
   return (
     <div className="space-y-5">
       <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
-        <strong>R-12: Vendor Delivery &amp; Certificate Status Report (Process Book §13)</strong> — Track delivery timelines, QA inspection outcomes, and DCC certificate upload compliance for all your consignments.
+        <strong>R-12: Vendor Delivery &amp; Certificate Status Report</strong> — Track delivery timelines, QA inspection outcomes, and DCC certificate upload compliance for all your consignments.
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -201,7 +202,7 @@ function VendorCertStatusReport() {
         <CardHeader className="pb-2 bg-muted/20 border-b">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Delivery &amp; DCC Compliance Register (§13 R-12)
+              Delivery &amp; DCC Compliance Register (R-12)
             </CardTitle>
             <Badge variant="outline" className="text-xs">SLA: DCC upload within 7 working days of delivery</Badge>
           </div>
@@ -296,7 +297,7 @@ function VendorSelfViewReport({ currentVendor }: { currentVendor: any }) {
   return (
     <div className="space-y-5">
       <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
-        <strong>R-13: Vendor Performance Self-View Report (Process Book §13)</strong> — Monthly period-wise procurement scorecard. Weighted formula: On-time Delivery 40% + QA First-Pass 35% + Compliance 25%. Target: ≥80/100.
+        <strong>R-13: Vendor Performance Self-View Report</strong> — Monthly period-wise procurement scorecard. Weighted formula: On-time Delivery 40% + QA First-Pass 35% + Compliance 25%. Target: ≥80/100.
       </div>
 
       {/* Score Summary Banner */}
@@ -331,7 +332,7 @@ function VendorSelfViewReport({ currentVendor }: { currentVendor: any }) {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            6-Month Performance Trend (§13 R-13)
+            6-Month Performance Trend (R-13)
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -922,7 +923,7 @@ export default function VendorPortal() {
                               {!po.vendorAcknowledged ? (
                                 <Button
                                   size="sm"
-                                  className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium shadow-xs"
+                                  className="h-7 text-xs font-medium shadow-xs"
                                   onClick={() => {
                                     setAckModal(po);
                                     const d = new Date();
@@ -950,11 +951,8 @@ export default function VendorPortal() {
                               ) : (
                                 <Button
                                   size="sm"
-                                  className={`h-7 text-xs gap-1 ${
-                                    linkedDelivery
-                                      ? "bg-slate-700 hover:bg-slate-800 text-white"
-                                      : "bg-[#186812] hover:bg-[#124e0d] text-white shadow-xs"
-                                  }`}
+                                  variant={linkedDelivery ? "outline" : "default"}
+                                  className="h-7 text-xs gap-1"
                                   onClick={() => {
                                     const dcNo = `DC/${po.poNumber?.slice(-4) || "001"}/${Math.floor(1000 + Math.random() * 9000)}`;
                                     const invNo = `INV/${format(new Date(), "yyyy")}-${(Number(format(new Date(), "yy")) + 1)}/${Math.floor(100 + Math.random() * 900)}`;
@@ -1030,96 +1028,126 @@ export default function VendorPortal() {
                       const dccOverdue = isDelivered && !d.deliveryCertUploaded && daysSinceDel > 7;
 
                       return (
-                        <tr key={d.id} className="hover:bg-[#f8fafc]/80 transition-colors">
-                          <td className="p-3 font-mono text-xs font-bold text-[#2563eb]">{d.deliveryTrackingId}</td>
-                          <td className="p-3 font-mono text-xs text-[#6b7a93]">{d.poNumber}</td>
-                          <td className="p-3 font-medium text-[#152340]">{d.equipmentName}</td>
-                          <td className="p-3 text-center font-bold font-mono text-[#152340]">{d.quantity}</td>
-                          <td className="p-3 text-xs text-[#6b7a93]">{d.facilityName}</td>
-                          <td className="p-3 text-center">
-                            {d.qaDecision === "accepted" ? (
-                              <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">✓ QA Passed</Badge>
-                            ) : d.qaDecision === "conditional" ? (
-                              <Badge className="bg-amber-100 text-amber-800 border-0 text-[10px]">⚠ Conditional</Badge>
-                            ) : d.qaDecision === "rejected" ? (
-                              <Badge className="bg-red-100 text-red-800 border-0 text-[10px]">✗ QA Rejected</Badge>
-                            ) : (
-                              <Badge className="bg-slate-100 text-slate-700 border-0 text-[10px]">Pending Inspection</Badge>
-                            )}
-                          </td>
-                          <td className="p-3 text-center">
-                            <div className="flex items-center justify-center gap-1 text-[11px]">
-                              {d.deliveryCertUploaded ? (
-                                <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">✓ DCC</Badge>
+                        <React.Fragment key={d.id}>
+                          <tr className="hover:bg-[#f8fafc]/80 transition-colors">
+                            <td className="p-3 font-mono text-xs font-bold text-[#2563eb]">{d.deliveryTrackingId}</td>
+                            <td className="p-3 font-mono text-xs text-[#6b7a93]">{d.poNumber}</td>
+                            <td className="p-3 font-medium text-[#152340]">{d.equipmentName}</td>
+                            <td className="p-3 text-center font-bold font-mono text-[#152340]">{d.quantity}</td>
+                            <td className="p-3 text-xs text-[#6b7a93]">{d.facilityName}</td>
+                            <td className="p-3 text-center">
+                              {d.qaDecision === "accepted" ? (
+                                <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">✓ QA Passed</Badge>
+                              ) : d.qaDecision === "conditional" ? (
+                                <Badge className="bg-amber-100 text-amber-800 border-0 text-[10px]">⚠ Conditional</Badge>
+                              ) : d.qaDecision === "rejected" ? (
+                                <Badge className="bg-red-100 text-red-800 border-0 text-[10px]">✗ QA Rejected</Badge>
                               ) : (
-                                <Badge className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px]">DCC Pending</Badge>
+                                <Badge className="bg-slate-100 text-slate-700 border-0 text-[10px]">Pending Inspection</Badge>
                               )}
-                              {d.installationStatus === "complete" ? (
-                                <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">✓ Installed</Badge>
-                              ) : (
-                                <Badge className="bg-slate-100 text-slate-600 border-0 text-[10px]">Install Pending</Badge>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-3 text-center">
-                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                              {d.status === "dispatched" && (
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center gap-1 text-[11px]">
+                                {d.deliveryCertUploaded ? (
+                                  <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">✓ DCC</Badge>
+                                ) : (
+                                  <Badge className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px]">DCC Pending</Badge>
+                                )}
+                                {d.installationStatus === "complete" ? (
+                                  <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">✓ Installed</Badge>
+                                ) : (
+                                  <Badge className="bg-slate-100 text-slate-600 border-0 text-[10px]">Install Pending</Badge>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                {d.status === "dispatched" && (
+                                  <Button
+                                    size="sm"
+                                    className="h-7 text-xs gap-1 shadow-xs font-medium"
+                                    onClick={() => handleConfirmReceipt(d)}
+                                  >
+                                    <CheckCircle2 className="h-3 w-3" /> Confirm Receipt
+                                  </Button>
+                                )}
                                 <Button
                                   size="sm"
-                                  className="h-7 text-xs gap-1 bg-amber-600 hover:bg-amber-700 text-white shadow-xs font-medium"
-                                  onClick={() => handleConfirmReceipt(d)}
+                                  variant="outline"
+                                  disabled={!d.deliveryCertUploaded}
+                                  title={!d.deliveryCertUploaded ? "DCC upload required before QA routing" : ""}
+                                  className={`h-7 text-xs gap-1 border-blue-300 text-blue-800 hover:bg-blue-50 ${!d.deliveryCertUploaded ? "opacity-50 cursor-not-allowed" : ""}`}
+                                  onClick={() => {
+                                    setQaModal(d);
+                                    setQaForm({
+                                      inspectorName: "Er. K. Suresh",
+                                      committeeName: "Institutional Biomedical Technical Committee",
+                                      qaDecision: "accepted",
+                                      qaComplianceScore: 100,
+                                      qaNotes: "Consignment physically verified, tested against specification sheet, electrical safety certified, and user training completed satisfactorily.",
+                                      rectificationDueDate: "",
+                                    });
+                                  }}
                                 >
-                                  <CheckCircle2 className="h-3 w-3" /> Confirm Receipt
+                                  {!d.deliveryCertUploaded ? (
+                                    <Lock className="h-3 w-3 text-slate-500" />
+                                  ) : (
+                                    <ShieldCheck className="h-3 w-3 text-blue-600" />
+                                  )}
+                                  {d.qaDecision === "accepted" ? "QA Passed" : "Conduct QA"}
                                 </Button>
-                              )}
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs gap-1 border-blue-300 text-blue-800 hover:bg-blue-50"
-                                onClick={() => {
-                                  setQaModal(d);
-                                  setQaForm({
-                                    inspectorName: "Er. K. Suresh",
-                                    committeeName: "Institutional Biomedical Technical Committee",
-                                    qaDecision: "accepted",
-                                    qaComplianceScore: 100,
-                                    qaNotes: "Consignment physically verified, tested against specification sheet, electrical safety certified, and user training completed satisfactorily.",
-                                    rectificationDueDate: "",
-                                  });
-                                }}
-                              >
-                                <ShieldCheck className="h-3 w-3 text-blue-600" />
-                                {d.qaDecision === "accepted" ? "QA Passed" : "Conduct QA"}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant={d.deliveryCertUploaded ? "outline" : "default"}
-                                className={`h-7 text-xs gap-1.5 ${!d.deliveryCertUploaded ? "bg-[#186812] hover:bg-[#124e0d] text-white shadow-xs font-medium" : "border-[#e4eaf2] text-[#152340] hover:bg-[#f8fafc]"}`}
-                                onClick={() => {
-                                  setDocModal(d);
-                                  setDocForm({
-                                    docType: "dcc",
-                                    filename: `DCC_Signed_${d.deliveryTrackingId}.pdf`,
-                                    officerName: "Dr. K. Srinivas",
-                                    notes: "DCC signed and stamped by Medical Superintendent at hospital site.",
-                                  });
-                                }}
-                              >
-                                <Upload className="h-3 w-3" /> {d.deliveryCertUploaded ? "Add Document" : "Upload Docs"}
-                              </Button>
-                              {d.qaDecision === "accepted" && d.deliveryCertUploaded && (
                                 <Button
                                   size="sm"
-                                  variant="ghost"
-                                  className="h-7 text-xs text-[#2563eb] hover:bg-blue-50 font-medium"
-                                  onClick={() => setActiveTab("payments")}
+                                  variant={d.deliveryCertUploaded ? "outline" : "default"}
+                                  className="h-7 text-xs gap-1.5 font-medium"
+                                  onClick={() => {
+                                    setDocModal(d);
+                                    setDocForm({
+                                      docType: "dcc",
+                                      filename: `DCC_Signed_${d.deliveryTrackingId}.pdf`,
+                                      officerName: "Dr. K. Srinivas",
+                                      notes: "DCC signed and stamped by Medical Superintendent at hospital site.",
+                                    });
+                                  }}
                                 >
-                                  Release Payment →
+                                  <Upload className="h-3 w-3" /> {d.deliveryCertUploaded ? "Add Document" : "Upload Docs"}
                                 </Button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
+                                {d.qaDecision === "accepted" && d.deliveryCertUploaded && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 text-xs text-[#2563eb] hover:bg-blue-50 font-medium"
+                                    onClick={() => setActiveTab("payments")}
+                                  >
+                                    Release Payment →
+                                  </Button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                          {!d.deliveryCertUploaded && isDelivered && (
+                            <tr>
+                              <td colSpan={8} className="p-2 pt-0">
+                                {dccOverdue ? (
+                                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-900 flex items-center gap-2">
+                                    <ShieldAlert className="h-4 w-4 shrink-0" />
+                                    <span>DCC Upload Overdue — Escalation initiated</span>
+                                  </div>
+                                ) : (
+                                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                                      <span>⚠️ Delivery Completion Certificate Required — Hospital Medical Superintendent must sign and stamp the DCC. Vendor must upload within 7 working days of delivery.</span>
+                                    </div>
+                                    <div className="font-bold whitespace-nowrap">
+                                      {Math.max(0, 7 - daysSinceDel)} days remaining
+                                    </div>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       );
                     })
                   )}
@@ -1147,8 +1175,8 @@ export default function VendorPortal() {
           <div className="bg-white border border-[#e4eaf2] rounded-xl shadow-xs overflow-hidden">
             <div className="p-3 border-b border-[#e4eaf2] bg-[#f8fafc] flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-[#152340]">Purchase Order Payment Register &amp; Release Actions</h3>
-                <p className="text-xs text-[#6b7a93]">Two-Tranche verification: 90% against verified DCC/QA, and 10% post 3-month performance verification</p>
+                <h3 className="text-sm font-bold text-[#152340]">Purchase Order Payment Register (Reporting Status)</h3>
+                <p className="text-xs text-[#6b7a93]">Statutory manual disbursement tracking: Paid / Not-Paid against verified physical DCC and QA compliance</p>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -1159,29 +1187,23 @@ export default function VendorPortal() {
                     <th className="p-3 text-left">Contracted Vendor</th>
                     <th className="p-3 text-left">Equipment</th>
                     <th className="p-3 text-right">PO Total Value</th>
-                    <th className="p-3 text-center">Tranche 1 (90%)</th>
-                    <th className="p-3 text-center">Tranche 2 (10% Retention)</th>
+                    <th className="p-3 text-center">Fulfilment Status</th>
+                    <th className="p-3 text-center">Payment Status</th>
+                    <th className="p-3 text-left">Bank UTR / Date</th>
                     <th className="p-3 text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#e4eaf2]">
                   {vendorPOs.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-[#6b7a93] text-sm">
-                        No purchase orders available for payment processing.
+                      <td colSpan={8} className="p-8 text-center text-[#6b7a93] text-sm">
+                        No purchase orders available for payment tracking.
                       </td>
                     </tr>
                   ) : (
                     vendorPOs.map((po: any) => {
                       const total = po.totalAmount || 0;
-                      const t1Amount = (po as any).tranche1Amount || Math.round(total * 0.9);
-                      const t2Amount = total - t1Amount;
-
-                      const isT1Paid = (po as any).tranche1Paid || po.paymentStatus === "paid" || po.paymentStatus === "partial";
-                      const isT2Paid = (po as any).tranche2Paid || (po.paymentStatus === "paid" && po.status === "completed");
-
-                      const linkedDel = deliveries.find((d: any) => d.purchaseOrderId === po.id || d.poNumber === po.poNumber);
-                      const docsReady = linkedDel?.deliveryCertUploaded && linkedDel?.qaDecision === "accepted";
+                      const isPaid = po.paymentStatus === "paid";
 
                       return (
                         <tr key={po.id} className="hover:bg-[#f8fafc]/80 transition-colors">
@@ -1198,91 +1220,82 @@ export default function VendorPortal() {
                             {formatINR(total)}
                           </td>
                           <td className="p-3 text-center">
-                            <div className="flex flex-col items-center gap-1">
-                              <span className="font-mono font-bold text-xs text-[#152340]">{formatINR(t1Amount)}</span>
-                              {isT1Paid ? (
-                                <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px] gap-1">
-                                  <CheckCircle2 className="h-3 w-3" /> 90% Released
-                                </Badge>
-                              ) : docsReady ? (
-                                <Badge className="bg-blue-100 text-blue-800 border-0 text-[10px]">
-                                  Ready for Release
-                                </Badge>
-                              ) : (
-                                <Badge className="bg-amber-100 text-amber-800 border-0 text-[10px]">
-                                  Docs Pending
-                                </Badge>
-                              )}
-                              {(po as any).tranche1Reference && (
-                                <span className="text-[10px] font-mono text-[#6b7a93]">
-                                  Ref: {(po as any).tranche1Reference}
-                                </span>
-                              )}
-                            </div>
+                            <Badge variant="outline" className="text-[10px] uppercase font-semibold">
+                              {po.fulfilmentStatus || po.status || "ordered"}
+                            </Badge>
                           </td>
                           <td className="p-3 text-center">
-                            <div className="flex flex-col items-center gap-1">
-                              <span className="font-mono font-bold text-xs text-[#152340]">{formatINR(t2Amount)}</span>
-                              {isT2Paid ? (
-                                <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px] gap-1">
-                                  <CheckCircle2 className="h-3 w-3" /> 10% Released
-                                </Badge>
-                              ) : isT1Paid ? (
-                                <Badge className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px]">
-                                  3-Month Usage Period
-                                </Badge>
-                              ) : (
-                                <Badge className="bg-slate-100 text-slate-600 border-0 text-[10px]">
-                                  Awaiting T1
-                                </Badge>
-                              )}
-                              {(po as any).tranche2Reference && (
-                                <span className="text-[10px] font-mono text-[#6b7a93]">
-                                  Ref: {(po as any).tranche2Reference}
-                                </span>
-                              )}
-                            </div>
+                            {isPaid ? (
+                              <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px] gap-1">
+                                <CheckCircle2 className="h-3 w-3" /> Paid
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-amber-100 text-amber-800 border-0 text-[10px] gap-1">
+                                <Clock className="h-3 w-3" /> Not Paid
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="p-3 text-xs">
+                            {po.paymentReference ? (
+                              <div className="font-mono text-[11px]">
+                                <span className="font-semibold text-foreground">{po.paymentReference}</span>
+                                {po.paymentDate && <span className="block text-muted-foreground">{format(new Date(po.paymentDate), "dd MMM yyyy")}</span>}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground text-[11px] italic">Pending Clearance</span>
+                            )}
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                              {canReleasePayment && !isT1Paid && (
+                              <Link href={`/purchase-orders/${po.id || po._id}`}>
+                                <Button size="sm" variant="ghost" className="h-7 text-xs gap-1">
+                                  <Eye className="h-3.5 w-3.5" /> View PO
+                                </Button>
+                              </Link>
+                              {canReleasePayment && !isPaid && (
                                 <Button
                                   size="sm"
-                                  className="h-7 text-xs bg-[#186812] hover:bg-[#124e0d] text-white shadow-xs font-medium"
-                                  onClick={() => {
-                                    setPayModal({ po, tranche: "tranche1_90" });
-                                    setPayForm({
-                                      paymentReference: `UTR-TG90-${Math.floor(10000000 + Math.random() * 90000000)}`,
-                                      paymentDate: new Date().toISOString().split("T")[0],
-                                      paidBy: user?.fullName || "Accounts Officer",
-                                      remarks: `90% payment released against verified DCC, QA clearance, and installation documentation for ${po.poNumber}.`,
-                                    });
+                                  className="h-7 text-xs shadow-xs font-medium"
+                                  onClick={async () => {
+                                    try {
+                                      await api.updatePOPaymentStatus(po.id || po._id, {
+                                        paymentStatus: "paid",
+                                        paymentReference: `UTR-TGMSIDC-${Math.floor(10000000 + Math.random() * 90000000)}`,
+                                        paymentDate: new Date().toISOString(),
+                                        paidBy: user?.fullName || "Accounts Wing",
+                                        remarks: `Statutory payment recorded for ${po.poNumber}.`,
+                                      });
+                                      queryClient.invalidateQueries({ queryKey: ["/purchase-orders"] });
+                                      toast({ title: "Payment Recorded", description: `PO ${po.poNumber} marked as Paid.` });
+                                    } catch (err: any) {
+                                      toast({ title: "Error", description: err.message || "Failed to update payment", variant: "destructive" });
+                                    }
                                   }}
                                 >
-                                  Release 90% (T1)
+                                  Record Paid
                                 </Button>
                               )}
-                              {canReleasePayment && isT1Paid && !isT2Paid && (
+                              {canReleasePayment && isPaid && (
                                 <Button
                                   size="sm"
-                                  className="h-7 text-xs bg-blue-700 hover:bg-blue-800 text-white shadow-xs font-medium"
-                                  onClick={() => {
-                                    setPayModal({ po, tranche: "tranche2_10" });
-                                    setPayForm({
-                                      paymentReference: `UTR-TG10-${Math.floor(10000000 + Math.random() * 90000000)}`,
-                                      paymentDate: new Date().toISOString().split("T")[0],
-                                      paidBy: user?.fullName || "Accounts Officer",
-                                      remarks: `10% retention released post 3 months satisfactory hospital usage & QPC verification for ${po.poNumber}.`,
-                                    });
+                                  variant="outline"
+                                  className="h-7 text-xs border-amber-300 text-amber-800 hover:bg-amber-50"
+                                  onClick={async () => {
+                                    try {
+                                      await api.updatePOPaymentStatus(po.id || po._id, {
+                                        paymentStatus: "not_paid",
+                                        paidBy: user?.fullName || "Accounts Wing",
+                                        remarks: `Payment status reset for ${po.poNumber}.`,
+                                      });
+                                      queryClient.invalidateQueries({ queryKey: ["/purchase-orders"] });
+                                      toast({ title: "Payment Reset", description: `PO ${po.poNumber} marked as Not Paid.` });
+                                    } catch (err: any) {
+                                      toast({ title: "Error", description: err.message || "Failed to reset payment", variant: "destructive" });
+                                    }
                                   }}
                                 >
-                                  Release 10% (T2)
+                                  Mark Not Paid
                                 </Button>
-                              )}
-                              {isT1Paid && isT2Paid && (
-                                <span className="text-xs text-emerald-700 font-semibold flex items-center gap-1">
-                                  <CheckCircle2 className="h-4 w-4 text-emerald-600" /> Settled
-                                </span>
                               )}
                             </div>
                           </td>
@@ -1310,7 +1323,7 @@ export default function VendorPortal() {
               </div>
               <Button
                 size="sm"
-                className="bg-[#186812] hover:bg-[#124e0d] text-white text-xs gap-1.5 shadow-xs font-medium"
+                className="text-xs gap-1.5 shadow-xs font-medium"
                 onClick={() => setGrievanceModal(true)}
               >
                 + Raise New Clarification
@@ -1441,7 +1454,7 @@ export default function VendorPortal() {
 
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setDccModal(null)}>Cancel</Button>
-                <Button type="submit" disabled={dccSubmitting} className="bg-[#186812] hover:bg-[#124e0d] text-white">
+                <Button type="submit" disabled={dccSubmitting}>
                   {dccSubmitting ? "Uploading..." : "Submit & Verify DCC"}
                 </Button>
               </DialogFooter>
@@ -1524,7 +1537,7 @@ export default function VendorPortal() {
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setGrievanceModal(false)}>Cancel</Button>
-              <Button type="submit" className="bg-[#186812] hover:bg-[#124e0d] text-white">
+              <Button type="submit">
                 Submit Ticket
               </Button>
             </DialogFooter>
@@ -1568,7 +1581,7 @@ export default function VendorPortal() {
             </div>
             <DialogFooter>
               <Button variant="outline" disabled={ackSubmitting} onClick={() => setAckModal(null)}>Cancel</Button>
-              <Button onClick={handleAcknowledge} disabled={ackSubmitting} className="bg-[#186812] hover:bg-[#124e0d] text-white">
+              <Button onClick={handleAcknowledge} disabled={ackSubmitting}>
                 {ackSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
                 {ackSubmitting ? "Recording Acknowledgement (2–3s)..." : "Submit Acknowledgement"}
               </Button>
@@ -1656,7 +1669,7 @@ export default function VendorPortal() {
             </div>
             <DialogFooter>
               <Button variant="outline" disabled={dispatchSubmitting} onClick={() => setDispatchModal(null)}>Cancel</Button>
-              <Button onClick={handleDispatch} disabled={dispatchSubmitting} className="bg-[#186812] hover:bg-[#124e0d] text-white">
+              <Button onClick={handleDispatch} disabled={dispatchSubmitting}>
                 {dispatchSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
                 {dispatchSubmitting ? "Transmitting Dispatch to DB (2–3s)..." : "Confirm & Transmit Dispatch"}
               </Button>
@@ -1736,7 +1749,7 @@ export default function VendorPortal() {
                 </div>
 
                 <div className="p-3 bg-slate-50 border rounded-lg space-y-1.5">
-                  <p className="font-semibold text-slate-900">Mandatory QA Checklist (§9):</p>
+                  <p className="font-semibold text-slate-900">Mandatory QA Checklist:</p>
                   <div className="space-y-1 text-slate-700">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" defaultChecked className="rounded border-slate-300" />
@@ -1769,7 +1782,7 @@ export default function VendorPortal() {
 
               <DialogFooter>
                 <Button type="button" variant="outline" disabled={qaSubmitting} onClick={() => setQaModal(null)}>Cancel</Button>
-                <Button type="submit" disabled={qaSubmitting} className="bg-blue-700 hover:bg-blue-800 text-white">
+                <Button type="submit" disabled={qaSubmitting}>
                   {qaSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
                   {qaSubmitting ? "Recording QA Inspection (2–3s)..." : "Certify QA Decision"}
                 </Button>
@@ -1851,106 +1864,9 @@ export default function VendorPortal() {
 
               <DialogFooter>
                 <Button type="button" variant="outline" disabled={docSubmitting} onClick={() => setDocModal(null)}>Cancel</Button>
-                <Button type="submit" disabled={docSubmitting} className="bg-[#186812] hover:bg-[#124e0d] text-white">
+                <Button type="submit" disabled={docSubmitting}>
                   {docSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
                   {docSubmitting ? "Uploading Document (2–3s)..." : "Confirm & Verify Document"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {/* Payment Release Dialog (Tranche 1 90% or Tranche 2 10%) */}
-      {payModal && (
-        <Dialog open={true} onOpenChange={() => setPayModal(null)}>
-          <DialogContent className="max-w-md">
-            <form onSubmit={handleReleasePayment}>
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <IndianRupee className="h-5 w-5 text-emerald-700" />
-                  {payModal.tranche === "tranche1_90" ? "Release 90% Payment (Tranche 1)" : "Release 10% Retention (Tranche 2)"}
-                </DialogTitle>
-                <DialogDescription className="text-xs">
-                  {payModal.tranche === "tranche1_90"
-                    ? "Release of 90% order value upon physical delivery, QA clearance, and verified documentation."
-                    : "Release of 10% retention upon completion of 3 months satisfactory clinical usage."}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-4 py-3 text-xs">
-                <div className="p-3 bg-muted/40 rounded-lg space-y-1">
-                  <div><span className="font-semibold">PO Number:</span> {payModal.po.poNumber}</div>
-                  <div><span className="font-semibold">Vendor:</span> {payModal.po.vendorName}</div>
-                  <div><span className="font-semibold">Total PO Value:</span> {formatINR(payModal.po.totalAmount)}</div>
-                  <div className="pt-1 border-t text-sm font-bold text-emerald-800">
-                    Release Amount: {payModal.tranche === "tranche1_90"
-                      ? formatINR(Math.round(payModal.po.totalAmount * 0.9))
-                      : formatINR(payModal.po.totalAmount - Math.round(payModal.po.totalAmount * 0.9))}
-                    <span className="text-xs font-normal text-slate-500 ml-1.5">
-                      ({payModal.tranche === "tranche1_90" ? "90% of Total" : "10% Retention"})
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Treasury / Bank UTR Reference Number *</Label>
-                  <Input
-                    value={payForm.paymentReference}
-                    onChange={e => setPayForm(f => ({ ...f, paymentReference: e.target.value }))}
-                    placeholder="e.g. UTR-SBIN-12345678"
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold">Disbursement Date</Label>
-                    <Input
-                      type="date"
-                      value={payForm.paymentDate}
-                      onChange={e => setPayForm(f => ({ ...f, paymentDate: e.target.value }))}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold">Authorizing Officer</Label>
-                    <Input
-                      value={payForm.paidBy}
-                      onChange={e => setPayForm(f => ({ ...f, paidBy: e.target.value }))}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Statutory Accounting Remarks</Label>
-                  <Textarea
-                    value={payForm.remarks}
-                    onChange={e => setPayForm(f => ({ ...f, remarks: e.target.value }))}
-                    rows={2}
-                    required
-                  />
-                </div>
-
-                <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded text-emerald-950 text-[11px]">
-                  {payModal.tranche === "tranche1_90" ? (
-                    <span>✓ Certified that DCC, QA Inspection, and Tax Invoices have been verified. 10% will be held as 3-month usage retention.</span>
-                  ) : (
-                    <span>✓ Certified that 3 months of satisfactory hospital usage have elapsed and QPC has been verified by the facility.</span>
-                  )}
-                </div>
-              </div>
-
-              <DialogFooter>
-                <Button type="button" variant="outline" disabled={paySubmitting} onClick={() => setPayModal(null)}>Cancel</Button>
-                <Button
-                  type="submit"
-                  disabled={paySubmitting}
-                  className={payModal.tranche === "tranche1_90" ? "bg-[#186812] hover:bg-[#124e0d] text-white" : "bg-blue-700 hover:bg-blue-800 text-white"}
-                >
-                  {paySubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-                  {paySubmitting ? "Releasing Payment to DB (2–3s)..." : `Confirm & Release ${payModal.tranche === "tranche1_90" ? "90% (T1)" : "10% Retention (T2)"}`}
                 </Button>
               </DialogFooter>
             </form>

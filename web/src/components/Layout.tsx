@@ -45,7 +45,6 @@ const ALL_NAV_GROUPS: NavGroup[] = [
     label: "DEMAND & BUDGET",
     items: [
       { href: "/indents", label: "Indents", icon: FileText },
-      { href: "/consolidation", label: "Consolidation", icon: Merge },
       { href: "/budget", label: "Budget Register", icon: IndianRupee },
     ],
   },
@@ -79,16 +78,16 @@ const ALL_NAV_GROUPS: NavGroup[] = [
   {
     label: "FINANCE",
     items: [
-      { href: "/invoices", label: "Invoices", icon: Receipt },
       { href: "/payments", label: "Payments", icon: CreditCard },
     ],
   },
   {
     label: "ADMINISTRATION",
     items: [
+      { href: "/users", label: "Users & Roles", icon: Users },
       { href: "/equipment", label: "Equipment Master", icon: Wrench },
       { href: "/masters", label: "Statutory Masters", icon: Shield },
-      { href: "/vendors", label: "Vendors", icon: Users },
+      { href: "/vendors", label: "Vendors", icon: Building2 },
       { href: "/institutions", label: "Hospital Master", icon: Building2 },
       { href: "/approval-hierarchy", label: "Approval Hierarchy", icon: Settings },
       // { href: "/audit-trail", label: "Audit Trail", icon: ShieldCheck },
@@ -97,8 +96,6 @@ const ALL_NAV_GROUPS: NavGroup[] = [
   {
     label: "ANALYTICS & REPORTS",
     items: [
-      // { href: "/kpi-dashboard", label: "KPI Control Tower", icon: Activity },
-      // { href: "/demand-forecast", label: "Demand Forecast", icon: TrendingUp },
       { href: "/reports", label: "Reports", icon: BarChart3 },
     ],
   },
@@ -112,7 +109,6 @@ const ROLE_ALLOWED_PATHS: Record<UserRole, string[]> = {
     "/vendor-portal",
     "/purchase-orders",
     "/deliveries",
-    "/invoices",
     "/reports",
   ],
   consignee: [
@@ -135,7 +131,6 @@ const ROLE_ALLOWED_PATHS: Record<UserRole, string[]> = {
     "/",
     "/approval-inbox",
     "/indents",
-    "/consolidation",
     "/rc-coverage",
     "/rate-contracts",
     "/purchase-orders",
@@ -148,7 +143,6 @@ const ROLE_ALLOWED_PATHS: Record<UserRole, string[]> = {
     "/",
     "/approval-inbox",
     "/indents",
-    "/consolidation",
     "/budget",
     "/rc-coverage",
     "/rate-contracts",
@@ -170,21 +164,43 @@ const ROLE_ALLOWED_PATHS: Record<UserRole, string[]> = {
     "/budget",
     "/purchase-orders",
     "/tenders",
-    "/invoices",
     "/payments",
     "/audit-trail",
     "/kpi-dashboard",
     "/demand-forecast",
+    "/users",
+    "/reports",
+  ],
+  managing_director: [
+    "/",
+    "/indents",
+    "/budget",
+    "/rc-coverage",
+    "/rate-contracts",
+    "/purchase-orders",
+    "/tenders",
+    "/deliveries",
+    "/payments",
+    "/vendors",
+    "/institutions",
+    "/equipment",
+    "/users",
+    "/kpi-dashboard",
+    "/demand-forecast",
+    "/audit-trail",
     "/reports",
   ],
   tgmsidc_user: [
-    "/",
     "/approval-inbox",
     "/indents",
     "/budget",
+    "/rc-coverage",
+    "/rate-contracts",
     "/purchase-orders",
+    "/tenders",
+    "/tenders/workbench",
     "/deliveries",
-    "/invoices",
+    "/grn",
     "/payments",
     "/reports",
   ],
@@ -206,7 +222,6 @@ function getBreadcrumb(pathname: string): { section: string; title: string } {
   if (pathname.startsWith("/indents/new")) return { section: "Demand", title: "New Indent Requisition" };
   if (pathname.startsWith("/indents/")) return { section: "Demand", title: "Indent Detail Workspace" };
   if (pathname.startsWith("/indents")) return { section: "Demand", title: "Indent Management" };
-  if (pathname.startsWith("/consolidation")) return { section: "Demand", title: "Indent Consolidation" };
   if (pathname.startsWith("/budget")) return { section: "Demand", title: "Budget & Allocation Register" };
   if (pathname.startsWith("/rc-coverage")) return { section: "Procurement", title: "Rate Contract Coverage" };
   if (pathname.startsWith("/rate-contracts")) return { section: "Procurement", title: "Rate Contracts" };
@@ -244,7 +259,7 @@ function NavItemEl({ href, label, icon: Icon, badge, collapsed }: NavItem & { co
           "neo-nav-i select-none group cursor-pointer transition-all duration-150",
           collapsed ? "justify-center px-1.5" : "px-3 py-2",
           isActive
-            ? "active on bg-[#186812] hover:bg-[#1f7e17] text-white font-semibold shadow-sm"
+            ? "active on bg-[#1f7e17] hover:bg-[#1f7e17] text-white font-semibold shadow-sm"
             : "text-white/90 hover:text-white hover:bg-white/[0.08]"
         )}
       >
@@ -451,7 +466,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               {/* Financial Year Pill */}
               <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 bg-[#f4f7fb] border border-[#e4eaf2] rounded-md text-[11px] font-semibold text-[#3c4a63]">
                 <Calendar className="w-3.5 h-3.5 text-[#2563eb]" />
-                <span>FY 2025–26</span>
+                <span>FY 2026–27</span>
               </div>
 
               {/* Notification Bell */}

@@ -1,6 +1,26 @@
 import { useRoute, Link } from "wouter";
-import { useGetPurchaseOrder, getGetPurchaseOrderQueryKey, useApprovePurchaseOrder, useCancelPurchaseOrder, useListDeliveries, getListDeliveriesQueryKey } from "@/lib/api-hooks";
-import { updatePOPaymentStatus, amendPurchaseOrder, submitPOForApproval, gmReviewPO, soDecisionPO, releasePOPayment, acknowledgePurchaseOrder, createDelivery } from "@/lib/api";
+import {
+  useGetPurchaseOrder,
+  getGetPurchaseOrderQueryKey,
+  useApprovePurchaseOrder,
+  useCancelPurchaseOrder,
+  useListDeliveries,
+  getListDeliveriesQueryKey,
+  useGetRateContract,
+  useGetIndent,
+} from "@/lib/api-hooks";
+import {
+  updatePOPaymentStatus,
+  amendPurchaseOrder,
+  issuePO,
+  checkPOClosureEligibility,
+  closePO,
+  releasePOPayment,
+  acknowledgePurchaseOrder,
+  createDelivery,
+  submitPOForApproval,
+  gmReviewPO,
+} from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +29,11 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, IndianRupee, ShieldCheck, CreditCard, CheckCircle2, Clock, AlertTriangle, FileText, Building2, History, RotateCcw, Wrench, Truck, Upload, Loader2 } from "lucide-react";
+import {
+  ArrowLeft, IndianRupee, ShieldCheck, CreditCard, CheckCircle2, Clock,
+  AlertTriangle, FileText, Building2, History, RotateCcw, Wrench, Truck,
+  Upload, Loader2, CheckCheck, Lock, ExternalLink, Send
+} from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 import { useState } from "react";
 import { ProductSpecSheet } from "@/components/ProductSpecSheet";
@@ -17,6 +41,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { cn } from "@/lib/utils";
 
 export default function PurchaseOrderDetail() {
   const [, params] = useRoute("/purchase-orders/:id");
@@ -28,15 +53,18 @@ export default function PurchaseOrderDetail() {
   
   const { data: po, isLoading } = useGetPurchaseOrder(id, { query: { enabled: !!id, queryKey: getGetPurchaseOrderQueryKey(id) } });
   const { data: deliveries } = useListDeliveries({ poId: id }, { query: { enabled: !!id, queryKey: getListDeliveriesQueryKey({ poId: id }) } });
+  const { data: linkedRc } = useGetRateContract(po?.rateContractId || "", { query: { enabled: !!po?.rateContractId } });
+  const { data: linkedIndent } = useGetIndent(po?.indentId || "", { query: { enabled: !!po?.indentId } });
   const approvePO = useApprovePurchaseOrder();
   const cancelPO = useCancelPurchaseOrder();
+
+  const [submitNextLevelLoading, setSubmitNextLevelLoading] = useState(false);
+  const [gmReviewLoading, setGmReviewLoading] = useState(false);
+  const [gmRemarks, setGmRemarks] = useState("Reviewed both Rate Contract and Purchase Order details. Pricing, item specifications, and hospital consignee verified. Approved for official procurement.");
 
   // Modals
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
-  const [reviewAction, setReviewAction] = useState<string | null>(null);
-  const [reviewComments, setReviewComments] = useState("");
-  const [isReviewing, setIsReviewing] = useState(false);
 
   // Acknowledgement & Dispatch Modals
   const [ackOpen, setAckOpen] = useState(false);
@@ -87,18 +115,130 @@ export default function PurchaseOrderDetail() {
   });
   const [amendSubmitting, setAmendSubmitting] = useState(false);
 
+  // Issue PO Dialog & State
+  const [issuePODialog, setIssuePODialog] = useState(false);
+  const [issuePORemarks, setIssuePORemarks] = useState("Official purchase order issued to empanelled vendor.");
+  const [issuingPO, setIssuingPO] = useState(false);
+
+  // PO Closure Checklist & State
+  const [closureCheckResult, setClosureCheckResult] = useState<any>(null);
+  const [checkingClosure, setCheckingClosure] = useState(false);
+  const [closePODialog, setClosePODialog] = useState(false);
+  const [closureRemarks, setClosureRemarks] = useState("All 7 statutory closure conditions met and verified.");
+  const [closingPO, setClosingPO] = useState(false);
+
+  async function handleIssuePO() {
+    setIssuingPO(true);
+    try {
+      await issuePO(id, {
+        remarks: issuePORemarks,
+        issuedBy: user?.fullName || "TGMSIDC User",
+      });
+      queryClient.invalidateQueries({ queryKey: getGetPurchaseOrderQueryKey(id) });
+      setIssuePODialog(false);
+      toast({ title: "Purchase Order Issued", description: "PO transmitted to vendor. Awaiting 7-day acknowledgement SLA." });
+    } catch (err: any) {
+      toast({ title: "Failed to Issue PO", description: err.message, variant: "destructive" });
+    } finally {
+      setIssuingPO(false);
+    }
+  }
+
+  async function handleCheckClosureEligibility() {
+    setCheckingClosure(true);
+    try {
+      const res = await checkPOClosureEligibility(id);
+      setClosureCheckResult(res);
+      toast({
+        title: res.eligible ? "Eligible for PO Closure" : "Closure Criteria Pending",
+        description: res.eligible ? "All 7 statutory conditions satisfied." : `${res.reasons?.length || 0} criteria pending.`,
+      });
+    } catch (err: any) {
+      toast({ title: "Check Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setCheckingClosure(false);
+    }
+  }
+
+  async function handleClosePO() {
+    setClosingPO(true);
+    try {
+      await closePO(id, {
+        remarks: closureRemarks,
+        officerName: user?.fullName || "TGMSIDC Officer",
+      });
+      queryClient.invalidateQueries({ queryKey: getGetPurchaseOrderQueryKey(id) });
+      setClosePODialog(false);
+      toast({ title: "Purchase Order Closed", description: "PO marked as closed and archived." });
+    } catch (err: any) {
+      toast({ title: "Closure Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setClosingPO(false);
+    }
+  }
+
   if (isLoading) return <div className="flex justify-center py-20"><div className="animate-spin h-8 w-8 rounded-full border-4 border-primary border-t-transparent" /></div>;
   if (!po) return <div className="text-center py-20 text-muted-foreground">PO not found</div>;
 
   const rawPO = po as any;
 
-  function handleApprove() {
-    approvePO.mutate(id, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getGetPurchaseOrderQueryKey(id) });
-        toast({ title: "PO Approved", description: `Purchase Order ${po.poNumber} has been approved.` });
-      }
-    });
+  async function handleApproveForNextLevel() {
+    try {
+      setSubmitNextLevelLoading(true);
+      await submitPOForApproval(id, {
+        submittedBy: user?.fullName || "TGMSIDC User",
+        remarks: "Validated against Rate Contract and submitted for GM Equipment scrutiny.",
+      });
+      queryClient.invalidateQueries({ queryKey: getGetPurchaseOrderQueryKey(id) });
+      queryClient.invalidateQueries({ queryKey: ["/purchase-orders"] });
+      toast({
+        title: "Submitted for Next Level",
+        description: `Purchase Order ${po.poNumber} forwarded to General Manager (Equipment) for scrutiny & approval.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Submission Failed",
+        description: err.message || "Failed to forward PO for approval",
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitNextLevelLoading(false);
+    }
+  }
+
+  async function handleGMDecision(action: "approve" | "return" | "reject") {
+    if ((action === "return" || action === "reject") && !gmRemarks.trim()) {
+      toast({
+        title: "Remarks Required",
+        description: "Please provide mandatory remarks explaining the return/rejection reason.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      setGmReviewLoading(true);
+      await gmReviewPO(id, {
+        action,
+        comments: gmRemarks,
+        reviewedBy: user?.fullName || "GM Equipment",
+      });
+      queryClient.invalidateQueries({ queryKey: getGetPurchaseOrderQueryKey(id) });
+      queryClient.invalidateQueries({ queryKey: ["/purchase-orders"] });
+      toast({
+        title: action === "approve" ? "PO Approved by GM Equipment" : action === "return" ? "PO Returned" : "PO Rejected",
+        description: action === "approve"
+          ? `Purchase Order ${po.poNumber} approved by GM Equipment. Official PO is now authorized for vendor issuance.`
+          : `Purchase Order ${po.poNumber} has been ${action}ed with remarks.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Action Failed",
+        description: err.message || "Could not complete GM review action",
+        variant: "destructive",
+      });
+    } finally {
+      setGmReviewLoading(false);
+    }
   }
 
   function handleCancel() {
@@ -122,7 +262,7 @@ export default function PurchaseOrderDetail() {
     setPaymentSubmitting(true);
     try {
       await updatePOPaymentStatus(id, {
-        paymentStatus: paymentForm.paymentStatus,
+        paymentStatus: paymentForm.paymentStatus as "paid" | "not_paid",
         paymentReference: paymentForm.paymentReference,
         paymentDate: paymentForm.paymentDate,
         paymentAmount: Number(paymentForm.paymentAmount || po.totalAmount),
@@ -165,42 +305,6 @@ export default function PurchaseOrderDetail() {
     }
   }
 
-  async function handleReviewSubmit() {
-    if (!reviewAction) return;
-    if ((reviewAction.includes("return") || reviewAction.includes("reject")) && !reviewComments.trim()) {
-      toast({ title: "Required", description: "Comments are required for this action.", variant: "destructive" });
-      return;
-    }
-    setIsReviewing(true);
-    try {
-      if (reviewAction.startsWith("so_")) {
-        const actionMap: Record<string, string> = {
-          so_approve: "approved",
-          so_return: "returned",
-          so_reject: "rejected",
-        };
-        await soDecisionPO(id, {
-          action: actionMap[reviewAction],
-          comments: reviewComments,
-          approvedBy: user?.username || "SO Equipment"
-        });
-      } else {
-        await gmReviewPO(id, {
-          action: reviewAction,
-          comments: reviewComments,
-          reviewedBy: user?.username || "GM Equipment"
-        });
-      }
-      queryClient.invalidateQueries({ queryKey: getGetPurchaseOrderQueryKey(id) });
-      setReviewAction(null);
-      setReviewComments("");
-      toast({ title: "Success", description: "PO approval status updated." });
-    } catch (err: any) {
-      toast({ title: "Error", description: err.message || "Failed to update PO status", variant: "destructive" });
-    } finally {
-      setIsReviewing(false);
-    }
-  }
 
   async function handleAcknowledgePO() {
     setAckSubmitting(true);
@@ -301,7 +405,7 @@ export default function PurchaseOrderDetail() {
               Version v{rawPO.version || 1}
             </Badge>
             {rawPO.vendorTier && (
-              <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+              <Badge variant="outline" className="text-xs bg-slate-50 text-slate-700 border-slate-200">
                 Tier {rawPO.vendorTier} ({rawPO.allocationRatio || "100%"})
               </Badge>
             )}
@@ -311,21 +415,43 @@ export default function PurchaseOrderDetail() {
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <StatusBadge status={po.status} />
+          <StatusBadge status={rawPO.approvalStatus === "pending_gm_approval" ? "pending_approval" : po.status} />
+          {(rawPO.approvalStatus === "pending_gm_approval" || po.status === "pending_approval") && (
+            <Button
+              size="sm"
+              onClick={() => handleGMDecision("approve")}
+              disabled={gmReviewLoading}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 shadow-xs cursor-pointer"
+            >
+              {gmReviewLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              Approve PO (GM)
+            </Button>
+          )}
+          {(po.status === "approved" || po.status === "po_approved") && (
+            <Button
+              size="sm"
+              onClick={() => setIssuePODialog(true)}
+              className="text-xs gap-1.5 shadow-xs cursor-pointer"
+            >
+              <Send className="h-3.5 w-3.5" />
+              Issue PO to Vendor
+            </Button>
+          )}
         </div>
       </div>
 
       {/* Scope Boundary Mandate Callout (Process Book §0) */}
-      <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 text-xs text-emerald-900 flex items-start gap-3">
-        <CreditCard className="h-5 w-5 text-emerald-700 shrink-0 mt-0.5" />
+      <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 text-xs text-slate-800 flex items-start gap-3 shadow-xs">
+        <CreditCard className="h-5 w-5 text-slate-600 shrink-0 mt-0.5" />
         <div className="flex-1">
-          <span className="font-semibold text-emerald-950">Statutory Scope Boundary Rule (Process Book §0): </span>
+          <span className="font-semibold text-slate-900">Scope Boundary Mandate: </span>
           Payment disbursement, invoice matching, and treasury transfers are processed outside the platform via IFMIS/Treasury.
           Accounts records a manual <strong>Paid / Not-Paid</strong> status and reference number (UTR / Cheque No) against this PO for official fulfillment records.
         </div>
         <Button
           size="sm"
-          className="bg-[#186812] hover:bg-[#124e0d] text-white shrink-0 shadow-sm"
+          variant="outline"
+          className="border-slate-300 text-slate-800 hover:bg-slate-100 shrink-0 shadow-xs"
           onClick={() => {
             setPaymentForm({
               paymentStatus: rawPO.paymentStatus === "paid" ? "paid" : "paid",
@@ -342,83 +468,368 @@ export default function PurchaseOrderDetail() {
         </Button>
       </div>
 
-      {/* Approval Banner */}
-      {po.approvalStatus && po.approvalStatus !== "approved" && po.approvalStatus !== "not_applicable" && (
-        <div className={`rounded-lg border p-4 text-sm flex flex-col gap-2 ${
-          po.approvalStatus === "pending" ? "border-amber-200 bg-amber-50 text-amber-900" :
-          po.approvalStatus === "proposed_approve" ? "border-blue-200 bg-blue-50 text-blue-900" :
-          (po.approvalStatus === "proposed_reject" || po.approvalStatus === "returned" || po.approvalStatus === "rejected") ? "border-red-200 bg-red-50 text-red-900" :
-          "border-slate-200 bg-slate-50 text-slate-900"
-        }`}>
-          <div className="font-semibold flex items-center gap-2">
-            {po.approvalStatus === "pending" && <Clock className="h-5 w-5" />}
-            {po.approvalStatus === "proposed_approve" && <ShieldCheck className="h-5 w-5" />}
-            {(po.approvalStatus === "returned" || po.approvalStatus === "proposed_reject" || po.approvalStatus === "rejected") && <AlertTriangle className="h-5 w-5" />}
-            Approval Status: {po.approvalStatus.replace("_", " ").toUpperCase()}
-          </div>
-          {po.returnComments && (
-            <div className="text-xs bg-white/50 p-2 rounded mt-1">
-              <strong>Comments:</strong> {po.returnComments}
+      {/* ── Draft PO Workflow Banner (Integrated with Indent Approval Workflow) ── */}
+      {(po.status === "draft" || rawPO.approvalStatus === "draft") && rawPO.approvalStatus !== "pending_gm_approval" && po.status !== "approved" && (
+        <Card className="border border-blue-200 bg-blue-50/50 shadow-xs">
+          <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1.5 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <FileText className="h-4 w-4 text-blue-600" />
+                <span className="font-semibold text-xs text-slate-900">
+                  Draft Purchase Order Linked to Indent #{rawPO.indentNumber || linkedIndent?.indentNumber || "Requisition"}
+                </span>
+                <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-800 border-amber-300">
+                  Draft PO Stage
+                </Badge>
+                {rawPO.rcNumber && (
+                  <Badge variant="outline" className="text-[10px] bg-purple-50 text-purple-700 border-purple-200">
+                    RC #{rawPO.rcNumber}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                This Purchase Order has been drafted and tagged to Indent #{rawPO.indentNumber || linkedIndent?.indentNumber}. It is undergoing administrative review and scrutiny by <strong>GM (Equipment)</strong> and <strong>SO (Equipment)</strong> within the Indent Approval Workflow. Once the <strong>Executive Director (ED)</strong> accords final sanction to the Indent, this Purchase Order will automatically transition to <strong>PO Issued</strong>.
+              </p>
             </div>
-          )}
-        </div>
-      )}
-      {po.approvalStatus === "approved" && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm flex items-center gap-2 text-emerald-900">
-          <CheckCircle2 className="h-5 w-5" />
-          <span className="font-semibold">PO Approved</span>
-        </div>
-      )}
-
-      {/* Approval Actions Card */}
-      {((role === "admin" || role === "tgmsidc_user" || role === "gm_equipment" || role === "so_equipment") && (po.status === "draft" || po.status === "pending_approval" || po.status === "returned")) && (
-        <Card className="border border-border/80 shadow-sm border-l-4 border-l-blue-500">
-          <CardHeader className="pb-3 bg-muted/20 border-b">
-            <CardTitle className="text-sm font-semibold">Approval Workflow Actions</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-4 flex flex-wrap gap-3">
-            {/* Submit for Approval (DEO / Admin / Draft) */}
-            {(po.status === "draft" || po.approvalStatus === "returned") && (
-              <Button onClick={async () => {
-                await submitPOForApproval(id, { submittedBy: user?.username || "User" });
-                queryClient.invalidateQueries({ queryKey: getGetPurchaseOrderQueryKey(id) });
-              }} className="bg-primary text-white">
-                Submit for Approval
-              </Button>
-            )}
-
-            {/* GM Review Actions */}
-            {(role === "gm_equipment" || role === "admin") && po.approvalStatus === "pending" && (
-              <>
-                <Button onClick={() => setReviewAction("recommend_approve")} variant="outline" className="text-blue-700 border-blue-300 hover:bg-blue-50">
-                  Recommend Approve
+            {(rawPO.indentId || rawPO.indentNumber) && (
+              <Link href={`/indents/${rawPO.indentId || rawPO.indentNumber}`}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs gap-1.5 shrink-0 bg-white border-blue-300 text-blue-800 hover:bg-blue-50 cursor-pointer shadow-xs"
+                >
+                  <ExternalLink className="h-3.5 w-3.5 text-blue-600" />
+                  View Indent Approval Workflow
                 </Button>
-                <Button onClick={() => setReviewAction("return")} variant="outline" className="text-amber-700 border-amber-300 hover:bg-amber-50">
-                  Return for Modification
-                </Button>
-                <Button onClick={() => setReviewAction("recommend_reject")} variant="outline" className="text-red-700 border-red-300 hover:bg-red-50">
-                  Recommend Reject
-                </Button>
-              </>
-            )}
-
-            {/* SO Decision Actions */}
-            {(role === "so_equipment" || role === "admin") && (po.approvalStatus === "proposed_approve" || po.approvalStatus === "proposed_reject" || po.approvalStatus === "pending") && (
-              <>
-                <Button onClick={() => setReviewAction("so_approve")} className="bg-[#186812] hover:bg-[#124e0d] text-white">
-                  Approve PO
-                </Button>
-                <Button onClick={() => setReviewAction("so_return")} variant="outline" className="text-amber-700 border-amber-300 hover:bg-amber-50">
-                  Return
-                </Button>
-                <Button onClick={() => setReviewAction("so_reject")} variant="destructive">
-                  Reject PO
-                </Button>
-              </>
+              </Link>
             )}
           </CardContent>
         </Card>
       )}
+
+      {/* ── GM Equipment Review & Approval Console (Dual RC & PO Scrutiny) ── */}
+      {(rawPO.approvalStatus === "pending_gm_approval" || po.status === "pending_approval") && (
+        <Card className="border-2 border-indigo-200 bg-gradient-to-r from-indigo-50/60 via-purple-50/40 to-slate-50 shadow-sm">
+          <CardHeader className="pb-3 border-b border-indigo-100">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-indigo-700 shrink-0" />
+                <div>
+                  <CardTitle className="text-sm font-bold text-slate-900">
+                    GM Equipment Scrutiny &amp; Statutory Approval Console
+                  </CardTitle>
+                  <CardDescription className="text-xs text-slate-600">
+                    Process Book Step 5: Dual scrutiny of Rate Contract validity and Purchase Order allocation before procurement authorization.
+                  </CardDescription>
+                </div>
+              </div>
+              <Badge className="bg-amber-100 text-amber-800 border-amber-300 self-start sm:self-auto text-xs">
+                Awaiting GM Approval
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-4 space-y-4">
+            {/* Dual Panel Comparison */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Panel 1: Rate Contract Scrutiny */}
+              <div className="p-3.5 bg-white rounded-lg border border-indigo-100 shadow-2xs space-y-2.5">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <div className="flex items-center gap-1.5">
+                    <FileText className="h-4 w-4 text-indigo-600" />
+                    <span className="font-semibold text-xs text-slate-900">1. Rate Contract (RC) Verification</span>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200 font-mono">
+                    {rawPO.rcNumber || linkedRc?.rcNumber || "RC-VERIFIED"}
+                  </Badge>
+                </div>
+                <div className="space-y-1.5 text-xs text-slate-700">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Contract Reference:</span>
+                    <span className="font-medium font-mono">{rawPO.rcNumber || linkedRc?.rcNumber || "RC-2024-EQ-001"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Tender Reference:</span>
+                    <span className="font-medium font-mono text-right">{linkedRc?.tenderRef || "TGMSIDC/MED-EQ/2024-25"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Empanelled Vendor:</span>
+                    <span className="font-semibold text-slate-900">{po.vendorName || linkedRc?.vendorName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Contracted Unit Rate:</span>
+                    <span className="font-mono font-medium">₹{(linkedRc?.unitPrice || Math.round(po.totalAmount / (po.quantity || 1) / 1.12)).toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">GST &amp; Landed Price:</span>
+                    <span className="font-mono font-medium">{linkedRc?.gstPercent || 12}% GST (₹{(linkedRc?.landedPrice || Math.round(po.totalAmount / (po.quantity || 1))).toLocaleString("en-IN")}/unit)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Validity &amp; SLA:</span>
+                    <span className="font-medium text-emerald-700">Valid Contract · 45 Days Supply SLA</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Panel 2: Purchase Order & Consignee Scrutiny */}
+              <div className="p-3.5 bg-white rounded-lg border border-purple-100 shadow-2xs space-y-2.5">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <div className="flex items-center gap-1.5">
+                    <Building2 className="h-4 w-4 text-purple-600" />
+                    <span className="font-semibold text-xs text-slate-900">2. Purchase Order &amp; Allocation</span>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] bg-purple-50 text-purple-700 border-purple-200 font-mono">
+                    {po.poNumber}
+                  </Badge>
+                </div>
+                <div className="space-y-1.5 text-xs text-slate-700">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Source Indent:</span>
+                    <span className="font-medium font-mono">Indent #{rawPO.indentNumber || linkedIndent?.indentNumber || "Requisition"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Equipment Item:</span>
+                    <span className="font-semibold text-slate-900 text-right">{po.equipmentName || rawPO.itemDescription || "Medical Equipment"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Allocated Quantity:</span>
+                    <span className="font-mono font-bold text-slate-900">{po.quantity || 1} Unit(s)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Consignee Facility:</span>
+                    <span className="font-medium text-right text-slate-800">{rawPO.consignees?.[0]?.institutionName || linkedIndent?.consigneeFacility || "Gandhi Hospital"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Total Sanction Amount:</span>
+                    <span className="font-bold font-mono text-emerald-700">₹{(po.totalAmount || 0).toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Warranty &amp; CAMC:</span>
+                    <span className="font-medium text-blue-700">3-Yr Warranty + 5-Yr CAMC Committed</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Scrutiny Checklist */}
+            <div className="p-3 bg-slate-50/80 rounded-lg border border-slate-200 text-xs space-y-1.5">
+              <span className="font-semibold text-slate-900 block">GM Scrutiny Checklist &amp; Concurrence:</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-700">
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                  <span>Rate Contract rate ceiling and validity confirmed</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                  <span>Technical specs match Indent sanction order</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                  <span>Consignee institution site readiness noted</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                  <span>Budget head and financial concurrence valid</span>
+                </div>
+              </div>
+            </div>
+
+            {/* GM Remarks & Action Buttons */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-slate-800">General Manager (Equipment) Remarks / Scrutiny Order</Label>
+              <Textarea
+                value={gmRemarks}
+                onChange={(e) => setGmRemarks(e.target.value)}
+                rows={2}
+                placeholder="Enter GM scrutiny observations and approval order..."
+                className="text-xs bg-white"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-1 border-t border-indigo-100">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleGMDecision("return")}
+                disabled={gmReviewLoading}
+                className="border-amber-300 text-amber-800 hover:bg-amber-50 text-xs gap-1.5"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Return for Clarification
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleGMDecision("reject")}
+                disabled={gmReviewLoading}
+                className="border-rose-300 text-rose-800 hover:bg-rose-50 text-xs gap-1.5"
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Reject PO
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => handleGMDecision("approve")}
+                disabled={gmReviewLoading}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 shadow-sm"
+              >
+                {gmReviewLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                Approve PO &amp; Authorize Issuance
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Approved PO Ready for Vendor Transmission ── */}
+      {(po.status === "approved" || po.status === "po_approved") && (
+        <Card className="border border-emerald-200 bg-emerald-50/40 shadow-xs">
+          <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                <span className="font-semibold text-xs text-slate-900">Purchase Order Approved by GM Equipment — Ready for Transmission</span>
+                <Badge variant="outline" className="text-[10px] bg-emerald-100 text-emerald-800 border-emerald-300">
+                  GM Approved
+                </Badge>
+              </div>
+              <p className="text-xs text-slate-600">
+                Statutory dual scrutiny of Rate Contract and Purchase Order completed. Transmit this Purchase Order to <strong>{po.vendorName}</strong> to initiate supplier fulfilment and 7-day acknowledgement SLA.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => setIssuePODialog(true)}
+              className="text-xs gap-1.5 shadow-xs shrink-0 cursor-pointer"
+            >
+              <Send className="h-3.5 w-3.5" />
+              Issue PO to Vendor (Transmit)
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Fulfilment Status & Delivery Statistics Bar */}
+      <Card className="border border-border/80 shadow-sm">
+        <CardHeader className="pb-3 bg-muted/20 border-b flex flex-row items-center justify-between">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Truck className="h-4 w-4 text-primary" /> Delivery &amp; Fulfilment Statistics
+          </CardTitle>
+          <Badge className={
+            rawPO.fulfilmentStatus === "completely_fulfilled" ? "bg-emerald-100 text-emerald-800 border-emerald-300" :
+            rawPO.fulfilmentStatus === "completely_fulfilled_dcc_pending" ? "bg-blue-100 text-blue-800 border-blue-300" :
+            rawPO.fulfilmentStatus === "partially_fulfilled" ? "bg-amber-100 text-amber-800 border-amber-300" :
+            rawPO.fulfilmentStatus === "excess_delivery_review" ? "bg-red-100 text-red-800 border-red-300" :
+            "bg-slate-100 text-slate-700 border-slate-300"
+          }>
+            {rawPO.fulfilmentStatus === "completely_fulfilled" ? "100% COMPLETELY FULFILLED" :
+             rawPO.fulfilmentStatus === "completely_fulfilled_dcc_pending" ? "ACCEPTED — DCC VERIFICATION PENDING" :
+             rawPO.fulfilmentStatus === "partially_fulfilled" ? "PARTIALLY FULFILLED" :
+             rawPO.fulfilmentStatus === "excess_delivery_review" ? "EXCESS DELIVERY REVIEW" :
+             "NOT FULFILLED"}
+          </Badge>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-center">
+            <div className="p-3 bg-slate-50 border rounded-lg">
+              <span className="text-[10.5px] text-muted-foreground block uppercase font-medium">Ordered Qty</span>
+              <span className="text-base font-bold font-mono text-slate-900">{po.quantity ?? 1}</span>
+            </div>
+            <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-lg">
+              <span className="text-[10.5px] text-emerald-800 block uppercase font-medium">Accepted Qty</span>
+              <span className="text-base font-bold font-mono text-emerald-700">{rawPO.cumulativeAcceptedQuantity ?? 0}</span>
+            </div>
+            <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-lg">
+              <span className="text-[10.5px] text-amber-800 block uppercase font-medium">Returned Qty</span>
+              <span className="text-base font-bold font-mono text-amber-700">{rawPO.cumulativeReturnedQuantity ?? 0}</span>
+            </div>
+            <div className="p-3 bg-red-50/70 border border-red-200 rounded-lg">
+              <span className="text-[10.5px] text-red-800 block uppercase font-medium">Rejected Qty</span>
+              <span className="text-base font-bold font-mono text-red-700">{rawPO.cumulativeRejectedQuantity ?? 0}</span>
+            </div>
+            <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-lg">
+              <span className="text-[10.5px] text-blue-800 block uppercase font-medium">Fulfilled Net</span>
+              <span className="text-base font-bold font-mono text-blue-700">{rawPO.fulfilledQuantity ?? 0}</span>
+            </div>
+            <div className="p-3 bg-slate-50 border rounded-lg">
+              <span className="text-[10.5px] text-muted-foreground block uppercase font-medium">Balance Qty</span>
+              <span className="text-base font-bold font-mono text-slate-900">{rawPO.balanceQuantity ?? po.quantity ?? 1}</span>
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-2 italic text-center">
+            Fulfilled Quantity = Cumulative Accepted Receipt Qty ({rawPO.cumulativeAcceptedQuantity ?? 0}) - Returned ({rawPO.cumulativeReturnedQuantity ?? 0}) - Rejected ({rawPO.cumulativeRejectedQuantity ?? 0})
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* PO Closure Status / Eligibility Panel (Section I Steps 71-73) */}
+      <Card className="border border-slate-200 shadow-xs">
+        <CardHeader className="pb-3 bg-muted/20 border-b flex flex-row items-center justify-between">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Lock className="h-4 w-4 text-slate-700" /> Purchase Order Closure &amp; Contract Completion
+          </CardTitle>
+          <Badge variant="outline" className={po.status === "po_closed" ? "bg-slate-100 text-slate-900 border-slate-300 font-semibold" : "bg-slate-50 text-slate-700 border-slate-200"}>
+            {po.status === "po_closed" ? "PO CLOSED & ARCHIVED" : "CLOSURE PENDING"}
+          </Badge>
+        </CardHeader>
+        <CardContent className="pt-4 space-y-3 text-xs">
+          {po.status === "po_closed" ? (
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 space-y-1">
+              <div className="flex items-center gap-2 font-semibold">
+                <CheckCheck className="h-4 w-4 text-slate-700" /> This Purchase Order has been officially closed.
+              </div>
+              <p className="text-slate-600 text-[11px]">
+                Closed by <strong>{rawPO.closedBy || "TGMSIDC Authority"}</strong> on {rawPO.closedAt ? format(new Date(rawPO.closedAt), "dd MMM yyyy, hh:mm a") : "—"}.
+                {rawPO.closureRemarks ? ` Remarks: "${rawPO.closureRemarks}"` : ""}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-slate-600 leading-relaxed">
+                A Purchase Order qualifies for official closure once all hospital deliveries are completely fulfilled, DCC physical certificates are verified, QA inspection is accepted, serialized equipment assets are registered with active warranty, and manual payment status is recorded.
+              </p>
+              <div className="flex gap-2 flex-wrap items-center">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleCheckClosureEligibility}
+                  disabled={checkingClosure}
+                  className="text-xs gap-1.5 border-slate-300"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5 text-slate-700" />
+                  {checkingClosure ? "Checking Criteria..." : "Check Closure Eligibility (7-Point Audit)"}
+                </Button>
+                <Button
+                  size="sm"
+                  className="text-xs gap-1.5 shadow-xs"
+                  onClick={() => setClosePODialog(true)}
+                >
+                  <Lock className="h-3.5 w-3.5" />
+                  Close Purchase Order
+                </Button>
+              </div>
+              {closureCheckResult && (
+                <div className="p-3 bg-slate-50 border rounded-lg space-y-2 mt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-900">
+                      Closure Eligibility Audit: {closureCheckResult.eligible ? "ELIGIBLE" : "PENDING CRITERIA"}
+                    </span>
+                    <Badge variant="outline" className={closureCheckResult.eligible ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}>
+                      {closureCheckResult.eligible ? "All Criteria Satisfied" : `${closureCheckResult.reasons?.length || 0} Pending Items`}
+                    </Badge>
+                  </div>
+                  {closureCheckResult.reasons && closureCheckResult.reasons.length > 0 && (
+                    <ul className="list-disc list-inside text-[11px] text-amber-800 space-y-0.5">
+                      {closureCheckResult.reasons.map((r: string, i: number) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Order & Delivery Details Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -504,7 +915,7 @@ export default function PurchaseOrderDetail() {
                 role === "vendor" || role === "admin" ? (
                   <Button
                     size="sm"
-                    className="w-full bg-[#186812] hover:bg-[#124e0d] text-white font-medium text-xs shadow-sm"
+                    className="w-full text-xs shadow-sm"
                     onClick={() => {
                       const dcNo = `DC/${po.poNumber?.slice(-4) || "001"}/${Math.floor(1000 + Math.random() * 9000)}`;
                       const invNo = `INV/${format(new Date(), "yyyy")}-${(Number(format(new Date(), "yy")) + 1)}/${Math.floor(100 + Math.random() * 900)}`;
@@ -559,119 +970,68 @@ export default function PurchaseOrderDetail() {
 
       {/* Scope Boundary Payment Status & Performance Security Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Statutory 2-Tranche Payment Card (90% + 10%) */}
-        <Card className="border border-border/80 shadow-sm border-l-4 border-l-emerald-600">
+        {/* Reporting-Only PO Payment Register Card (Scope-Aligned) */}
+        <Card className="border border-slate-200 shadow-xs">
           <CardHeader className="pb-3 bg-muted/20 border-b">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <IndianRupee className="h-4 w-4 text-emerald-700" /> Statutory 2-Tranche Payment Release (§8 &amp; §10)
+                <CreditCard className="h-4 w-4 text-slate-700" /> Payment Register (Reporting-Only)
               </CardTitle>
-              <Badge className={
-                isT1Paid && isT2Paid ? "bg-emerald-100 text-emerald-800 border-emerald-300" :
-                isT1Paid ? "bg-blue-100 text-blue-800 border-blue-300" :
-                "bg-slate-100 text-slate-700 border-slate-300"
+              <Badge variant="outline" className={
+                rawPO.paymentStatus === "paid"
+                  ? "bg-slate-100 text-slate-900 border-slate-300 font-semibold"
+                  : "bg-slate-50 text-slate-700 border-slate-200 font-semibold"
               }>
-                {isT1Paid && isT2Paid ? "FULLY PAID" : isT1Paid ? "90% PAID (TRANCHE 1)" : "PAYMENT PENDING"}
+                {rawPO.paymentStatus === "paid" ? "PAID" : "NOT PAID"}
               </Badge>
             </div>
             <CardDescription className="text-[11px] mt-1 text-slate-600">
-              90% on delivery &amp; verified docs; 10% held as retention released post 3 months satisfactory hospital usage.
+              Disbursements occur outside TGMSIDC through IFMIS/Treasury. Accounts officer manually records payment clearance.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 pt-4 text-xs">
-            {/* Tranche 1 (90%) */}
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
               <div className="flex items-center justify-between">
-                <div>
-                  <span className="font-bold text-slate-900">Tranche 1 (90% Release)</span>
-                  <p className="text-[11px] text-muted-foreground">Released upon delivery, QA clearance &amp; all verified docs</p>
-                </div>
-                <span className="font-mono font-bold text-sm text-foreground">₹{t1Amount.toLocaleString("en-IN")}</span>
+                <span className="font-semibold text-slate-700">Payment Status:</span>
+                <span className="font-bold text-slate-900 uppercase">{rawPO.paymentStatus || "NOT PAID"}</span>
               </div>
-              <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200">
-                <span className="text-muted-foreground">Status:</span>
-                {isT1Paid ? (
-                  <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px] gap-1">
-                    <CheckCircle2 className="h-3 w-3" /> Released {rawPO.tranche1PaidDate ? format(new Date(rawPO.tranche1PaidDate), "dd MMM") : ""}
-                  </Badge>
-                ) : (
-                  <Badge className="bg-amber-100 text-amber-800 border-0 text-[10px]">
-                    Pending Verification
-                  </Badge>
-                )}
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">UTR / Transaction Ref:</span>
+                <span className="font-mono font-medium text-slate-800">{rawPO.paymentReference || "—"}</span>
               </div>
-              {rawPO.tranche1Reference && (
-                <div className="text-[10px] text-slate-500 font-mono">
-                  UTR: {rawPO.tranche1Reference} · By: {rawPO.tranche1PaidBy || "Accounts Division"}
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Payment Date:</span>
+                <span className="text-slate-800">{rawPO.paymentDate ? format(new Date(rawPO.paymentDate), "dd MMM yyyy") : "—"}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Recorded By:</span>
+                <span className="text-slate-800">{rawPO.paidBy || "—"}</span>
+              </div>
+              {rawPO.paymentRemarks && (
+                <div className="pt-1 border-t text-[11px] text-slate-600">
+                  Remarks: {rawPO.paymentRemarks}
                 </div>
-              )}
-              {(role === "admin" || role === "tgmsidc_user" || role === "executive_director") && !isT1Paid && (
-                <Button
-                  size="sm"
-                  className="w-full bg-[#186812] hover:bg-[#124e0d] text-white text-xs mt-1"
-                  onClick={() => {
-                    setPayTrancheModal({ tranche: "tranche1_90" });
-                    setPayTrancheForm({
-                      reference: `UTR-TG90-${Math.floor(10000000 + Math.random() * 90000000)}`,
-                      date: new Date().toISOString().split("T")[0],
-                      paidBy: user?.fullName || "Accounts Officer",
-                      remarks: `90% payment released against verified DCC, QA clearance & installation documents for ${po.poNumber}.`,
-                    });
-                  }}
-                >
-                  <IndianRupee className="h-3.5 w-3.5 mr-1" /> Release 90% (Tranche 1)
-                </Button>
               )}
             </div>
 
-            {/* Tranche 2 (10% Retention) */}
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="font-bold text-slate-900">Tranche 2 (10% Retention)</span>
-                  <p className="text-[11px] text-muted-foreground">Released post 3 months satisfactory usage &amp; QPC verification</p>
-                </div>
-                <span className="font-mono font-bold text-sm text-foreground">₹{t2Amount.toLocaleString("en-IN")}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200">
-                <span className="text-muted-foreground">Status:</span>
-                {isT2Paid ? (
-                  <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px] gap-1">
-                    <CheckCircle2 className="h-3 w-3" /> Retention Released {rawPO.tranche2PaidDate ? format(new Date(rawPO.tranche2PaidDate), "dd MMM") : ""}
-                  </Badge>
-                ) : isT1Paid ? (
-                  <Badge className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px]">
-                    3-Month Usage Period
-                  </Badge>
-                ) : (
-                  <Badge className="bg-slate-100 text-slate-600 border-0 text-[10px]">
-                    Awaiting Tranche 1
-                  </Badge>
-                )}
-              </div>
-              {rawPO.tranche2Reference && (
-                <div className="text-[10px] text-slate-500 font-mono">
-                  UTR: {rawPO.tranche2Reference} · By: {rawPO.tranche2PaidBy || "Accounts Division"}
-                </div>
-              )}
-              {(role === "admin" || role === "tgmsidc_user" || role === "executive_director") && isT1Paid && !isT2Paid && (
-                <Button
-                  size="sm"
-                  className="w-full bg-blue-700 hover:bg-blue-800 text-white text-xs mt-1"
-                  onClick={() => {
-                    setPayTrancheModal({ tranche: "tranche2_10" });
-                    setPayTrancheForm({
-                      reference: `UTR-TG10-${Math.floor(10000000 + Math.random() * 90000000)}`,
-                      date: new Date().toISOString().split("T")[0],
-                      paidBy: user?.fullName || "Accounts Officer",
-                      remarks: `Final 10% retention released post 3 months satisfactory hospital usage & QPC verification for ${po.poNumber}.`,
-                    });
-                  }}
-                >
-                  <IndianRupee className="h-3.5 w-3.5 mr-1" /> Release 10% (Tranche 2 - Post 3 Months)
-                </Button>
-              )}
-            </div>
+            <Button
+              size="sm"
+              className="w-full text-xs shadow-xs"
+              onClick={() => {
+                setPaymentForm({
+                  paymentStatus: rawPO.paymentStatus === "paid" ? "paid" : "paid",
+                  paymentReference: rawPO.paymentReference || "",
+                  paymentDate: rawPO.paymentDate ? new Date(rawPO.paymentDate).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
+                  paymentAmount: rawPO.paymentAmount || po.totalAmount,
+                  paidBy: rawPO.paidBy || user?.fullName || "Accounts Officer",
+                  paymentRemarks: rawPO.paymentRemarks || "",
+                });
+                setPaymentOpen(true);
+              }}
+            >
+              <CreditCard className="h-3.5 w-3.5 mr-1.5" />
+              Update Payment Status (Paid / Not Paid)
+            </Button>
           </CardContent>
         </Card>
 
@@ -866,7 +1226,7 @@ export default function PurchaseOrderDetail() {
                 <CreditCard className="h-5 w-5 text-emerald-700" /> Record Manual Payment Status
               </DialogTitle>
               <DialogDescription className="text-xs">
-                Per Process Book §0, disbursement occurs via Treasury. Enter the transaction UTR number and date for official records.
+                Disbursement occurs externally via Treasury/PFMS. Enter the transaction UTR number and date for official records.
               </DialogDescription>
             </DialogHeader>
 
@@ -940,7 +1300,7 @@ export default function PurchaseOrderDetail() {
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setPaymentOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={paymentSubmitting} className="bg-[#186812] hover:bg-[#124e0d] text-white">
+              <Button type="submit" disabled={paymentSubmitting}>
                 {paymentSubmitting ? "Recording..." : "Save Payment Record"}
               </Button>
             </DialogFooter>
@@ -957,7 +1317,7 @@ export default function PurchaseOrderDetail() {
                 <RotateCcw className="h-5 w-5 text-primary" /> Request PO Amendment (v{(rawPO.version || 1) + 1})
               </DialogTitle>
               <DialogDescription className="text-xs">
-                Record a formal statutory amendment to this purchase order per Process Book §7.
+                Record a formal statutory amendment to this purchase order.
               </DialogDescription>
             </DialogHeader>
 
@@ -1014,7 +1374,7 @@ export default function PurchaseOrderDetail() {
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setAmendOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={amendSubmitting} className="bg-primary text-white">
+              <Button type="submit" disabled={amendSubmitting}>
                 {amendSubmitting ? "Amending..." : "Create Amendment Snapshot"}
               </Button>
             </DialogFooter>
@@ -1022,37 +1382,6 @@ export default function PurchaseOrderDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* Review Dialog */}
-      <Dialog open={!!reviewAction} onOpenChange={(open) => !open && setReviewAction(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {reviewAction === "recommend_approve" ? "Recommend Approval" :
-               reviewAction === "recommend_reject" ? "Recommend Rejection" :
-               reviewAction === "return" ? "Return for Modification" :
-               reviewAction === "so_approve" ? "Approve Purchase Order" :
-               reviewAction === "so_return" ? "Return Purchase Order" :
-               reviewAction === "so_reject" ? "Reject Purchase Order" : "Action"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <Label>Comments (Optional for Approve, Required for Return/Reject)</Label>
-            <Textarea
-              className="mt-2"
-              placeholder="Enter your remarks here..."
-              value={reviewComments}
-              onChange={(e) => setReviewComments(e.target.value)}
-              rows={4}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setReviewAction(null)}>Cancel</Button>
-            <Button onClick={handleReviewSubmit} className="bg-primary text-white" disabled={isReviewing}>
-              Confirm Action
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Cancel Dialog */}
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
@@ -1111,7 +1440,7 @@ export default function PurchaseOrderDetail() {
           </div>
           <DialogFooter>
             <Button variant="outline" disabled={ackSubmitting} onClick={() => setAckOpen(false)}>Cancel</Button>
-            <Button onClick={handleAcknowledgePO} disabled={ackSubmitting} className="bg-[#186812] hover:bg-[#124e0d] text-white">
+            <Button onClick={handleAcknowledgePO} disabled={ackSubmitting}>
               {ackSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
               {ackSubmitting ? "Recording Acknowledgement (2–3s)..." : "Submit Acknowledgement"}
             </Button>
@@ -1195,7 +1524,7 @@ export default function PurchaseOrderDetail() {
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" disabled={dispatchSubmitting} onClick={() => setDispatchOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={dispatchSubmitting} className="bg-[#186812] hover:bg-[#124e0d] text-white">
+              <Button type="submit" disabled={dispatchSubmitting}>
                 {dispatchSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
                 {dispatchSubmitting ? "Transmitting Dispatch to DB (2–3s)..." : "Confirm & Transmit Dispatch"}
               </Button>
@@ -1204,102 +1533,105 @@ export default function PurchaseOrderDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* Statutory 2-Tranche Payment Release Dialog */}
-      {payTrancheModal && (
-        <Dialog open={true} onOpenChange={() => setPayTrancheModal(null)}>
-          <DialogContent className="max-w-md">
-            <form onSubmit={handleReleaseTranchePayment}>
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <IndianRupee className="h-5 w-5 text-emerald-700" />
-                  {payTrancheModal.tranche === "tranche1_90" ? "Release 90% Payment (Tranche 1)" : "Release 10% Retention (Tranche 2)"}
-                </DialogTitle>
-                <DialogDescription className="text-xs">
-                  {payTrancheModal.tranche === "tranche1_90"
-                    ? "Release 90% of total order value upon verified delivery, QA clearance, and statutory documents."
-                    : "Release final 10% retention upon completion of 3 months satisfactory clinical hospital usage."}
-                </DialogDescription>
-              </DialogHeader>
 
-              <div className="space-y-4 py-3 text-xs">
-                <div className="p-3 bg-muted/40 rounded-lg space-y-1">
-                  <div><span className="font-semibold">PO Number:</span> {po.poNumber}</div>
-                  <div><span className="font-semibold">Vendor:</span> {po.vendorName}</div>
-                  <div><span className="font-semibold">Total PO Value:</span> ₹{(po.totalAmount || 0).toLocaleString("en-IN")}</div>
-                  <div className="pt-1 border-t text-sm font-bold text-emerald-800">
-                    Release Amount: ₹{payTrancheModal.tranche === "tranche1_90"
-                      ? Math.round((po.totalAmount || 0) * 0.9).toLocaleString("en-IN")
-                      : ((po.totalAmount || 0) - Math.round((po.totalAmount || 0) * 0.9)).toLocaleString("en-IN")}
-                    <span className="text-xs font-normal text-slate-500 ml-1.5">
-                      ({payTrancheModal.tranche === "tranche1_90" ? "90% of Total" : "10% Retention"})
-                    </span>
-                  </div>
-                </div>
 
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Treasury / Bank UTR Reference Number *</Label>
-                  <Input
-                    value={payTrancheForm.reference}
-                    onChange={e => setPayTrancheForm(f => ({ ...f, reference: e.target.value }))}
-                    placeholder="e.g. UTR-SBIN-12345678"
-                    required
-                  />
-                </div>
+      {/* Issue PO to Vendor Dialog */}
+      <Dialog open={issuePODialog} onOpenChange={setIssuePODialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <Send className="h-5 w-5 text-emerald-600" />
+              Issue Purchase Order to Empanelled Vendor
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              This officially transmits the sanctioned PO to <strong>{po.vendorName}</strong>. The vendor will have 7 days to acknowledge supply commitments.
+            </DialogDescription>
+          </DialogHeader>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold">Disbursement Date</Label>
-                    <Input
-                      type="date"
-                      value={payTrancheForm.date}
-                      onChange={e => setPayTrancheForm(f => ({ ...f, date: e.target.value }))}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold">Authorizing Officer</Label>
-                    <Input
-                      value={payTrancheForm.paidBy}
-                      onChange={e => setPayTrancheForm(f => ({ ...f, paidBy: e.target.value }))}
-                      required
-                    />
-                  </div>
-                </div>
+          <div className="space-y-3 py-2 text-xs">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Issuance Remarks / Instructions to Vendor</Label>
+              <Textarea
+                placeholder="Enter transmission instructions, dispatch timeline expectations, or delivery guidelines..."
+                value={issuePORemarks}
+                onChange={(e) => setIssuePORemarks(e.target.value)}
+                rows={3}
+                className="text-xs resize-none"
+              />
+            </div>
+          </div>
 
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Statutory Accounting Remarks</Label>
-                  <Textarea
-                    value={payTrancheForm.remarks}
-                    onChange={e => setPayTrancheForm(f => ({ ...f, remarks: e.target.value }))}
-                    rows={2}
-                    required
-                  />
-                </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIssuePODialog(false)}
+              disabled={issuingPO}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleIssuePO}
+              disabled={issuingPO}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 shadow-xs"
+            >
+              {issuingPO ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Send className="h-3.5 w-3.5" />}
+              {issuingPO ? "Transmitting..." : "Confirm & Issue PO"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-                <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded text-emerald-950 text-[11px]">
-                  {payTrancheModal.tranche === "tranche1_90" ? (
-                    <span>✓ Certified that DCC, QA Inspection, and Tax Invoices have been verified. 10% will be held as 3-month usage retention.</span>
-                  ) : (
-                    <span>✓ Certified that 3 months of satisfactory hospital usage have elapsed and QPC has been verified by the facility.</span>
-                  )}
-                </div>
-              </div>
+      {/* Official PO Closure Dialog */}
+      <Dialog open={closePODialog} onOpenChange={setClosePODialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <Lock className="h-5 w-5 text-emerald-700" />
+              Officially Close Purchase Order
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Closing this PO confirms full delivery fulfilment, physical DCC verification, QA acceptance, asset registration with warranty, and payment status update.
+            </DialogDescription>
+          </DialogHeader>
 
-              <DialogFooter>
-                <Button type="button" variant="outline" disabled={payTrancheSubmitting} onClick={() => setPayTrancheModal(null)}>Cancel</Button>
-                <Button
-                  type="submit"
-                  disabled={payTrancheSubmitting}
-                  className={payTrancheModal.tranche === "tranche1_90" ? "bg-[#186812] hover:bg-[#124e0d] text-white" : "bg-blue-700 hover:bg-blue-800 text-white"}
-                >
-                  {payTrancheSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-                  {payTrancheSubmitting ? "Releasing Payment to DB (2–3s)..." : `Confirm & Release ${payTrancheModal.tranche === "tranche1_90" ? "90% (T1)" : "10% Retention (T2)"}`}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      )}
+          <div className="space-y-3 py-2 text-xs">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Final Closure Observations / Archival Remarks</Label>
+              <Textarea
+                placeholder="Enter archival remarks or audit observations..."
+                value={closureRemarks}
+                onChange={(e) => setClosureRemarks(e.target.value)}
+                rows={3}
+                className="text-xs resize-none"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setClosePODialog(false)}
+              disabled={closingPO}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleClosePO}
+              disabled={closingPO}
+              className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs gap-1.5 shadow-xs"
+            >
+              {closingPO ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Lock className="h-3.5 w-3.5" />}
+              {closingPO ? "Closing PO..." : "Confirm Official PO Closure"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

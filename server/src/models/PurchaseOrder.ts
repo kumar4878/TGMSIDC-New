@@ -29,7 +29,7 @@ export interface IPurchaseOrder extends Document {
   poDate: Date;
   version: number;
 
-  indentId: Types.ObjectId;
+  indentId?: Types.ObjectId | null;
   indentNumber: string;
   rateContractId: Types.ObjectId;
   rcNumber: string;
@@ -69,11 +69,55 @@ export interface IPurchaseOrder extends Document {
   expectedDeliveryDate?: Date;
   actualDeliveryDate?: Date;
 
-  /* Approval */
+  /* 3-Tier Approval (GM -> SO -> MD) */
   approvalStatus: string;
   approvedBy: string;
   approvedDate?: Date;
+  issuedDate?: Date;
   returnComments: string;
+
+  gmReviewNotes?: string;
+  gmReviewedBy?: string;
+  gmReviewedDate?: Date;
+
+  soApprovalNotes?: string;
+  soApprovedBy?: string;
+  soApprovedDate?: Date;
+
+  mdApprovalNotes?: string;
+  mdApprovedBy?: string;
+  mdApprovedDate?: Date;
+
+  approvalTrail?: any[];
+
+  /* Indent context reviewed alongside PO */
+  indentLineItemIndex?: number;
+  indentDetails?: {
+    facilityName?: string;
+    hodName?: string;
+    indentType?: string;
+    programmeName?: string;
+    fundingSourceName?: string;
+    accountHeadName?: string;
+    scannedCopyFilename?: string;
+    scannedCopyDataUrl?: string;
+    technicalRequirements?: string;
+  };
+
+  /* Fulfilment calculation & ledger */
+  fulfilmentStatus?: string;
+  cumulativeAcceptedQuantity?: number;
+  cumulativeReturnedQuantity?: number;
+  cumulativeRejectedQuantity?: number;
+  fulfilledQuantity?: number;
+  balanceQuantity?: number;
+
+  /* PO Closure */
+  closureStatus?: string;
+  closureEligibleAt?: Date;
+  closedAt?: Date;
+  closedBy?: string;
+  closureRemarks?: string;
 
   /* Amendment & cancellation */
   amendments: any[];
@@ -86,13 +130,16 @@ export interface IPurchaseOrder extends Document {
   vendorAckDate?: Date;
   vendorExpectedDispatchDate?: Date;
 
-  /* Payment (Scope Boundary: Manual Paid/Not-Paid status recorded by TGMSIDC Accounts) */
+  /* Payment: Strictly reporting-only manual Paid / Not-Paid indicator */
   paymentStatus: string;
   paymentReference?: string;
   paymentDate?: Date;
   paymentAmount?: number;
   paidBy?: string;
   paymentRemarks?: string;
+  paymentHistory?: any[];
+
+  /* Legacy tranche fields (backward compat only) */
   tranche1Amount?: number;
   tranche1Paid?: boolean;
   tranche1PaidDate?: Date;
@@ -103,7 +150,6 @@ export interface IPurchaseOrder extends Document {
   tranche2PaidDate?: Date;
   tranche2Reference?: string;
   tranche2PaidBy?: string;
-  paymentHistory?: any[];
 
   /* Misc */
   fileNo: string;
@@ -119,11 +165,11 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
   {
     poNumber: { type: String, required: true, unique: true },
     poType: { type: String, default: "rc_based", enum: ["rc_based", "local_purchase"] },
-    financialYear: { type: String, default: "2025-26" },
+    financialYear: { type: String, default: "2026-27" },
     poDate: { type: Date, default: () => new Date() },
     version: { type: Number, default: 1 },
 
-    indentId: { type: Schema.Types.Mixed, ref: "Indent", required: true },
+    indentId: { type: Schema.Types.Mixed, ref: "Indent", required: false },
     indentNumber: { type: String, default: "" },
     rateContractId: { type: Schema.Types.Mixed, ref: "RateContract", required: true },
     rcNumber: { type: String, default: "" },
@@ -157,10 +203,59 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
     expectedDeliveryDate: { type: Date },
     actualDeliveryDate: { type: Date },
 
-    approvalStatus: { type: String, default: "pending", enum: ["pending", "proposed_approve", "proposed_reject", "approved", "returned", "rejected"] },
+    approvalStatus: {
+      type: String,
+      default: "draft",
+    },
     approvedBy: { type: String, default: "" },
     approvedDate: { type: Date },
+    issuedDate: { type: Date },
     returnComments: { type: String, default: "" },
+
+    gmReviewNotes: { type: String, default: "" },
+    gmReviewedBy: { type: String, default: "" },
+    gmReviewedDate: { type: Date },
+
+    soApprovalNotes: { type: String, default: "" },
+    soApprovedBy: { type: String, default: "" },
+    soApprovedDate: { type: Date },
+
+    mdApprovalNotes: { type: String, default: "" },
+    mdApprovedBy: { type: String, default: "" },
+    mdApprovedDate: { type: Date },
+
+    approvalTrail: [
+      {
+        level: { type: String, required: true },
+        actorName: { type: String, required: true },
+        role: { type: String, required: true },
+        action: { type: String, required: true },
+        remarks: { type: String, default: "" },
+        actionedAt: { type: Date, default: () => new Date() },
+      },
+    ],
+
+    indentLineItemIndex: { type: Number },
+    indentDetails: { type: Schema.Types.Mixed },
+
+    fulfilmentStatus: {
+      type: String,
+      default: "not_fulfilled",
+    },
+    cumulativeAcceptedQuantity: { type: Number, default: 0 },
+    cumulativeReturnedQuantity: { type: Number, default: 0 },
+    cumulativeRejectedQuantity: { type: Number, default: 0 },
+    fulfilledQuantity: { type: Number, default: 0 },
+    balanceQuantity: { type: Number, default: 0 },
+
+    closureStatus: {
+      type: String,
+      default: "open",
+    },
+    closureEligibleAt: { type: Date },
+    closedAt: { type: Date },
+    closedBy: { type: String, default: "" },
+    closureRemarks: { type: String, default: "" },
 
     amendments: [POAmendmentSchema],
     cancellationReason: { type: String },

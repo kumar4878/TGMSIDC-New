@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useLocation, Link } from "wouter";
-import { useCreatePurchaseOrder, useListIndents, useListRateContracts, useListInstitutions, useListVendors, type Indent, type RateContract } from "@/lib/api-hooks";
+import { useCreatePurchaseOrder, useListIndents, useListRateContracts, useGetRateContract, useListInstitutions, useListVendors, type Indent, type RateContract } from "@/lib/api-hooks";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,8 +9,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, CheckCircle2, Package, ShoppingCart, IndianRupee, Layers, ShieldCheck, Users, Building2, Split } from "lucide-react";
+import {
+  ArrowLeft, CheckCircle2, Package, ShoppingCart, IndianRupee, Layers,
+  ShieldCheck, Users, Building2, Split, FileText, Phone, Mail, MapPin, Tag,
+  AlertCircle, ExternalLink, Send,
+} from "lucide-react";
+import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface OrderItemRow {
   equipmentId: string;
@@ -23,7 +29,9 @@ interface OrderItemRow {
 }
 
 export default function PurchaseOrderNew() {
-  const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const isRaisePoAllowed = user?.role === "admin" || user?.role === "tgmsidc_user" || user?.role === "gm_equipment" || (user?.role as string) === "gm";
+  const [location, navigate] = useLocation();
   const { toast } = useToast();
   const { data: allIndents = [] } = useListIndents({});
   const { data: rcs = [] } = useListRateContracts({ status: "active" });
@@ -31,10 +39,19 @@ export default function PurchaseOrderNew() {
   const { data: vendors = [] } = useListVendors({});
   const createPO = useCreatePurchaseOrder();
 
-  // Filter indents ready for PO: linked_to_rc or approved
+  // Extract query params (for "Draft PO from Indent" and "Create PO from RC" flows)
+  const searchParams = new URLSearchParams(window.location.search);
+  const rcIdFromParam = searchParams.get("rcId") || "";
+  const indentIdFromParam = searchParams.get("indentId") || "";
+  const lineIndexFromParam = searchParams.get("lineIndex");
+
+  // Filter indents ready for PO: linked_to_rc, approved, ready_for_procurement, in_procurement
   const eligibleIndents = useMemo(() => {
-    return allIndents.filter(i => ["linked_to_rc", "approved", "tender_initiated"].includes(i.status));
-  }, [allIndents]);
+    return allIndents.filter(i =>
+      ["linked_to_rc", "approved", "tender_initiated", "in_procurement", "ready_for_procurement", "verification_completed"].includes(i.status) ||
+      String(i.id) === indentIdFromParam || String((i as any)._id) === indentIdFromParam
+    );
+  }, [allIndents, indentIdFromParam]);
 
   const [selectedIndentId, setSelectedIndentId] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
@@ -62,13 +79,38 @@ export default function PurchaseOrderNew() {
   // Consignee allocation state
   const [selectedFacilityId, setSelectedFacilityId] = useState("");
 
+  // Ensure page always starts at top on mount or param change
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [indentIdFromParam, rcIdFromParam]);
+
+  // Auto-populate from RC ONLY IF no indentId is specified (Create PO directly from RC view)
+  useEffect(() => {
+    if (!rcIdFromParam || indentIdFromParam || !rcs.length) return;
+    const matchedRc = rcs.find(r => r.id === rcIdFromParam);
+    if (!matchedRc) return;
+    // Pre-populate one order item from the matched RC
+    setOrderItems([{
+      equipmentId: matchedRc.equipmentId || "",
+      equipmentName: matchedRc.equipmentName,
+      rateContractId: matchedRc.id,
+      unitPrice: matchedRc.unitPrice,
+      gstRate: matchedRc.gstRate ?? 12,
+      qty: 1,
+      selected: true,
+    }]);
+    if (!deliveryAddress) {
+      setDeliveryAddress("TGMSIDC Central Biomedical Warehouse, Sultan Bazar, Hyderabad, Telangana - 500095");
+    }
+  }, [rcIdFromParam, indentIdFromParam, rcs]);
+
   // When indent changes, populate line items & defaults
-  function handleIndentSelect(indentId: string) {
+  function handleIndentSelect(indentId: string, targetLineIndex?: number, targetRcId?: string) {
     setSelectedIndentId(indentId);
-    const indent = allIndents.find(i => String(i.id) === indentId);
+    const indent = allIndents.find(i => String(i.id) === indentId || String((i as any)._id) === indentId || i.indentNumber === indentId);
     if (!indent) return;
 
-    if (!deliveryAddress) {
+    if (!deliveryAddress || deliveryAddress.includes("Central Biomedical Warehouse")) {
       setDeliveryAddress(indent.facilityName ? `${indent.facilityName}, Telangana` : "Medical Facility, Telangana");
     }
     if (indent.facilityId) {
@@ -78,27 +120,58 @@ export default function PurchaseOrderNew() {
     // Build selectable items from indent
     const items: OrderItemRow[] = [];
     if (indent.lineItems && indent.lineItems.length > 0) {
-      for (const li of indent.lineItems) {
+      indent.lineItems.forEach((li, idx) => {
+        const isTarget = targetLineIndex !== undefined ? idx === targetLineIndex : true;
         const eqId = li.equipmentId || indent.equipmentId;
-        const matchingRc = rcs.find(r => r.equipmentId === eqId || r.equipmentName.toLowerCase() === (li.equipmentName || "").toLowerCase()) || rcs[0];
+
+        // Accurate RC matching priority:
+        // 1. Specified targetRcId from query
+        // 2. RC whose unitPrice (or unitPriceInclTax) matches li.estimatedUnitCost or li.rateContractUnitPrice
+        // 3. li.rateContractId
+        // 4. Any RC for this equipment
+        // 5. Fallback to first available RC
+        const matchingRc =
+          (targetRcId && rcs.find(r => r.id === targetRcId)) ||
+          (li.estimatedUnitCost && rcs.find(r =>
+            (r.equipmentId === eqId || r.equipmentName.toLowerCase() === (li.equipmentName || "").toLowerCase()) &&
+            (r.unitPrice === li.estimatedUnitCost || Math.round(r.unitPrice * (1 + (r.gstRate ?? 12) / 100)) === li.estimatedUnitCost)
+          )) ||
+          (li.rateContractUnitPrice && rcs.find(r =>
+            (r.equipmentId === eqId || r.equipmentName.toLowerCase() === (li.equipmentName || "").toLowerCase()) &&
+            r.unitPrice === li.rateContractUnitPrice
+          )) ||
+          (li.rateContractId && rcs.find(r => r.id === li.rateContractId)) ||
+          rcs.find(r => r.equipmentId === eqId || r.equipmentName.toLowerCase() === (li.equipmentName || "").toLowerCase()) ||
+          rcs[0];
+
+        const resolvedUnitPrice = matchingRc
+          ? matchingRc.unitPrice
+          : (li.rateContractUnitPrice || li.estimatedUnitCost || 100000);
+        const resolvedGstRate = matchingRc ? (matchingRc.gstRate ?? 12) : 12;
+
         items.push({
           equipmentId: eqId || matchingRc?.equipmentId || "",
           equipmentName: li.equipmentName || matchingRc?.equipmentName || "Medical Equipment",
-          rateContractId: matchingRc ? matchingRc.id : (indent.rateContractId || ""),
-          unitPrice: matchingRc ? matchingRc.unitPrice : (li.estimatedUnitCost || 100000),
-          gstRate: matchingRc ? matchingRc.gstRate : 12,
+          rateContractId: matchingRc ? matchingRc.id : (li.rateContractId || indent.rateContractId || ""),
+          unitPrice: resolvedUnitPrice,
+          gstRate: resolvedGstRate,
           qty: li.requestedQty || li.quantity || 1,
-          selected: true,
+          selected: isTarget,
         });
-      }
+      });
     } else {
-      const matchingRc = rcs.find(r => r.equipmentId === indent.equipmentId) || (indent.rateContractId ? rcs.find(r => r.id === indent.rateContractId) : rcs[0]);
+      const eqId = indent.equipmentId;
+      const matchingRc =
+        (targetRcId && rcs.find(r => r.id === targetRcId)) ||
+        rcs.find(r => r.equipmentId === eqId || r.equipmentName.toLowerCase() === (indent.equipmentName || "").toLowerCase()) ||
+        (indent.rateContractId ? rcs.find(r => r.id === indent.rateContractId) : rcs[0]);
+
       items.push({
         equipmentId: indent.equipmentId || matchingRc?.equipmentId || "",
         equipmentName: indent.equipmentName || matchingRc?.equipmentName || "Medical Equipment",
         rateContractId: matchingRc ? matchingRc.id : (indent.rateContractId || ""),
         unitPrice: matchingRc ? matchingRc.unitPrice : (indent.estimatedTotalValue || 100000),
-        gstRate: matchingRc ? matchingRc.gstRate : 12,
+        gstRate: matchingRc ? (matchingRc.gstRate ?? 12) : 12,
         qty: indent.quantity || 1,
         selected: true,
       });
@@ -106,6 +179,15 @@ export default function PurchaseOrderNew() {
 
     setOrderItems(items);
   }
+
+  // Pre-populate when coming from Indent "Draft PO"
+  useEffect(() => {
+    if (!indentIdFromParam || !allIndents.length) return;
+    const matched = allIndents.find(i => String(i.id) === indentIdFromParam || String((i as any)._id) === indentIdFromParam || i.indentNumber === indentIdFromParam);
+    if (matched) {
+      handleIndentSelect(String(matched.id || (matched as any)._id), lineIndexFromParam !== null ? Number(lineIndexFromParam) : undefined, rcIdFromParam);
+    }
+  }, [indentIdFromParam, allIndents.length, lineIndexFromParam, rcIdFromParam, rcs.length]);
 
   function toggleItem(index: number) {
     setOrderItems(prev => prev.map((item, i) => i === index ? { ...item, selected: !item.selected } : item));
@@ -145,15 +227,21 @@ export default function PurchaseOrderNew() {
   const l1Qty = Math.ceil(totalQty * l1Ratio);
   const l2Qty = isSplit ? totalQty - l1Qty : 0;
 
-  const isValid = selectedIndentId && selectedItems.length > 0 && deliveryAddress && expectedDeliveryDate && (!isSplit || secondaryVendorId);
+  const isValid = (selectedIndentId || rcIdFromParam) && selectedItems.length > 0 && deliveryAddress && expectedDeliveryDate && (!isSplit || secondaryVendorId);
+
+  const primaryItem = selectedItems[0];
+  const selectedRc = rcs.find(r => r.id === primaryItem?.rateContractId) || (rcIdFromParam ? rcs.find(r => r.id === rcIdFromParam) : null);
+  const selectedVendor = vendors.find(v => String(v.id) === String(selectedRc?.vendorId)) || vendors.find(v => v.name === selectedRc?.vendorName);
+  const selectedIndent = allIndents.find(i => String(i.id) === selectedIndentId || String((i as any)._id) === selectedIndentId || i.indentNumber === selectedIndentId);
+  const selectedLineIndex = lineIndexFromParam !== null ? Number(lineIndexFromParam) : (orderItems.findIndex(i => i.selected) >= 0 ? orderItems.findIndex(i => i.selected) : 0);
+  const selectedLineItem = selectedIndent?.lineItems?.[selectedLineIndex];
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!isValid) return;
 
     try {
-      const primaryItem = selectedItems[0];
-      const rc = rcs.find(r => r.id === primaryItem.rateContractId);
+      const rc = rcs.find(r => r.id === primaryItem?.rateContractId) || selectedRc;
 
       // Build consignees array
       const matchedFacility = institutions.find(inst => String(inst.id) === selectedFacilityId);
@@ -171,13 +259,15 @@ export default function PurchaseOrderNew() {
       // Primary L1 Purchase Order
       const res = await createPO.mutateAsync({
         data: {
-          indentId: selectedIndentId,
-          rateContractId: primaryItem.rateContractId,
+          indentId: selectedIndentId || undefined,
+          lineIndex: selectedLineIndex,
+          rateContractId: primaryItem.rateContractId || rcIdFromParam,
           vendorId: rc?.vendorId,
           equipmentId: primaryItem.equipmentId,
           quantity: isSplit ? l1Qty : primaryItem.qty,
           deliveryAddress,
           expectedDeliveryDate,
+          financialYear: "2026-27",
           psRequired,
           psPercent,
           psAmount: isSplit ? Math.round((psAmount * l1Ratio)) : psAmount,
@@ -185,6 +275,8 @@ export default function PurchaseOrderNew() {
           vendorTier: "L1",
           allocationRatio: isSplit ? `${Math.round(l1Ratio * 100)}% (L1 BFC Allocation)` : "100%",
           consignees,
+          status: "draft",
+          approvalStatus: "draft",
         }
       });
 
@@ -193,13 +285,15 @@ export default function PurchaseOrderNew() {
         const l2Vendor = vendors.find(v => String(v.id) === secondaryVendorId);
         await createPO.mutateAsync({
           data: {
-            indentId: selectedIndentId,
+            indentId: selectedIndentId || undefined,
+            lineIndex: selectedLineIndex,
             rateContractId: primaryItem.rateContractId,
             vendorId: secondaryVendorId,
             equipmentId: primaryItem.equipmentId,
             quantity: l2Qty,
             deliveryAddress,
             expectedDeliveryDate,
+            financialYear: "2026-27",
             psRequired,
             psPercent,
             psAmount: Math.round(psAmount * (1 - l1Ratio)),
@@ -216,18 +310,18 @@ export default function PurchaseOrderNew() {
                 deliveryStatus: "pending",
               }
             ],
+            status: "draft",
+            approvalStatus: "draft",
           }
         });
       }
 
       toast({
-        title: isSplit ? "Multi-Vendor POs Released" : "Purchase Order Issued",
-        description: isSplit
-          ? `Created L1 PO (${l1Qty} units) and L2 PO (${l2Qty} units) under BFC statutory split.`
-          : `Order ${res.poNumber || "PO"} created successfully. Performance Security: ₹${psAmount.toLocaleString("en-IN")}.`,
+        title: "Draft PO Created & Tagged to Indent",
+        description: `Draft PO ${res.poNumber || "PO"} created. It will now be reviewed by GM & SO during Indent approval and issued upon Executive Director (ED) sanction.`,
       });
 
-      navigate(`/purchase-orders/${res.id}`);
+      navigate(`/purchase-orders/${res.id}?fromDraft=true`);
     } catch (err: any) {
       toast({
         title: "Failed to create Purchase Order",
@@ -235,6 +329,23 @@ export default function PurchaseOrderNew() {
         variant: "destructive",
       });
     }
+  }
+
+  if (!isRaisePoAllowed) {
+    return (
+      <div className="max-w-2xl mx-auto py-16 px-4 text-center space-y-4">
+        <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
+          <AlertCircle className="w-6 h-6" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900">Access Restricted</h2>
+        <p className="text-sm text-slate-600 max-w-md mx-auto">
+          Only authorized roles (<strong>TGMSIDC User</strong>, <strong>General Manager (GM)</strong>, and <strong>Administrator</strong>) are permitted to draft or raise Purchase Orders.
+        </p>
+        <Link href="/purchase-orders">
+          <Button variant="outline" className="mt-2">Back to Purchase Orders</Button>
+        </Link>
+      </div>
+    );
   }
 
   return (
@@ -246,14 +357,32 @@ export default function PurchaseOrderNew() {
           </Button>
         </Link>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Issue Official Purchase Order</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight">Purchase Orders &gt; Raise PO</h1>
+            <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-xs">
+              Review &amp; Draft PO
+            </Badge>
+          </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Generate statutory purchase orders from approved indents with multi-vendor allocation and performance security
+            Review Rate Contract terms, item technical schedule, and associated empanelled vendor details to generate a Draft Purchase Order
           </p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* RC-based flow banner */}
+        {rcIdFromParam && (
+          <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
+            <ShieldCheck className="w-5 h-5 text-blue-600 shrink-0" />
+            <div>
+              <p className="text-xs font-bold text-blue-900">Creating PO from Rate Contract</p>
+              <p className="text-[11px] text-blue-700 mt-0.5">
+                Equipment and pricing have been pre-filled from the selected Rate Contract. Provide delivery details to proceed.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* 1. Indent & Facility Selection */}
         <Card className="border border-border/80 shadow-sm">
           <CardHeader className="pb-3 bg-muted/20 border-b">
@@ -264,10 +393,10 @@ export default function PurchaseOrderNew() {
           </CardHeader>
           <CardContent className="space-y-4 pt-4">
             <div>
-              <Label className="text-xs font-semibold">Approved Indent *</Label>
+              <Label className="text-xs font-semibold">Approved Indent {rcIdFromParam ? "(Optional — auto-linked from RC)" : "*"}</Label>
               <Select value={selectedIndentId} onValueChange={handleIndentSelect}>
                 <SelectTrigger className="mt-1.5 h-10 text-sm">
-                  <SelectValue placeholder="Select an approved requisition..." />
+                  <SelectValue placeholder={rcIdFromParam ? "Select an indent (optional)..." : "Select an approved requisition..."} />
                 </SelectTrigger>
                 <SelectContent>
                   {eligibleIndents.map((i) => (
@@ -323,7 +452,7 @@ export default function PurchaseOrderNew() {
         </Card>
 
         {/* 2. Item & Rate Contract Selection */}
-        {selectedIndentId && (
+        {(selectedIndentId || (rcIdFromParam && orderItems.length > 0)) && (
           <Card className="border border-border/80 shadow-sm">
             <CardHeader className="pb-3 bg-muted/20 border-b flex flex-row items-center justify-between">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -331,7 +460,7 @@ export default function PurchaseOrderNew() {
                 2. Equipment &amp; Rate Contract Line Items ({selectedItems.length} selected)
               </CardTitle>
               <Badge variant="outline" className="text-xs font-mono">
-                {orderItems.length} Available in Indent
+                {orderItems.length} {rcIdFromParam && !selectedIndentId ? "from Rate Contract" : "Available in Indent"}
               </Badge>
             </CardHeader>
             <CardContent className="space-y-4 pt-4">
@@ -383,11 +512,23 @@ export default function PurchaseOrderNew() {
                               <SelectValue placeholder="Select RC..." />
                             </SelectTrigger>
                             <SelectContent>
-                              {rcs.map((rc) => (
-                                <SelectItem key={rc.id} value={String(rc.id)} className="text-xs">
-                                  {rc.contractNumber} — ₹{rc.unitPrice.toLocaleString("en-IN")} ({rc.vendorName})
-                                </SelectItem>
-                              ))}
+                              {rcs
+                                .slice()
+                                .sort((a, b) => {
+                                  const aMatches = (a.equipmentId && a.equipmentId === item.equipmentId) || a.equipmentName.toLowerCase() === item.equipmentName.toLowerCase();
+                                  const bMatches = (b.equipmentId && b.equipmentId === item.equipmentId) || b.equipmentName.toLowerCase() === item.equipmentName.toLowerCase();
+                                  if (aMatches && !bMatches) return -1;
+                                  if (!aMatches && bMatches) return 1;
+                                  return 0;
+                                })
+                                .map((rc) => {
+                                  const matchesEq = (rc.equipmentId && rc.equipmentId === item.equipmentId) || rc.equipmentName.toLowerCase() === item.equipmentName.toLowerCase();
+                                  return (
+                                    <SelectItem key={rc.id} value={String(rc.id)} className="text-xs">
+                                      {rc.contractNumber} — ₹{rc.unitPrice.toLocaleString("en-IN")} + {rc.gstRate ?? 12}% GST ({rc.vendorName}){matchesEq ? " ★" : ""}
+                                    </SelectItem>
+                                  );
+                                })}
                             </SelectContent>
                           </Select>
                         </div>
@@ -408,7 +549,7 @@ export default function PurchaseOrderNew() {
         )}
 
         {/* 3. Performance Security (PS) & Bank Guarantee (Process Book §5 Step 13-14) */}
-        {selectedIndentId && (
+        {(selectedIndentId || (rcIdFromParam && orderItems.length > 0)) && (
           <Card className="border border-border/80 shadow-sm">
             <CardHeader className="pb-3 bg-muted/20 border-b">
               <div className="flex items-center justify-between">
@@ -463,15 +604,15 @@ export default function PurchaseOrderNew() {
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Under Process Book §5 Step 13, the empanelled supplier must submit a Bank Guarantee equal to {psPercent}% of the order value before equipment dispatch.
+                  The empanelled supplier must submit a Bank Guarantee equal to {psPercent}% of the order value before equipment dispatch.
                 </p>
               </CardContent>
             )}
           </Card>
         )}
 
-        {/* 4. Multi-Vendor PO Allocation (Process Book §5 Step 10 & §12 F-15) */}
-        {selectedIndentId && (
+        {/* 4. Multi-Vendor PO Allocation */}
+        {(selectedIndentId || (rcIdFromParam && orderItems.length > 0)) && (
           <Card className="border border-border/80 shadow-sm">
             <CardHeader className="pb-3 bg-muted/20 border-b">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -479,7 +620,7 @@ export default function PurchaseOrderNew() {
                 4. Statutory Multi-Vendor Allocation (BFC Approved Ratio)
               </CardTitle>
               <CardDescription className="text-xs">
-                Per Process Book §5 Step 10, when BFC approves split supply across L1 and L2 vendors, the system issues separate POs proportionally.
+                When BFC approves split supply across L1 and L2 vendors, the system issues separate POs proportionally.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-4">
@@ -547,13 +688,183 @@ export default function PurchaseOrderNew() {
           </Card>
         )}
 
+        {/* ── 4. Rate Contract, Equipment Item & Associated Vendor Scrutiny Review Panel ── */}
+        {(selectedRc || primaryItem) && (
+          <Card className="border border-slate-300 shadow-sm bg-white overflow-hidden">
+            <CardHeader className="bg-slate-900 text-white p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                    <CardTitle className="text-sm font-bold text-white tracking-wide">
+                      Rate Contract &amp; Associated Vendor Statutory Scrutiny
+                    </CardTitle>
+                    <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-400/30 text-[10px]">
+                      FR-RPT-RC-001 Verified
+                    </Badge>
+                  </div>
+                  <CardDescription className="text-xs text-slate-300">
+                    Mandatory TGMSIDC scrutiny of contracted rates, item technical schedule, and empanelled supplier before drafting PO.
+                  </CardDescription>
+                </div>
+                <div className="text-xs text-slate-300 sm:text-right font-mono">
+                  {selectedRc?.contractNumber ? `Contract #${selectedRc.contractNumber}` : "Direct Rate Contract"}
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="p-4 space-y-4 bg-slate-50/50">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* Panel 1: Rate Contract Details */}
+                <div className="bg-white border border-slate-200 rounded-lg p-3.5 space-y-2 shadow-2xs">
+                  <div className="flex items-center justify-between border-b pb-1.5 border-slate-100">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <FileText className="h-3.5 w-3.5 text-blue-600" /> Rate Contract
+                    </span>
+                    <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-800 border-emerald-200">
+                      Active
+                    </Badge>
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Contract Number:</span>
+                      <span className="font-mono font-bold text-slate-900">{selectedRc?.contractNumber || "RC-2627-0001"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Contracted Unit Rate:</span>
+                      <span className="font-semibold text-slate-900">₹{(selectedRc?.unitPrice || primaryItem?.unitPrice || 0).toLocaleString("en-IN")}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Applicable GST:</span>
+                      <span className="font-semibold text-slate-900">{selectedRc?.gstRate ?? 12}% (₹{Math.round(((selectedRc?.unitPrice || primaryItem?.unitPrice || 0) * (selectedRc?.gstRate ?? 12)) / 100).toLocaleString("en-IN")})</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Landed Rate (Incl. Tax):</span>
+                      <span className="font-bold text-emerald-700">₹{Math.round((selectedRc?.unitPrice || primaryItem?.unitPrice || 0) * (1 + (selectedRc?.gstRate ?? 12) / 100)).toLocaleString("en-IN")}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Validity Window:</span>
+                      <span className="text-slate-700 text-[11px]">
+                        {selectedRc?.startDate ? format(new Date(selectedRc.startDate), "dd MMM yyyy") : "01 Apr 2026"} to {selectedRc?.endDate ? format(new Date(selectedRc.endDate), "dd MMM yyyy") : "31 Mar 2028"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Tender Reference:</span>
+                      <span className="font-mono text-slate-700">{selectedRc?.tenderNumber || selectedRc?.tenderRef || "TND-2026-27-001"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Supply SLA:</span>
+                      <span className="font-medium text-slate-700">{selectedRc?.supplyPeriodDays || 45} Calendar Days</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Panel 2: Equipment Item & Hospital Requisition */}
+                <div className="bg-white border border-slate-200 rounded-lg p-3.5 space-y-2 shadow-2xs">
+                  <div className="flex items-center justify-between border-b pb-1.5 border-slate-100">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <Package className="h-3.5 w-3.5 text-emerald-600" /> Item &amp; Consignee
+                    </span>
+                    <Badge variant="outline" className="text-[9px] bg-slate-100 text-slate-700">
+                      Requisition #{selectedIndent?.indentNumber || "Requisition"}
+                    </Badge>
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">Equipment Name:</span>
+                      <span className="font-bold text-slate-900 block truncate">{primaryItem?.equipmentName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Category &amp; Dept:</span>
+                      <span className="font-medium text-slate-700">{selectedLineItem?.category || "Medical Equipment"} · {selectedLineItem?.department || "General"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Requested Quantity:</span>
+                      <span className="font-bold text-slate-900">{primaryItem?.qty} Units</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Consignee Hospital:</span>
+                      <span className="font-semibold text-slate-900 truncate max-w-[150px]" title={selectedIndent?.facilityName || deliveryAddress}>
+                        {selectedIndent?.facilityName || deliveryAddress.split(",")[0] || "Telangana Hospital"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">District:</span>
+                      <span className="text-slate-700">{selectedIndent?.institutions?.[0]?.district || "Telangana"}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">Technical Specifications:</span>
+                      <p className="text-[11px] text-slate-600 line-clamp-2 mt-0.5" title={selectedLineItem?.specifications || selectedIndent?.technicalRequirements}>
+                        {selectedLineItem?.specifications || selectedIndent?.technicalRequirements || "Conforming strictly to TGMSIDC technical parameters and clinical schedule."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Panel 3: Associated Vendor Profile */}
+                <div className="bg-white border border-slate-200 rounded-lg p-3.5 space-y-2 shadow-2xs">
+                  <div className="flex items-center justify-between border-b pb-1.5 border-slate-100">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <Building2 className="h-3.5 w-3.5 text-purple-600" /> Associated Vendor
+                    </span>
+                    <Badge variant="outline" className="text-[9px] bg-purple-50 text-purple-700 border-purple-200">
+                      Empanelled Supplier
+                    </Badge>
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <div>
+                      <span className="text-slate-500 block text-[10px]">Vendor / OEM:</span>
+                      <span className="font-bold text-slate-900 block truncate">{selectedVendor?.name || selectedRc?.vendorName || "Empanelled Vendor"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Vendor Code:</span>
+                      <span className="font-mono text-slate-700">{selectedVendor?.vendorCode || `VND-TGMSIDC-00${selectedVendor?.id || "1"}`}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Contact Person:</span>
+                      <span className="font-medium text-slate-800">{selectedVendor?.contactPerson || "Manager - Sales & Dispatch"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Phone:</span>
+                      <span className="text-slate-700">{selectedVendor?.contactPhone || "+91-9849012345"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Email:</span>
+                      <span className="text-slate-700 truncate max-w-[150px]">{selectedVendor?.contactEmail || "sales@empanelled.gov.in"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">GSTIN:</span>
+                      <span className="font-mono font-medium text-slate-800">{selectedVendor?.gstin || "36AAACB1234F1Z5"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Registered City:</span>
+                      <span className="text-slate-700">{selectedVendor?.address?.split(",")?.slice(-2)?.join(", ") || "Hyderabad, Telangana"}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Statutory Review Affirmation */}
+              <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-lg p-3 text-xs text-emerald-900 flex items-start gap-2.5">
+                <CheckCircle2 className="h-4 w-4 text-emerald-700 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="font-bold text-emerald-950">TGMSIDC Scrutiny Affirmation</p>
+                  <p className="text-[11px] text-emerald-800 leading-relaxed">
+                    By clicking <strong>Draft PO</strong>, you confirm that Rate Contract #{selectedRc?.contractNumber || "RC-001"} has been verified, pricing and item specifications match requisition standards, and the order will be prepared as a Draft Purchase Order tagged to Indent #{selectedIndent?.indentNumber || "Requisition"} for GM review.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* 5. Order Summary & Submit Toolbar */}
-        {selectedIndentId && (
+        {(selectedIndentId || (rcIdFromParam && orderItems.length > 0)) && (
           <Card className="border border-border/80 shadow-md bg-muted/20">
             <CardContent className="p-6 flex flex-col md:flex-row items-center justify-between gap-4">
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                  Total Landed Procurement Value (Incl. Taxes &amp; PS)
+                  Total Landed Procurement Value (Incl. Taxes)
                 </p>
                 <div className="flex items-baseline gap-3">
                   <p className="text-3xl font-black text-emerald-800 font-mono">
@@ -561,12 +872,12 @@ export default function PurchaseOrderNew() {
                   </p>
                   {psRequired && (
                     <Badge variant="outline" className="text-xs font-mono bg-emerald-50 text-emerald-700 border-emerald-300">
-                      + ₹{psAmount.toLocaleString("en-IN")} PS Bank Guarantee
+                      + ₹{psAmount.toLocaleString("en-IN")} PS Bank Guarantee ({psPercent}%)
                     </Badge>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {isSplit ? `2 Separate POs will be generated (${l1Qty} L1 + ${l2Qty} L2 units)` : `1 PO will be issued for ${totalQty} units`}
+                  {isSplit ? `2 Separate POs will be drafted (${l1Qty} L1 + ${l2Qty} L2 units)` : `Draft PO will be tagged to Indent #${selectedIndent?.indentNumber || ""}`}
                 </p>
               </div>
 
@@ -577,9 +888,10 @@ export default function PurchaseOrderNew() {
                 <Button
                   type="submit"
                   disabled={createPO.isPending || !isValid}
-                  className="bg-[#186812] hover:bg-[#124e0d] text-white shadow-md font-semibold px-6"
+                  className="shadow-md font-semibold px-6 gap-2 cursor-pointer"
                 >
-                  {createPO.isPending ? "Generating Order..." : isSplit ? "Release Split Purchase Orders" : "Issue Purchase Order"}
+                  <FileText className="h-4 w-4" />
+                  {createPO.isPending ? "Drafting PO..." : isSplit ? "Draft Split Purchase Orders" : "Draft PO"}
                 </Button>
               </div>
             </CardContent>

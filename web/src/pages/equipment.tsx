@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useListEquipment, getListEquipmentQueryKey, useCreateEquipment } from "@/lib/api-hooks";
+import { useListEquipment, getListEquipmentQueryKey, useCreateEquipment, useListRateContracts, useListTenders } from "@/lib/api-hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,23 +22,30 @@ import {
 } from "@/lib/productSpecs";
 import { cn } from "@/lib/utils";
 import { differenceInDays } from "date-fns";
-import { mockRateContracts, mockTenders } from "@/mocks/data";
 
 type RCStatus = "active_rc" | "expiring_soon" | "expired" | "tender_in_progress" | "no_coverage";
 
-function getRCStatus(equipmentId: number | string, equipmentName: string): { status: RCStatus; daysLeft?: number } {
+function getRCStatus(
+  equipmentId: number | string,
+  equipmentName: string,
+  rateContracts: any[] = [],
+  tenders: any[] = [],
+): { status: RCStatus; daysLeft?: number; rc?: any } {
   const today = new Date();
-  const itemRCs = mockRateContracts.filter((rc) => String(rc.equipmentId) === String(equipmentId));
+  const itemRCs = rateContracts.filter((rc) => 
+    String(rc.equipmentId) === String(equipmentId) ||
+    (rc.equipmentName && rc.equipmentName.toLowerCase() === equipmentName.toLowerCase())
+  );
   const activeRC = itemRCs.find((rc) => rc.status === "active" && new Date(rc.endDate) > today);
   const expiredRC = itemRCs.some((rc) => new Date(rc.endDate) <= today);
-  const activeTender = mockTenders.find((t) => {
+  const activeTender = tenders.find((t) => {
     const first = equipmentName.toLowerCase().split(" ")[0];
     return t.equipmentName.toLowerCase().includes(first) && t.status !== "rc_created" && t.status !== "awarded";
   });
 
   if (activeRC) {
     const daysLeft = differenceInDays(new Date(activeRC.endDate), today);
-    return { status: daysLeft <= 180 ? "expiring_soon" : "active_rc", daysLeft };
+    return { status: daysLeft <= 180 ? "expiring_soon" : "active_rc", daysLeft, rc: activeRC };
   }
   if (activeTender) return { status: "tender_in_progress" };
   if (expiredRC)    return { status: "expired" };
@@ -74,6 +81,8 @@ export default function Equipment() {
 
   const queryClient = useQueryClient();
   const { data: equipment = [], isLoading } = useListEquipment({ query: { queryKey: getListEquipmentQueryKey() } });
+  const { data: liveRCs = [] } = useListRateContracts();
+  const { data: liveTenders = [] } = useListTenders();
   const createEquipment = useCreateEquipment();
   const f = (k: keyof typeof form, v: string) => setForm({ ...form, [k]: v });
 
@@ -209,6 +218,9 @@ export default function Equipment() {
                       const commonName = e.commonName || specs?.commonName || e.name;
                       const dept = e.department || specs?.typicalDepartment || "General";
                       const estRate = specs?.estimatedUnitRate || e.estimatedUnitCost || 0;
+                      const rcInfo = getRCStatus(e.id, e.name, liveRCs, liveTenders);
+                      const activeRC = rcInfo.rc;
+                      const displayRate = activeRC ? activeRC.unitPrice : estRate;
                       return (
                         <tr
                           key={e.id}
@@ -238,11 +250,16 @@ export default function Equipment() {
                             </span>
                           </td>
                           <td className="px-4 py-3">
-                            {estRate > 0 ? (
-                              <span className="inline-flex items-center gap-0.5 font-semibold text-foreground">
-                                <IndianRupee className="h-3 w-3" />
-                                {formatINR(estRate).replace("₹", "")}
-                              </span>
+                            {displayRate > 0 ? (
+                              <div className="flex flex-col">
+                                <span className="inline-flex items-center gap-0.5 font-semibold text-foreground">
+                                  <IndianRupee className="h-3 w-3" />
+                                  {formatINR(displayRate).replace("₹", "")}
+                                </span>
+                                {activeRC && (
+                                  <span className="text-[10px] text-emerald-600 font-semibold">Active RC Rate</span>
+                                )}
+                              </div>
                             ) : (
                               <span className="text-muted-foreground text-xs">—</span>
                             )}
@@ -250,7 +267,7 @@ export default function Equipment() {
                           <td className="px-4 py-3 font-semibold">{e.gstRate}%</td>
                           <td className="px-4 py-3" onClick={(ev) => ev.stopPropagation()}>
                             {(() => {
-                              const { status, daysLeft } = getRCStatus(e.id, e.name);
+                              const { status, daysLeft } = rcInfo;
                               const m = RC_STATUS_META[status];
                               const Icon = m.icon;
                               return (

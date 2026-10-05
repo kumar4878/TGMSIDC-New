@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { differenceInDays, format } from "date-fns";
+import { differenceInDays, format, addYears, addDays } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,9 +9,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter,
 } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import {
   AlertTriangle, CheckCircle2, Clock, XCircle, Gavel,
-  Search, ShieldAlert, Eye, Plus, RefreshCw, Loader2,
+  Search, ShieldAlert, Eye, Plus, RefreshCw, Loader2, Filter, Wrench
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -130,6 +132,9 @@ const EMPTY_RC_FORM = {
   gstRate: "12", warrantyYears: "1",
   cmcCharges: "0", cmcStartYear: "2",
   startDate: "", endDate: "",
+  camcApplicable: false,
+  camcPeriodYears: "1",
+  camcRatePerYear: "0",
 };
 
 function RCForm({
@@ -145,7 +150,7 @@ function RCForm({
   equipment: { id: string | number; name: string }[];
   lockedEquipmentId?: string;
 }) {
-  function f(k: keyof typeof EMPTY_RC_FORM, v: string) { setForm({ ...form, [k]: v }); }
+  function f(k: keyof typeof EMPTY_RC_FORM, v: any) { setForm({ ...form, [k]: v }); }
   return (
     <div className="grid grid-cols-2 gap-4 py-2">
       <div className="col-span-2">
@@ -196,6 +201,46 @@ function RCForm({
       <div>
         <Label>End Date *</Label>
         <Input type="date" value={form.endDate} onChange={(e) => f("endDate", e.target.value)} className="mt-1.5" />
+      </div>
+
+      <div className="col-span-2 pt-4 mt-2 border-t">
+        <div className="flex items-center gap-2 mb-4">
+          <Wrench className="h-4 w-4 text-slate-500" />
+          <h3 className="font-semibold text-[#152340]">CAMC Details</h3>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="flex items-center justify-between col-span-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
+            <div>
+              <Label className="text-sm font-semibold">CAMC Applicable?</Label>
+              <p className="text-xs text-muted-foreground">Comprehensive Annual Maintenance Contract</p>
+            </div>
+            <Switch 
+              checked={form.camcApplicable as boolean} 
+              onCheckedChange={(c) => f("camcApplicable", c)} 
+            />
+          </div>
+          {form.camcApplicable && (
+            <>
+              <div>
+                <Label>CAMC Period (Years) *</Label>
+                <Input type="number" min="1" max="5" value={form.camcPeriodYears} onChange={(e) => f("camcPeriodYears", e.target.value)} className="mt-1.5" />
+              </div>
+              <div>
+                <Label>CAMC Rate (₹/year) *</Label>
+                <Input type="number" min="0" value={form.camcRatePerYear} onChange={(e) => f("camcRatePerYear", e.target.value)} placeholder="0.00" className="mt-1.5" />
+              </div>
+              <div className="col-span-2">
+                <Label>Calculated CAMC Start Date</Label>
+                <Input 
+                  type="date" 
+                  value={form.startDate && form.warrantyYears ? format(addDays(addYears(new Date(form.startDate), parseInt(form.warrantyYears || "0")), 1), 'yyyy-MM-dd') : ""}
+                  readOnly 
+                  className="mt-1.5 bg-muted/50 cursor-not-allowed" 
+                />
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -262,6 +307,9 @@ export default function RCCoverage() {
       cmcStartYear: String(sourceRC.cmcStartYear ?? 2),
       startDate: "",
       endDate: "",
+      camcApplicable: sourceRC.camcApplicable ?? false,
+      camcPeriodYears: String(sourceRC.camcPeriodYears ?? 1),
+      camcRatePerYear: String(sourceRC.camcRatePerYear ?? 0),
     });
     setDrawer({ type: "renewRC", coverage: c, sourceRC });
   }
@@ -298,6 +346,9 @@ export default function RCCoverage() {
         cmcStartYear: parseInt(rcForm.cmcStartYear),
         startDate: rcForm.startDate,
         endDate: rcForm.endDate,
+        camcApplicable: rcForm.camcApplicable,
+        camcPeriodYears: parseInt(rcForm.camcPeriodYears || "0"),
+        camcRatePerYear: parseFloat(rcForm.camcRatePerYear || "0"),
       }
     }, {
       onSuccess: () => {
@@ -326,34 +377,41 @@ export default function RCCoverage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">RC Coverage Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Item-wise Rate Contract coverage status across all tracked products (BR-04)
-        </p>
+      {/* Header — matches rate-contracts.tsx style */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-[#152340]">RC Coverage Dashboard</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Item-wise Rate Contract coverage status across all tracked products
+          </p>
+        </div>
       </div>
 
-      {/* KPI cards — clickable filters */}
+      {/* KPI Summary Ribbon — neo-kpi-card style matching rate-contracts.tsx */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {KPI_FILTERS.map((kpi) => {
           const count = counts[kpi.key as keyof typeof counts];
           const active = statusFilter === kpi.key;
           return (
-            <button
+            <div
               key={kpi.key}
               onClick={() => setStatusFilter(active ? "all" : kpi.key)}
               className={cn(
-                "text-left p-4 rounded-xl border-2 transition-all hover:shadow-md bg-white",
-                active ? "shadow-md" : "border-transparent hover:border-slate-200"
+                "neo-kpi-card cursor-pointer transition-all",
+                active ? "ring-2 shadow-md" : "hover:shadow-md"
               )}
-              style={active ? { borderColor: kpi.color } : {}}
+              style={active ? { outline: `2px solid ${kpi.color}`, outlineOffset: '2px' } : {}}
             >
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-tight">
+              <span className="text-[10px] font-bold uppercase tracking-wider block" style={{ color: active ? kpi.color : "#6b7a93" }}>
                 {kpi.label}
-              </p>
-              <p className="text-3xl font-bold mt-1.5" style={{ color: kpi.color }}>{count}</p>
-            </button>
+              </span>
+              <span className="text-2xl font-bold tabular-nums mt-1 block" style={{ color: kpi.color }}>
+                {count}
+              </span>
+              <span className="text-[10.5px] text-[#6b7a93] mt-1 block">
+                {active ? "Click to clear" : "Click to filter"}
+              </span>
+            </div>
           );
         })}
       </div>
@@ -393,53 +451,60 @@ export default function RCCoverage() {
         </div>
       )}
 
-      {/* Grid */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
+      {/* Table Card — styled identically to rate-contracts.tsx */}
+      <div className="bg-white border border-[#e4eaf2] rounded-xl shadow-xs overflow-hidden">
+        {/* Filter Bar */}
+        <div className="p-3 border-b border-[#e4eaf2] bg-[#f8fafc] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 flex-1 max-w-md">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-[#93a2b8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
                 placeholder="Search by name, code, RC no., or vendor…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
+                className="w-full h-[32px] bg-white border border-[#e4eaf2] rounded-md text-xs text-[#152340] placeholder:text-[#93a2b8] pl-9 pr-3 focus:outline-none focus:border-[#2563eb]"
               />
             </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Filter className="w-3.5 h-3.5 text-[#6b7a93]" />
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-56">
+              <SelectTrigger className="w-56 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="active_rc">Active RC</SelectItem>
-                <SelectItem value="expiring_soon">RC Expiring Soon (≤ 180 days)</SelectItem>
-                <SelectItem value="expired">RC Expired</SelectItem>
-                <SelectItem value="tender_in_progress">Tender in Progress</SelectItem>
-                <SelectItem value="no_coverage">No Coverage</SelectItem>
+                <SelectItem value="all" className="text-xs">All Statuses</SelectItem>
+                <SelectItem value="active_rc" className="text-xs">Active RC</SelectItem>
+                <SelectItem value="expiring_soon" className="text-xs">RC Expiring Soon (≤ 180 days)</SelectItem>
+                <SelectItem value="expired" className="text-xs">RC Expired</SelectItem>
+                <SelectItem value="tender_in_progress" className="text-xs">Tender in Progress</SelectItem>
+                <SelectItem value="no_coverage" className="text-xs">No Coverage</SelectItem>
               </SelectContent>
             </Select>
-            <span className="text-xs text-muted-foreground self-center">
-              {isLoading ? "Loading…" : `${filtered.length} of ${coverage.length} items`}
+
+            <span className="text-xs font-medium text-[#6b7a93] ml-2">
+              Showing <span className="font-bold text-[#152340]">{filtered.length}</span> of {coverage.length} items
             </span>
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Item Code</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Item / Product Name</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">RC Status</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">RC / Tender No.</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Expiry Date</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Days Remaining</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Vendor / Tender Status</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-[#e4eaf2] bg-[#f8fafc] text-[#6b7a93] font-bold uppercase tracking-wider text-[10.5px]">
+                <th className="py-2.5 px-3">Item Code</th>
+                <th className="py-2.5 px-3">Item / Product Name</th>
+                <th className="py-2.5 px-3">RC Status</th>
+                <th className="py-2.5 px-3">RC / Tender No.</th>
+                <th className="py-2.5 px-3">Expiry Date</th>
+                <th className="py-2.5 px-3">Days Remaining</th>
+                <th className="py-2.5 px-3">Vendor / Tender Status</th>
+                <th className="py-2.5 px-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#eff3f8]">
                 {isLoading ? (
                   <tr>
                     <td colSpan={8} className="px-4 py-16 text-center text-muted-foreground">
@@ -458,52 +523,52 @@ export default function RCCoverage() {
                     const meta = STATUS_META[c.status];
                     const Icon = meta.icon;
                     return (
-                      <tr key={c.equipmentId} className="border-b hover:bg-muted/30 transition-colors">
-                        <td className="px-4 py-3 font-mono text-xs text-primary">{c.equipmentCode}</td>
-                        <td className="px-4 py-3">
-                          <p className="font-medium">{c.equipmentName}</p>
-                          <p className="text-[11px] text-muted-foreground capitalize mt-0.5">
+                      <tr key={c.equipmentId} className="hover:bg-[#eff5ff] border-b border-[#eff3f8] transition-colors">
+                        <td className="py-2.5 px-3 font-mono text-xs font-bold text-[#2563eb]">{c.equipmentCode}</td>
+                        <td className="py-2.5 px-3">
+                          <p className="font-semibold text-[#152340]">{c.equipmentName}</p>
+                          <p className="text-[11px] text-[#6b7a93] capitalize mt-0.5">
                             {c.category.replace(/_/g, " ")}
                           </p>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="py-2.5 px-3">
                           <span className={cn(
-                            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border",
+                            "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold border",
                             meta.bg, meta.color, meta.border
                           )}>
                             <Icon className="h-3 w-3" />
                             {meta.label}
                           </span>
                         </td>
-                        <td className="px-4 py-3 font-mono text-xs">
+                        <td className="py-2.5 px-3 font-mono text-xs font-medium text-[#152340]">
                           {c.rcNumber ?? c.tenderNumber ?? (
-                            <span className="text-muted-foreground">—</span>
+                            <span className="text-[#93a2b8]">—</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-sm">
+                        <td className="py-2.5 px-3 text-xs text-[#3c4a63]">
                           {c.rcExpiry
                             ? format(new Date(c.rcExpiry), "dd MMM yyyy")
-                            : <span className="text-muted-foreground">—</span>}
+                            : <span className="text-[#93a2b8]">—</span>}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="py-2.5 px-3">
                           {c.daysRemaining != null ? (
                             <span className={cn(
-                              "font-semibold tabular-nums",
-                              c.daysRemaining < 0 ? "text-red-600" :
-                              c.daysRemaining <= 90 ? "text-amber-600" :
-                              c.daysRemaining <= 180 ? "text-amber-500" : "text-emerald-600"
+                              "font-semibold tabular-nums text-xs",
+                              c.daysRemaining < 0 ? "text-[#dc2f3c] font-bold" :
+                              c.daysRemaining <= 90 ? "text-[#e08a0b] font-bold" :
+                              c.daysRemaining <= 180 ? "text-amber-500" : "text-[#159557]"
                             )}>
                               {c.daysRemaining < 0
                                 ? `${Math.abs(c.daysRemaining)}d overdue`
                                 : `${c.daysRemaining}d`}
                             </span>
-                          ) : <span className="text-muted-foreground">—</span>}
+                          ) : <span className="text-[#93a2b8]">—</span>}
                         </td>
-                        <td className="px-4 py-3 text-sm text-muted-foreground max-w-[200px] truncate">
+                        <td className="py-2.5 px-3 text-xs text-[#3c4a63] max-w-[200px] truncate">
                           {c.vendorName
                             ?? (c.tenderStatus ? c.tenderStatus.replace(/_/g, " ") : "—")}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="py-2.5 px-3 text-right">
                           <ActionCell coverage={c} onRenewRC={openRenewRC} onNewRC={openNewRC} onInitiateTender={openInitiateTender} />
                         </td>
                       </tr>
@@ -513,12 +578,11 @@ export default function RCCoverage() {
               </tbody>
             </table>
           </div>
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* Business Rules legend */}
+        {/* Business Rules legend */}
       <div className="p-4 bg-slate-50 border rounded-lg text-xs text-slate-600 space-y-1">
-        <p className="font-semibold text-slate-700 mb-2">Coverage Classification Rules (BR-02 to BR-05)</p>
+        <p className="font-semibold text-slate-700 mb-2">Coverage Classification Rules</p>
         <p><span className="text-emerald-600 font-medium">Active RC</span> — Valid RC exists with endDate &gt; today and endDate &gt; 180 days away</p>
         <p><span className="text-amber-600 font-medium">RC Expiring Soon</span> — Active RC but expiry within <strong>180 days</strong> (BR-09: minimum 6-month advance alert)</p>
         <p><span className="text-red-600 font-medium">RC Expired</span> — All RCs for this item have passed their end date</p>
@@ -539,6 +603,47 @@ export default function RCCoverage() {
                 : `Creating a new Rate Contract for ${drawer?.type === "newRC" ? drawer?.coverage.equipmentName : ""}.`}
             </SheetDescription>
           </SheetHeader>
+
+          {drawer?.type === "renewRC" && drawer.sourceRC && (
+            <div className="mb-6">
+              <Card className="border-[#e4eaf2] shadow-sm">
+                <CardHeader className="py-3 px-4 bg-[#f8fafc] border-b border-[#e4eaf2]">
+                  <div className="flex items-center gap-2">
+                    <Wrench className="h-4 w-4 text-[#6b7a93]" />
+                    <h4 className="font-semibold text-[#152340] text-sm">Previous RC CAMC Details</h4>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-sm font-medium text-[#3c4a63]">CAMC Applicable</span>
+                    {drawer.sourceRC.camcApplicable ? (
+                      <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">Yes</Badge>
+                    ) : (
+                      <Badge className="bg-slate-50 text-slate-700 border-slate-200">No</Badge>
+                    )}
+                  </div>
+                  {drawer.sourceRC.camcApplicable && (
+                    <div className="grid grid-cols-2 gap-4 pt-3 border-t border-[#e4eaf2]">
+                      <div>
+                        <p className="text-xs text-[#6b7a93] mb-1">Period</p>
+                        <p className="text-sm font-medium text-[#152340]">{drawer.sourceRC.camcPeriodYears} years</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-[#6b7a93] mb-1">Annual Rate</p>
+                        <p className="text-sm font-medium text-[#152340]">₹{drawer.sourceRC.camcRatePerYear?.toLocaleString()}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-xs text-[#6b7a93] mb-1">Start Date</p>
+                        <p className="text-sm font-medium text-[#152340]">
+                          {drawer.sourceRC.camcStartDate ? format(new Date(drawer.sourceRC.camcStartDate), 'dd MMM yyyy') : '—'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
           <form onSubmit={submitRC} className="space-y-1">
             {(drawer?.type === "renewRC" || drawer?.type === "newRC") && (

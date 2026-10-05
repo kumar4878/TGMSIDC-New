@@ -1,4 +1,4 @@
-import { useRoute, Link } from "wouter";
+import { useRoute, Link, useLocation } from "wouter";
 import { useGetIndent, getGetIndentQueryKey } from "@/lib/api-hooks";
 import { BASE_URL } from "@/lib/api";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -9,13 +9,24 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAuth } from "@/contexts/AuthContext";
-import { useListEquipment, useListPurchaseOrders, useListDeliveries } from "@/lib/api-hooks";
-import { resolveWriteInEquipment } from "@/lib/api";
+import { useListEquipment, useListPurchaseOrders, useListDeliveries, useAuditLog } from "@/lib/api-hooks";
+import {
+  resolveWriteInEquipment,
+  verifyIndent,
+  returnIndentToDEO,
+  resubmitIndent,
+  selectLineRC,
+  raiseLinePO,
+  initiateLineTender,
+  reprioritizeIndent,
+  revalidateIndent,
+} from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { getSteps } from "@/lib/approvalWorkflow";
 import type { ApprovalStep } from "@/lib/approvalWorkflow";
@@ -34,15 +45,15 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { getIndentLifecycleData, daysBetween } from "@/lib/indentLifecycle";
 import type { AuditEventType } from "@/lib/indentLifecycle";
 import { format, formatDistanceToNow, differenceInDays } from "date-fns";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
 
 const STEP_ROLE_COLOR: Record<string, string> = {
-  deo: "bg-blue-100 text-blue-700 border-blue-200",
-  tgmsidc_user: "bg-violet-100 text-violet-700 border-violet-200",
-  gm_equipment: "bg-emerald-100 text-emerald-700 border-emerald-200",
-  so_equipment: "bg-cyan-100 text-cyan-700 border-cyan-200",
-  executive_director: "bg-amber-100 text-amber-700 border-amber-200",
+  deo: "bg-slate-100 text-slate-700 border-slate-200",
+  tgmsidc_user: "bg-slate-100 text-slate-700 border-slate-200",
+  gm_equipment: "bg-slate-100 text-slate-700 border-slate-200",
+  so_equipment: "bg-slate-100 text-slate-700 border-slate-200",
+  executive_director: "bg-slate-100 text-slate-700 border-slate-200",
   admin: "bg-slate-100 text-slate-700 border-slate-200",
 };
 
@@ -85,7 +96,8 @@ function safeDistance(d: string | null | undefined): string {
 
 function formatINR(n: number | null | undefined): string {
   if (n == null || isNaN(n)) return "₹0";
-  if (n >= 1_00_000) return `₹${(n / 1_00_000).toFixed(2)} L`;
+  if (n >= 10_000_000) return `₹${(n / 10_000_000).toFixed(2)}\u00A0Cr`;
+  if (n >= 1_00_000) return `₹${(n / 1_00_000).toFixed(2)}\u00A0L`;
   return `₹${Math.round(n).toLocaleString("en-IN")}`;
 }
 
@@ -160,9 +172,10 @@ function ApprovalTimeline({ steps, activeStepNumber }: { steps: ApprovalStep[]; 
   );
 }
 
-export default function IndentDetail() {
+export default function IndentDetail(props?: { id?: string }) {
   const [, params] = useRoute("/indents/:id");
-  const id = (params?.id ?? "");
+  const [, setLocation] = useLocation();
+  const id = (props?.id || params?.id || "");
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
@@ -207,6 +220,9 @@ export default function IndentDetail() {
   const { data: allEquipment = [] } = useListEquipment();
   const { data: livePOs = [] } = useListPurchaseOrders();
   const { data: liveDeliveries = [] } = useListDeliveries();
+  const { data: dbAuditLogs = [] } = useAuditLog(
+    indent?.indentNumber ? { entityId: indent.indentNumber } : { entityId: String(id) }
+  );
   const [sideBySide, setSideBySide] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<"scanned_doc" | "timeline">("scanned_doc");
   const [scannedZoom, setScannedZoom] = useState(100);
@@ -248,6 +264,283 @@ export default function IndentDetail() {
       toast({ title: "Error", description: err.message || "Failed to resolve write-in", variant: "destructive" });
     } finally {
       setWriteInSubmitting(false);
+    }
+  }
+
+  // TGMSIDC Verification & Decoupled Line Routing States
+  const [verificationRemarks, setVerificationRemarks] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [returnDEODialog, setReturnDEODialog] = useState(false);
+  const [returnRemarks, setReturnRemarks] = useState("");
+  const [multiRcSelectModal, setMultiRcSelectModal] = useState<{
+    lineIndex: number;
+    item: any;
+    candidates: any[];
+  } | null>(null);
+  const [selectedCandidateRcId, setSelectedCandidateRcId] = useState("");
+  const [lineActionLoading, setLineActionLoading] = useState<number | null>(null);
+
+  // Reprioritization & Budget Revalidation States (Steps 5 - 10)
+  const [reprioritizeModalOpen, setReprioritizeModalOpen] = useState(false);
+  const [reprioritizeLines, setReprioritizeLines] = useState<Array<{
+    lineIndex: number;
+    equipmentName: string;
+    category: string;
+    requestedQty: number;
+    originalRequestedQty: number;
+    estimatedUnitRate: number;
+    priority: number;
+    deferred: boolean;
+  }>>([]);
+  const [revisedAsAmountInput, setRevisedAsAmountInput] = useState("");
+  const [revisedAsRefInput, setRevisedAsRefInput] = useState("");
+  const [revisedAsDateInput, setRevisedAsDateInput] = useState("");
+  const [revisedAsRemarksInput, setRevisedAsRemarksInput] = useState("");
+  const [reprioritizing, setReprioritizing] = useState(false);
+  const [revalidating, setRevalidating] = useState(false);
+
+  function openReprioritizationModal() {
+    const rawLines = indent?.lineItems || indent?.lines || [];
+    setReprioritizeLines(
+      rawLines.map((li: any, idx: number) => ({
+        lineIndex: idx,
+        equipmentName: li.equipmentName || `Equipment Item ${idx + 1}`,
+        category: li.category || "medical_equipment",
+        requestedQty: Number(li.requestedQty ?? li.qty ?? 1),
+        originalRequestedQty: Number(li.originalRequestedQty ?? li.requestedQty ?? li.qty ?? 1),
+        estimatedUnitRate: Number(li.rateContractUnitPrice ?? li.estimatedUnitCost ?? li.estimatedUnitRate ?? 0),
+        priority: Number(li.priority || 1),
+        deferred: Boolean(li.deferred),
+      }))
+    );
+    setRevisedAsAmountInput(indent?.revisedAsAmount ? String(indent.revisedAsAmount) : "");
+    setRevisedAsRefInput(indent?.revisedAsReferenceNo || "");
+    setRevisedAsDateInput(indent?.revisedAsDate ? indent.revisedAsDate.split("T")[0] : "");
+    setRevisedAsRemarksInput(indent?.reprioritizationNotes || "");
+    setReprioritizeModalOpen(true);
+  }
+
+  async function handleReprioritizeSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setReprioritizing(true);
+    try {
+      await reprioritizeIndent(id, {
+        lineItems: reprioritizeLines.map((l) => ({
+          lineIndex: l.lineIndex,
+          requestedQty: Number(l.requestedQty),
+          priority: Number(l.priority),
+          deferred: Boolean(l.deferred),
+        })),
+        revisedAsAmount: revisedAsAmountInput ? Number(revisedAsAmountInput) : undefined,
+        revisedAsReferenceNo: revisedAsRefInput || undefined,
+        revisedAsDate: revisedAsDateInput || undefined,
+        revisedAsRemarks: revisedAsRemarksInput || undefined,
+        reprioritizedBy: user?.fullName || "Facility DEO",
+      });
+      refetchSteps();
+      queryClient.invalidateQueries({ queryKey: getGetIndentQueryKey(id) });
+      queryClient.invalidateQueries({ queryKey: stepKey(id) });
+      queryClient.invalidateQueries({ queryKey: ["indent-approval-steps", id] });
+      queryClient.invalidateQueries({ queryKey: ["/audit-log"] });
+      queryClient.invalidateQueries({ queryKey: ["/indents"] });
+      setReprioritizeModalOpen(false);
+      toast({
+        title: "Reprioritization Submitted",
+        description: "Revised quantities and AS details submitted to TGMSIDC for revalidation.",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Submission Failed",
+        description: err.message || "Could not submit reprioritized indent",
+        variant: "destructive",
+      });
+    } finally {
+      setReprioritizing(false);
+    }
+  }
+
+  async function handleRevalidateIndent() {
+    setRevalidating(true);
+    try {
+      const res = await revalidateIndent(id, {
+        revalidatedBy: user?.fullName || "TGMSIDC Revalidation Officer",
+      });
+      refetchSteps();
+      queryClient.invalidateQueries({ queryKey: getGetIndentQueryKey(id) });
+      queryClient.invalidateQueries({ queryKey: stepKey(id) });
+      queryClient.invalidateQueries({ queryKey: ["indent-approval-steps", id] });
+      queryClient.invalidateQueries({ queryKey: ["/audit-log"] });
+      queryClient.invalidateQueries({ queryKey: ["/indents"] });
+      toast({
+        title: "Revalidation Complete",
+        description: res?.message || "Budget revalidated within AS. Procurement routing unlocked.",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Revalidation Failed",
+        description: err.message || "Requirement still exceeds Administrative Sanction.",
+        variant: "destructive",
+      });
+    } finally {
+      setRevalidating(false);
+    }
+  }
+
+  async function handleVerifyIndent() {
+    setVerifying(true);
+    try {
+      const res = await verifyIndent(id, {
+        remarks: verificationRemarks || "TGMSIDC verification completed and active Rate Contracts tagged",
+        verifiedBy: user?.fullName || "TGMSIDC User",
+      });
+      queryClient.invalidateQueries({ queryKey: getGetIndentQueryKey(id) });
+      queryClient.invalidateQueries({ queryKey: ["/indents"] });
+      if (res?.budgetSufficiency === "insufficient" || res?.status === "reprioritization_required") {
+        toast({
+          title: "Budget Shortfall Detected",
+          description: `Estimated value exceeds AS by ₹${Math.abs(res.budgetSurplusOrShortfall || 0).toLocaleString("en-IN")}. Routed to DEO for Reprioritization.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Indent Verified Successfully",
+          description: "Requisition verified within Administrative Sanction. Active Rate Contracts assessed per line.",
+        });
+      }
+      setVerificationRemarks("");
+    } catch (err: any) {
+      toast({ title: "Verification Failed", description: err.message || "Failed to verify indent", variant: "destructive" });
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  async function handleReturnToDEO() {
+    if (!returnRemarks.trim()) {
+      toast({ title: "Remarks Required", description: "Please enter specific reasons for returning to DEO", variant: "destructive" });
+      return;
+    }
+    setVerifying(true);
+    try {
+      await returnIndentToDEO(id, {
+        remarks: returnRemarks,
+        returnedBy: user?.fullName || "TGMSIDC User",
+      });
+      queryClient.invalidateQueries({ queryKey: getGetIndentQueryKey(id) });
+      queryClient.invalidateQueries({ queryKey: ["/indents"] });
+      setReturnDEODialog(false);
+      setReturnRemarks("");
+      toast({
+        title: "Indent Returned to DEO",
+        description: "Requisition marked for facility revision.",
+      });
+    } catch (err: any) {
+      toast({ title: "Failed to Return", description: err.message || "Action failed", variant: "destructive" });
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  async function handleResubmitIndent() {
+    setVerifying(true);
+    try {
+      await resubmitIndent(id, {
+        remarks: verificationRemarks || "Resubmitted by DEO after revisions",
+        submittedBy: user?.fullName || "DEO",
+      });
+      queryClient.invalidateQueries({ queryKey: getGetIndentQueryKey(id) });
+      queryClient.invalidateQueries({ queryKey: ["/indents"] });
+      toast({
+        title: "Indent Resubmitted",
+        description: "Requisition resubmitted for TGMSIDC verification.",
+      });
+      setVerificationRemarks("");
+    } catch (err: any) {
+      toast({ title: "Resubmission Failed", description: err.message || "Action failed", variant: "destructive" });
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  async function handleRaiseLinePO(lineIndex: number, item: any) {
+    if (user?.role === "deo") {
+      toast({ title: "Action Restricted", description: "DEO cannot raise Purchase Orders. PO issuance is performed by TGMSIDC User.", variant: "destructive" });
+      return;
+    }
+    if (item.deferred) {
+      toast({ title: "Item Deferred", description: "This item has been deferred from the current procurement cycle.", variant: "destructive" });
+      return;
+    }
+    if (indent?.status === "reprioritization_required" || indent?.budgetSufficiency === "insufficient") {
+      toast({ title: "Action Blocked", description: "Cannot raise Purchase Order while requisition is under budget reprioritization.", variant: "destructive" });
+      return;
+    }
+    setLineActionLoading(lineIndex);
+    try {
+      const targetRcId =
+        item.rateContractId ||
+        (Array.isArray(item.candidateRateContracts) ? item.candidateRateContracts[0]?.rcId || item.candidateRateContracts[0]?.rateContractId : undefined);
+
+      const res = await raiseLinePO(id, lineIndex, {
+        rateContractId: targetRcId,
+        poRemarks: `PO raised for ${item.equipmentName} via Rate Contract ${item.rateContractNumber || ''}`,
+        createdBy: user?.fullName || "TGMSIDC User",
+      });
+      queryClient.invalidateQueries({ queryKey: getGetIndentQueryKey(id) });
+      queryClient.invalidateQueries({ queryKey: ["/indents"] });
+      queryClient.invalidateQueries({ queryKey: ["/purchase-orders"] });
+      toast({
+        title: "Purchase Order Raised",
+        description: `Generated PO ${res?.purchaseOrder?.poNumber || ''} for ${item.equipmentName}.`,
+      });
+    } catch (err: any) {
+      toast({ title: "Failed to Raise PO", description: err.message || "Could not generate PO", variant: "destructive" });
+    } finally {
+      setLineActionLoading(null);
+    }
+  }
+
+  async function handleConfirmSelectRC() {
+    if (!multiRcSelectModal || !selectedCandidateRcId) return;
+    setLineActionLoading(multiRcSelectModal.lineIndex);
+    try {
+      await selectLineRC(id, multiRcSelectModal.lineIndex, {
+        rateContractId: selectedCandidateRcId,
+        selectedBy: user?.fullName || "TGMSIDC User",
+      });
+      queryClient.invalidateQueries({ queryKey: getGetIndentQueryKey(id) });
+      queryClient.invalidateQueries({ queryKey: ["/indents"] });
+      setMultiRcSelectModal(null);
+      setSelectedCandidateRcId("");
+      toast({
+        title: "Rate Contract Selected",
+        description: "Line item tagged with chosen Rate Contract. PO can now be generated.",
+      });
+    } catch (err: any) {
+      toast({ title: "Selection Failed", description: err.message || "Could not select RC", variant: "destructive" });
+    } finally {
+      setLineActionLoading(null);
+    }
+  }
+
+  async function handleInitiateLineTender(lineIndex: number, item: any) {
+    setLineActionLoading(lineIndex);
+    try {
+      const res = await initiateLineTender(id, lineIndex, {
+        tenderCategory: item.category || "Medical Equipment",
+        createdBy: user?.fullName || "TGMSIDC User",
+      });
+      queryClient.invalidateQueries({ queryKey: getGetIndentQueryKey(id) });
+      queryClient.invalidateQueries({ queryKey: ["/indents"] });
+      queryClient.invalidateQueries({ queryKey: ["/tenders"] });
+      toast({
+        title: "Tender Initiated",
+        description: `Initiated Tender ${res?.tender?.tenderNumber || ''} for ${item.equipmentName}.`,
+      });
+    } catch (err: any) {
+      toast({ title: "Failed to Initiate Tender", description: err.message || "Could not start tender", variant: "destructive" });
+    } finally {
+      setLineActionLoading(null);
     }
   }
 
@@ -391,7 +684,7 @@ export default function IndentDetail() {
     return <div className="text-center py-20 text-muted-foreground">Indent not found</div>;
   }
 
-  const lineItems = indent.lineItems ?? [];
+  const lineItems = indent.lines ?? indent.lineItems ?? [];
   const hasLineItems = lineItems.length > 0;
   const totalEstimated = indent.estimatedTotalValue || lineItems.reduce((sum: number, li: any) => {
     const qty = li.requestedQty ?? li.qty ?? 0;
@@ -399,7 +692,14 @@ export default function IndentDetail() {
     return sum + (qty * rate);
   }, 0);
 
-  const lifecycleData = getIndentLifecycleData(id, indent, livePOs, liveDeliveries);
+  const effectiveAsAmount = indent.revisedAsAmount || indent.asAmount || (indent.institutions?.reduce((sum: number, inst: any) => sum + (inst.fundSanctionedAmount || 0), 0) ?? 0);
+  const estimatedProcurementCost = indent.estimatedTotalProcurementValue || totalEstimated;
+  const budgetDifference = indent.budgetSurplusOrShortfall !== undefined ? indent.budgetSurplusOrShortfall : (effectiveAsAmount - estimatedProcurementCost);
+  const isBudgetShortfall = indent.budgetSufficiency === "insufficient" || indent.budgetValidationStatus === "shortfall_detected" || indent.status === "reprioritization_required" || (effectiveAsAmount > 0 && budgetDifference < 0);
+  const isBudgetValidated = indent.budgetValidationStatus === "validated_within_as" || indent.budgetSufficiency === "sufficient" || indent.status === "ready_for_procurement" || indent.status === "tgmsidc_verification_completed" || (effectiveAsAmount > 0 && budgetDifference >= 0);
+  const isReprioritizationSubmitted = indent.status === "resubmitted_for_review" || indent.status === "under_tgmsidc_revalidation" || indent.verificationStatus === "resubmitted_for_review";
+
+  const lifecycleData = getIndentLifecycleData(id, indent, livePOs, liveDeliveries, dbAuditLogs);
   const { purchaseOrders: linkedPOs, deliveries: linkedDeliveries, invoices: linkedInvoices, auditLog } = lifecycleData;
 
   const firstDeliveredDelivery = linkedDeliveries.find((d) => d.deliveredDate || d.status === "delivered");
@@ -411,10 +711,16 @@ export default function IndentDetail() {
     "Indent Raised", "Approved", "PO Issued", "Delivered", "QA Passed", "Accepted",
   ] as const;
 
+  const isPOIssued = indent.status === "po_issued" || indent.status === "completed" ||
+    linkedPOs.some((p: any) => p.status === "issued" || p.status === "po_approved" || p.status === "in_transit" || p.status === "delivered" || p.status === "completed") ||
+    steps_live.find((s: ApprovalStep) => s.requiredRole === "executive_director")?.status === "approved";
+
+  const isIndentApproved = !!indent.approvedBy || !["pending_review", "pending_approval", "rejected"].includes(indent.status);
+
   const stageTimestamps: (string | null)[] = [
     indent.createdAt,
-    (indent.approvedBy || !["pending_review", "pending_approval", "rejected"].includes(indent.status)) ? indent.updatedAt : null,
-    linkedPOs.length > 0 ? linkedPOs[0].createdAt : null,
+    isIndentApproved ? indent.updatedAt : null,
+    isPOIssued ? (linkedPOs.find((p: any) => p.status === "issued")?.issuedDate || linkedPOs[0]?.createdAt || indent.updatedAt) : null,
     firstDeliveredDelivery?.deliveredDate ? firstDeliveredDelivery.deliveredDate : null,
     firstQAPassedDelivery?.updatedAt ?? null,
     firstAcceptedDelivery?.updatedAt ?? null,
@@ -424,8 +730,8 @@ export default function IndentDetail() {
     if (firstAcceptedDelivery) return 5;
     if (firstQAPassedDelivery) return 4;
     if (firstDeliveredDelivery) return 3;
-    if (linkedPOs.length > 0) return 2;
-    if (indent.approvedBy || !["pending_review", "pending_approval", "rejected"].includes(indent.status)) return 1;
+    if (isPOIssued) return 2;
+    if (isIndentApproved) return 1;
     return 0;
   })();
 
@@ -437,13 +743,13 @@ export default function IndentDetail() {
   const allInvoicesPaid = linkedInvoices.length > 0 && linkedInvoices.every((i) => i.status === "paid");
 
   const AUDIT_EVENT_COLORS: Record<AuditEventType, string> = {
-    indent:   "bg-blue-100 text-blue-700 border-blue-200",
-    approval: "bg-violet-100 text-violet-700 border-violet-200",
-    po:       "bg-emerald-100 text-emerald-700 border-emerald-200",
-    delivery: "bg-sky-100 text-sky-700 border-sky-200",
-    qa:       "bg-amber-100 text-amber-700 border-amber-200",
-    invoice:  "bg-indigo-100 text-indigo-700 border-indigo-200",
-    grn:      "bg-teal-100 text-teal-700 border-teal-200",
+    indent:   "bg-slate-100 text-slate-700 border-slate-200",
+    approval: "bg-slate-100 text-slate-700 border-slate-200",
+    po:       "bg-slate-100 text-slate-700 border-slate-200",
+    delivery: "bg-slate-100 text-slate-700 border-slate-200",
+    qa:       "bg-slate-100 text-slate-700 border-slate-200",
+    invoice:  "bg-slate-100 text-slate-700 border-slate-200",
+    grn:      "bg-slate-100 text-slate-700 border-slate-200",
   };
 
   function handleAction(action: "approved" | "returned") {
@@ -454,7 +760,7 @@ export default function IndentDetail() {
       stepNumber: pendingStep.stepNumber,
       status: action,
       comments: comments.trim() || "Approved.",
-      procurementMode: (action === "approved" && isLastStep) || (action === "approved" && ["gm_equipment", "gm"].includes(pendingStep.requiredRole))
+      procurementMode: (action === "approved" && isLastStep) || (action === "approved" && ["gm_equipment", "gm", "so_equipment", "executive_director"].includes(pendingStep.requiredRole))
         ? procurementMode
         : undefined,
     });
@@ -462,11 +768,12 @@ export default function IndentDetail() {
 
   const isFinalProcurementStep = pendingStep && (
     pendingStep.stepNumber === progress_live.totalSteps ||
-    ["gm_equipment", "so_equipment", "gm"].includes(pendingStep.requiredRole)
+    ["gm_equipment", "so_equipment", "gm", "executive_director"].includes(pendingStep.requiredRole)
   );
 
   return (
-    <div className="w-full max-w-[1600px] mx-auto space-y-6">
+    <ErrorBoundary fallbackTitle="Indent Workspace Error">
+      <div className="w-full max-w-[1600px] mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-start gap-3">
         <Link href="/indents">
@@ -503,7 +810,7 @@ export default function IndentDetail() {
           <Button
             variant={sideBySide ? "default" : "outline"}
             size="sm"
-            className={cn("gap-1.5 text-xs shadow-xs", sideBySide ? "bg-[#186812] hover:bg-[#124e0d] text-white" : "")}
+            className={cn("gap-1.5 text-xs shadow-xs", sideBySide ? "bg-slate-900 hover:bg-slate-800 text-white" : "")}
             onClick={() => {
               const next = !sideBySide;
               setSideBySide(next);
@@ -591,51 +898,345 @@ export default function IndentDetail() {
         </div>
       )}
 
-      {/* Return notice */}
-      {indent.status === "returned" && indent.returnComments && (
-        <div className="flex gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-          <RotateCcw className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-amber-800">Returned for Revision</p>
-            <p className="text-sm text-amber-700 mt-0.5">{indent.returnComments}</p>
+      {/* ── Administrative Sanction (AS) vs. Estimated Cost Validation Card ── */}
+      <Card className="border border-slate-200 bg-white shadow-xs mb-3">
+        <CardHeader className="py-3 px-4 border-b border-slate-100 flex flex-row items-center justify-between space-y-0">
+          <div className="flex items-center gap-2">
+            <IndianRupee className="h-4 w-4 text-slate-700" />
+            <CardTitle className="text-sm font-semibold text-slate-900">
+              Administrative Sanction (AS) vs. Estimated Cost Assessment
+            </CardTitle>
           </div>
+          <Badge
+            variant="outline"
+            className={cn(
+              "text-[11px] font-medium border px-2 py-0.5",
+              isBudgetShortfall
+                ? "bg-amber-50 text-amber-900 border-amber-200"
+                : isBudgetValidated
+                ? "bg-emerald-50 text-emerald-900 border-emerald-200"
+                : "bg-slate-50 text-slate-700 border-slate-200"
+            )}
+          >
+            {isBudgetShortfall
+              ? "Budget Shortfall (Reprioritization Required)"
+              : isBudgetValidated
+              ? "AS Sufficient (Ready for Procurement)"
+              : "Pending Scrutiny"}
+          </Badge>
+        </CardHeader>
+        <CardContent className="p-4 space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* 1. AS Amount - Low contrast soft sky tint */}
+            <div className="p-3.5 rounded-lg border border-sky-200/70 bg-sky-50/50">
+              <span className="text-[11px] font-semibold text-sky-800 uppercase tracking-wide">
+                Administrative Sanction (AS)
+              </span>
+              <p className="text-base font-bold text-sky-950 mt-0.5">
+                {formatINR(effectiveAsAmount)}
+              </p>
+              <div className="text-[10px] text-sky-700/80 mt-1 space-y-0.5">
+                <p>Order Ref: <strong className="text-sky-900">{indent.revisedAsReferenceNo || indent.asReferenceNo || indent.indentRefNumber || "Sanction Order Ref"}</strong></p>
+                {indent.revisedAsAmount && (
+                  <p className="text-sky-800">Revised AS: ₹{Number(indent.revisedAsAmount).toLocaleString("en-IN")}</p>
+                )}
+              </div>
+            </div>
+
+            {/* 2. Total Estimated Cost - Low contrast soft indigo tint */}
+            <div className="p-3.5 rounded-lg border border-indigo-200/70 bg-indigo-50/40">
+              <span className="text-[11px] font-semibold text-indigo-800 uppercase tracking-wide">
+                Total Estimated Procurement Value
+              </span>
+              <p className="text-base font-bold text-indigo-950 mt-0.5">
+                {formatINR(estimatedProcurementCost)}
+              </p>
+              <p className="text-[10px] text-indigo-700/80 mt-1">
+                Computed from {lineItems.length} line item{lineItems.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+
+            {/* 3. Surplus / Shortfall - Low contrast soft emerald/amber tint */}
+            <div className={cn(
+              "p-3.5 rounded-lg border",
+              budgetDifference < 0
+                ? "border-amber-200/80 bg-amber-50/50"
+                : "border-emerald-200/80 bg-emerald-50/50"
+            )}>
+              <span className={cn(
+                "text-[11px] font-semibold uppercase tracking-wide",
+                budgetDifference < 0 ? "text-amber-800" : "text-emerald-800"
+              )}>
+                Surplus (+) / Shortfall (-)
+              </span>
+              <p className={cn(
+                "text-base font-bold mt-0.5",
+                budgetDifference < 0 ? "text-amber-950" : "text-emerald-950"
+              )}>
+                {budgetDifference < 0 ? `- ₹${Math.abs(budgetDifference).toLocaleString("en-IN")}` : `+ ₹${budgetDifference.toLocaleString("en-IN")}`}
+              </p>
+              <p className={cn(
+                "text-[10px] mt-1",
+                budgetDifference < 0 ? "text-amber-700/90" : "text-emerald-700/90"
+              )}>
+                {budgetDifference < 0
+                  ? "Shortfall: Estimated value exceeds sanctioned budget."
+                  : "Surplus: Requirement is within sanctioned budget."}
+              </p>
+            </div>
+          </div>
+
+          {/* Action Trigger Banners */}
+          {/* A. If Budget Shortfall Detected */}
+          {isBudgetShortfall && (
+            <div className="border border-slate-300 rounded-lg p-3 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 font-semibold text-xs text-slate-900">
+                  {isReprioritizationSubmitted ? (
+                    <>
+                      <Clock className="h-4 w-4 text-slate-700" />
+                      Reprioritization Submitted &mdash; Under TGMSIDC Review
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle className="h-4 w-4 text-slate-700" />
+                      Budget Shortfall: Action Required by Facility DEO
+                    </>
+                  )}
+                </div>
+                <p className="text-xs text-slate-600">
+                  {isReprioritizationSubmitted
+                    ? `Revised requirement (Est. Cost ₹${estimatedProcurementCost.toLocaleString("en-IN")}, AS ₹${effectiveAsAmount.toLocaleString("en-IN")}) has been submitted by DEO and is currently locked pending TGMSIDC revalidation.`
+                    : `Total estimated value exceeds Administrative Sanction by ₹${Math.abs(budgetDifference).toLocaleString("en-IN")}. Adjust item quantities, defer non-critical items, or provide Revised AS details to proceed.`}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                className={cn(
+                  "text-xs shrink-0 transition-colors",
+                  isReprioritizationSubmitted
+                    ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed hover:bg-slate-100"
+                    : "bg-slate-900 hover:bg-slate-800 text-white"
+                )}
+                onClick={openReprioritizationModal}
+                disabled={isReprioritizationSubmitted || (user?.role !== "deo" && user?.role !== "admin")}
+                title={isReprioritizationSubmitted ? "Reprioritization submitted. Awaiting TGMSIDC revalidation." : undefined}
+              >
+                {isReprioritizationSubmitted ? "Reprioritization Submitted (Awaiting Review)" : "Reprioritize Requisition →"}
+              </Button>
+            </div>
+          )}
+
+          {/* B. If Resubmitted for TGMSIDC Revalidation */}
+          {(indent.status === "resubmitted_for_review" || indent.status === "under_tgmsidc_revalidation") && (
+            <div className="border border-slate-300 rounded-lg p-3 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 font-semibold text-xs text-slate-900">
+                  <CheckCircle2 className="h-4 w-4 text-slate-700" />
+                  Reprioritized Requisition Submitted &mdash; TGMSIDC Revalidation Due
+                </div>
+                <p className="text-xs text-slate-600">
+                  Facility DEO has submitted revised item quantities and/or updated Administrative Sanction. Verify that revised procurement cost fits within available AS.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {(user?.role === "tgmsidc_user" || user?.role === "admin") ? (
+                  <>
+                    <Button
+                      size="sm"
+                      className="text-xs shrink-0 shadow-xs"
+                      onClick={handleRevalidateIndent}
+                      disabled={revalidating}
+                    >
+                      {revalidating ? "Revalidating..." : "Complete Revalidation & Unlock Procurement"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-slate-300 text-slate-700 bg-white hover:bg-slate-50 text-xs shrink-0"
+                      onClick={() => setReturnDEODialog(true)}
+                      disabled={revalidating}
+                    >
+                      Return to DEO
+                    </Button>
+                  </>
+                ) : (
+                  <Badge variant="outline" className="border-slate-300 text-slate-700 bg-white text-xs px-2.5 py-1">
+                    Awaiting TGMSIDC Revalidation
+                  </Badge>
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+
+      {/* ── TGMSIDC Verification Workflow Banner ── */}
+      {(indent.verificationStatus === "pending" || indent.verificationStatus === "under_verification" || indent.verificationStatus === "draft" || indent.status === "pending_tgmsidc_verification" || indent.status === "pending_review" || indent.status === "draft") && (
+        <Card className="border border-slate-200 bg-white shadow-xs mb-3">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck className="h-5 w-5 text-slate-700 shrink-0" />
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">TGMSIDC Requisition Scrutiny &amp; RC Assessment</h3>
+                  <p className="text-xs text-slate-600">
+                    Verify hospital requirements, evaluate line item active Rate Contracts, and validate estimated cost against Administrative Sanction.
+                  </p>
+                </div>
+              </div>
+              <Badge variant="outline" className="bg-slate-50 text-slate-800 border-slate-300 shrink-0 w-fit">
+                Pending Scrutiny
+              </Badge>
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              <Label className="text-xs font-semibold text-slate-700">Scrutiny Remarks / Observations</Label>
+              <Input
+                placeholder="Enter scrutiny notes regarding budget head, facility quota, and technical compliance..."
+                value={verificationRemarks}
+                onChange={(e) => setVerificationRemarks(e.target.value)}
+                className="text-xs h-9 bg-white"
+              />
+            </div>
+
+            <div className="flex gap-2 flex-wrap pt-1">
+              <Button
+                size="sm"
+                className="gap-1.5 text-xs shadow-xs"
+                onClick={handleVerifyIndent}
+                disabled={verifying}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                {verifying ? "Scrutinizing & Assessing Budget..." : "Complete Scrutiny & Budget Validation"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-slate-300 text-slate-700 bg-white hover:bg-slate-50 gap-1.5 text-xs"
+                onClick={() => setReturnDEODialog(true)}
+                disabled={verifying}
+              >
+                <RotateCcw className="h-4 w-4" />
+                Return to DEO
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Return to DEO notification & Resubmission */}
+      {(
+        indent.status === "returned_to_deo_for_correction" ||
+        indent.status === "returned_to_deo" ||
+        indent.verificationStatus === "returned_to_deo_for_correction" ||
+        indent.verificationStatus === "returned_to_deo" ||
+        (indent.status === "returned" && indent.returnComments)
+      ) && (
+        <Card className="border border-amber-200 bg-amber-50 shadow-xs mb-3">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <RotateCcw className="h-5 w-5 text-amber-700 shrink-0 mt-0.5" />
+              <div className="space-y-1 flex-1">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-900">Indent Returned to Facility DEO — Reprioritization / Revised AS Required</h3>
+                  <Badge variant="outline" className="bg-amber-100 text-amber-900 border-amber-300">
+                    DEO Action Required
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-700 font-medium">
+                  Remarks from TGMSIDC: <em className="text-slate-800">{indent.returnComments || indent.verificationRemarks || "Please review equipment specifications and budget allocation."}</em>
+                </p>
+                {(user?.role === "deo" || user?.role === "admin") && (
+                  <p className="text-xs text-amber-800 mt-1">
+                    Review the item-wise estimated cost, adjust quantities or defer non-critical items to fit within the Administrative Sanction, then resubmit or use the Reprioritize option below.
+                  </p>
+                )}
+              </div>
+            </div>
+            {(user?.role === "deo" || user?.role === "admin") && (
+              <div className="flex items-center gap-2 pt-1">
+                <Input
+                  placeholder="DEO resubmission comments..."
+                  value={verificationRemarks}
+                  onChange={(e) => setVerificationRemarks(e.target.value)}
+                  className="text-xs h-9 bg-white max-w-md"
+                />
+                <Button
+                  size="sm"
+                  className="text-xs gap-1.5 shadow-xs"
+                  onClick={handleResubmitIndent}
+                  disabled={verifying}
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  Resubmit to TGMSIDC
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Verification completed status notice */}
+      {(indent.verificationStatus === "completed" || indent.status === "verification_completed" || indent.status === "in_procurement" || indent.status === "ready_for_procurement") &&
+       indent.status !== "returned_to_deo_for_correction" &&
+       indent.status !== "returned_to_deo" &&
+       indent.verificationStatus !== "returned_to_deo_for_correction" && (
+        <div className="bg-white border border-slate-200 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs mb-3">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="h-5 w-5 text-slate-700 shrink-0" />
+            <div>
+              <span className="text-xs font-bold text-slate-900">TGMSIDC Scrutiny &amp; Budget Validation Completed</span>
+              <p className="text-[11px] text-slate-600">
+                Verified by <strong>{indent.verifiedBy || "TGMSIDC User"}</strong>
+                {indent.verifiedAt ? ` on ${safeFormat(indent.verifiedAt)}` : ""}
+                {indent.verificationRemarks ? ` · "${indent.verificationRemarks}"` : ""}
+              </p>
+            </div>
+          </div>
+          <Badge variant="outline" className="border-slate-300 text-slate-800 bg-slate-50 text-[11px] shrink-0 w-fit">
+            Ready for Procurement
+          </Badge>
         </div>
       )}
 
-      {/* ── Procurement Routing & Statutory Assessment Banner ── */}
+      {/* ── Procurement Routing & Statutory Assessment Banner (Steps 11A & 11B) ── */}
       {indent.tenderId || indent.status === "tender_initiated" ? (
-        <Card className="border-[#5c2d91]/30 bg-purple-50/40 shadow-xs">
+        <Card className="border border-slate-200 bg-white shadow-xs mb-3">
           <CardContent className="p-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-lg bg-[#5c2d91]/10 flex items-center justify-center text-[#5c2d91] shrink-0 mt-0.5">
+                <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 shrink-0 mt-0.5">
                   <GitBranch className="w-5 h-5" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-[#152340]">
-                      Open Tendering Workflow Initiated (Statutory Rule BR-02)
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Open Tendering Workflow Initiated (Rule BR-02)
                     </h3>
-                    <span className="neo-chip pur text-[10px]">Tender #{indent.tenderNumber || "TND-2026"}</span>
+                    <Badge variant="outline" className="border-slate-200 text-slate-700 bg-slate-50 text-[10px]">
+                      Tender #{indent.tenderNumber || "TND-2026"}
+                    </Badge>
                   </div>
-                  <p className="text-xs text-[#6b7a93] mt-1 leading-relaxed">
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                     Requisition routed to competitive e-Procurement / GeM bidding because active Rate Contract was not available or expired for line items.
                   </p>
                   <div className="flex items-center gap-4 mt-2 text-xs">
-                    <span className="text-[#6b7a93]">Portal: <strong className="text-[#152340] uppercase">{indent.tenderPortal || "GeM"}</strong></span>
-                    <span className="text-[#6b7a93]">Status: <strong className="text-[#159557] capitalize">{indent.tenderStatus || "Invited"}</strong></span>
-                    <span className="text-[#6b7a93]">Stage: <strong className="text-[#2563eb]">Stage {indent.tenderCurrentStageNumber || 1} of 10</strong></span>
+                    <span className="text-slate-500">Portal: <strong className="text-slate-800 uppercase">{indent.tenderPortal || "GeM"}</strong></span>
+                    <span className="text-slate-500">Status: <strong className="text-slate-800 capitalize">{indent.tenderStatus || "Invited"}</strong></span>
+                    <span className="text-slate-500">Stage: <strong className="text-slate-800">Stage {indent.tenderCurrentStageNumber || 1} of 10</strong></span>
                   </div>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <Link href={indent.tenderId ? `/tenders/${indent.tenderId}` : "/tenders"}>
-                  <Button size="sm" className="bg-[#5c2d91] hover:bg-[#472270] text-white text-xs gap-1.5 shadow-xs">
+                  <Button size="sm" className="text-xs gap-1.5 shadow-xs">
                     Open Tender Details →
                   </Button>
                 </Link>
                 <Link href="/tenders/workbench">
-                  <Button size="sm" variant="outline" className="text-xs border-[#e4eaf2]">
+                  <Button size="sm" variant="outline" className="text-xs border-slate-200">
                     Tender Workbench
                   </Button>
                 </Link>
@@ -643,26 +1244,82 @@ export default function IndentDetail() {
             </div>
           </CardContent>
         </Card>
-      ) : indent.tenderRequired || !indent.hasFullRCCoverage ? (
-        <Card className="border-amber-200 bg-amber-50/60 shadow-xs">
+      ) : user?.role !== "deo" && (indent.hasFullRCCoverage || indent.procurementMode === "rate_contract") && !indent.tenderRequired ? (
+        <Card className="border border-slate-200 bg-white shadow-xs mb-3">
           <CardContent className="p-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center text-amber-700 shrink-0 mt-0.5">
+                <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 shrink-0 mt-0.5">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Covered Under Active Rate Contract (Direct PO Route)
+                    </h3>
+                    <Badge variant="outline" className="border-slate-200 text-slate-700 bg-slate-50 text-[10px]">
+                      RC Available
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    {indent.rateContractNumber
+                      ? `Requisitioned equipment is covered under approved Rate Contract ${indent.rateContractNumber} (${indent.rateContractVendor || "Empanelled Vendor"}). Direct Purchase Order can be issued immediately upon approval without tendering.`
+                      : "Requisitioned equipment is covered under approved Rate Contract. Direct Purchase Order can be issued immediately upon approval without tendering."}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {indent.rateContractId && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-slate-300 text-slate-700 hover:bg-slate-50 text-xs gap-1.5 shadow-xs"
+                    onClick={() => setRcModal({
+                      contractNumber: indent.rateContractNumber || "RC Agreement",
+                      vendorName: indent.rateContractVendor || "Empanelled Vendor",
+                      unitPrice: indent.rateContractUnitPrice || 0,
+                      validityEnd: indent.rateContractValidityEnd ?? undefined,
+                      equipmentName: indent.equipmentName ?? undefined,
+                      id: indent.rateContractId ?? undefined,
+                      status: indent.rateContractStatus || "active",
+                    })}
+                  >
+                    View Rate Card
+                  </Button>
+                )}
+                {indent.rateContractId && (
+                  <Link href={`/rate-contracts/${indent.rateContractId}`}>
+                    <Button size="sm" className="text-xs gap-1.5 shadow-xs">
+                      Master Contract →
+                    </Button>
+                  </Link>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : indent.tenderRequired || !indent.hasFullRCCoverage ? (
+        <Card className="border border-slate-200 bg-white shadow-xs mb-3">
+          <CardContent className="p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 shrink-0 mt-0.5">
                   <AlertTriangle className="w-5 h-5" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-amber-950">
-                      Active Rate Contract Not Available for All Items (Rule BR-02)
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Active Rate Contract Not Available for All Items
                     </h3>
-                    <span className="neo-chip amb text-[10px]">Tender Required</span>
+                    <Badge variant="outline" className="border-slate-200 text-slate-700 bg-slate-50 text-[10px]">
+                      Tender Required
+                    </Badge>
                   </div>
-                  <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                     {indent.missingRCItems?.length
-                      ? `${indent.missingRCItems.join(", ")} does not possess an active Rate Contract (e.g. Autoclave RC-2425-0012 has expired).`
+                      ? `${indent.missingRCItems.join(", ")} does not possess an active Rate Contract.`
                       : "One or more line items in this requisition lack a valid Rate Contract."}
-                    {" Under statutory healthcare procurement guidelines, items without active Rate Contracts must proceed via Open Tendering (GeM / e-Procurement)."}
+                    {" Under healthcare procurement guidelines, items without active Rate Contracts must proceed via Open Tendering (GeM / e-Procurement)."}
                   </p>
                 </div>
               </div>
@@ -670,7 +1327,7 @@ export default function IndentDetail() {
                 <Button
                   size="sm"
                   onClick={() => setTenderDialogOpen(true)}
-                  className="bg-[#186812] hover:bg-[#124e0d] text-white text-xs gap-1.5 shadow-xs"
+                  className="text-xs gap-1.5 shadow-xs"
                 >
                   <GitBranch className="w-3.5 h-3.5" />
                   <span>Initiate Tendering Process</span>
@@ -712,10 +1369,10 @@ export default function IndentDetail() {
                   <InfoRow icon={User} label="Digitised By" value={indent.digitisedBy} />
                 </div>
                 <div className="flex items-start gap-3 pt-1 border-t border-border/50">
-                  <IndianRupee className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
+                  <IndianRupee className="h-4 w-4 text-slate-700 mt-0.5 shrink-0" />
                   <div>
                     <p className="text-xs text-muted-foreground">Total Estimated Value</p>
-                    <p className="text-sm font-bold text-emerald-700 mt-0.5">{formatINR(totalEstimated)}</p>
+                    <p className="text-sm font-bold text-slate-900 mt-0.5">{formatINR(totalEstimated)}</p>
                   </div>
                 </div>
                 {!hasLineItems && (
@@ -725,7 +1382,7 @@ export default function IndentDetail() {
                       <Button
                         size="sm"
                         variant="outline"
-                        className="h-7 text-xs gap-1 border-primary/30 text-primary hover:bg-primary hover:text-white"
+                        className="h-7 text-xs gap-1 border-slate-300 text-slate-700 hover:bg-slate-50"
                         onClick={() => setSpecProduct({
                           equipmentId: String(indent.equipmentId || indent.equipmentName),
                           name: indent.equipmentName || "Medical Equipment",
@@ -748,7 +1405,7 @@ export default function IndentDetail() {
                   Procurement &amp; Financial Details
                 </CardTitle>
                 <Badge variant="outline" className="text-[10px] font-mono">
-                  FY {indent.financialYear || "2025-26"}
+                  FY {indent.financialYear || "2026-27"}
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-2.5">
@@ -768,27 +1425,35 @@ export default function IndentDetail() {
                   <div className="pt-1 border-t border-border/50">
                     <p className="text-xs text-muted-foreground">Linked Rate Contract</p>
                     <div className="flex items-center gap-2 mt-1">
-                      <button
-                        type="button"
-                        onClick={() => setRcModal({
-                          contractNumber: indent.rateContractNumber || "RC Agreement",
-                          vendorName: indent.rateContractVendor || "Empanelled Vendor",
-                          unitPrice: indent.rateContractUnitPrice || 0,
-                          validityEnd: indent.rateContractValidityEnd ?? undefined,
-                          equipmentName: indent.equipmentName ?? undefined,
-                          id: indent.rateContractId ?? undefined,
-                          status: indent.rateContractStatus || "active",
-                        })}
-                        className="text-xs font-semibold text-[#2563eb] hover:underline flex items-center gap-1 cursor-pointer bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200"
-                      >
-                        {indent.rateContractNumber || "View Ratecard"}
-                        <ExternalLink className="h-3 w-3" />
-                      </button>
-                      <Link href={`/rate-contracts/${indent.rateContractId}`}>
-                        <span className="text-[11px] text-[#6b7a93] hover:text-[#152340] underline">
-                          (Full Master Agreement →)
+                      {user?.role === "deo" ? (
+                        <span className="text-xs font-semibold text-slate-800 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 select-none">
+                          {indent.rateContractNumber || "RC Active"}
                         </span>
-                      </Link>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setRcModal({
+                              contractNumber: indent.rateContractNumber || "RC Agreement",
+                              vendorName: indent.rateContractVendor || "Empanelled Vendor",
+                              unitPrice: indent.rateContractUnitPrice || 0,
+                              validityEnd: indent.rateContractValidityEnd ?? undefined,
+                              equipmentName: indent.equipmentName ?? undefined,
+                              id: indent.rateContractId ?? undefined,
+                              status: indent.rateContractStatus || "active",
+                            })}
+                            className="text-xs font-semibold text-slate-800 hover:underline flex items-center gap-1 cursor-pointer bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200"
+                          >
+                            {indent.rateContractNumber || "View Ratecard"}
+                            <ExternalLink className="h-3 w-3" />
+                          </button>
+                          <Link href={`/rate-contracts/${indent.rateContractId}`}>
+                            <span className="text-[11px] text-slate-600 hover:text-slate-900 underline">
+                              (Full Master Agreement →)
+                            </span>
+                          </Link>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
@@ -796,7 +1461,7 @@ export default function IndentDetail() {
                   <div className="pt-1 border-t border-border/50">
                     <p className="text-xs text-muted-foreground">Linked Open Tender</p>
                     <Link href={`/tenders/${indent.tenderId}`}>
-                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#5c2d91] hover:underline mt-1 bg-purple-50 px-2.5 py-1.5 rounded-lg border border-purple-200">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-800 hover:underline mt-1 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200">
                         {indent.tenderNumber || "View Tender"} →
                       </span>
                     </Link>
@@ -812,12 +1477,9 @@ export default function IndentDetail() {
             <Card className="border-border">
               <CardHeader className="pb-2.5 flex flex-row items-center justify-between space-y-0">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Award className="h-4 w-4 text-emerald-600" />
+                  <Award className="h-4 w-4 text-slate-700" />
                   Key Signatory Details
                 </CardTitle>
-                <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200 font-medium">
-                  Verified Authority
-                </Badge>
               </CardHeader>
               <CardContent className="space-y-2.5 pt-1">
                 {(indent.signatories && indent.signatories.length > 0 ? indent.signatories : [
@@ -828,12 +1490,9 @@ export default function IndentDetail() {
                   <div key={sIdx} className="p-2.5 bg-muted/20 border border-border/60 rounded-xl space-y-1">
                     <div className="flex items-center justify-between">
                       <p className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                        <CheckCircle2 className="h-3.5 w-3.5 text-slate-700 shrink-0" />
                         {sig.name || `Signatory ${sIdx + 1}`}
                       </p>
-                      <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                        {sig.status || "Signed"}
-                      </span>
                     </div>
                     <p className="text-[11px] text-muted-foreground font-medium">{sig.designation || "Authorised Officer"}</p>
                     <div className="flex items-center gap-1 text-[10px] text-muted-foreground pt-0.5">
@@ -872,75 +1531,111 @@ export default function IndentDetail() {
                 </Button>
               </CardHeader>
               <CardContent className="space-y-2 pt-1">
-                {(indent.attachments && indent.attachments.length > 0 ? indent.attachments : [
-                  { name: indent.scannedCopyFilename || `Official_Sanction_${indent.indentNumber.replace(/[\/\\:]/g, '_')}.pdf`, size: "1.4 MB", type: "Facility Sanction Copy & Indent Form", date: safeFormat(indent.createdAt), status: "Verified" },
-                  { name: "Technical_Specifications_Compliance.pdf", size: "840 KB", type: "Technical Specifications & Justification", date: safeFormat(indent.createdAt), status: "Verified" },
-                  { name: "Administrative_Sanction_GO.pdf", size: "620 KB", type: "Govt Order (G.O. Ms.) Sanction Ref", date: safeFormat(indent.createdAt), status: "Verified" },
-                ]).map((doc: any, dIdx: number) => (
-                  <div key={dIdx} className="flex items-center justify-between p-2.5 rounded-xl border border-border/60 bg-muted/15 hover:bg-muted/30 transition-colors">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="h-8 w-8 rounded-lg bg-red-50 border border-red-200 flex items-center justify-center shrink-0">
-                        <FileText className="h-4 w-4 text-red-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-foreground truncate max-w-[220px]" title={doc.name}>{doc.name}</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">{doc.type || "Document"} · {doc.size || "1 MB"}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-[11px] text-primary hover:bg-primary/10 gap-1 px-2"
-                        onClick={() => {
-                          setActiveDoc(doc);
-                          setSideBySide(true);
-                          setRightPanelTab("scanned_doc");
-                        }}
-                      >
-                        <Eye className="h-3 w-3" /> View
-                      </Button>
-                      {doc.dataUrl && (
-                        <a href={doc.dataUrl} download={doc.name} target="_blank" rel="noreferrer">
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-500 hover:text-slate-900" title="Download">
-                            <Download className="h-3 w-3" />
+                {(() => {
+                  const docList: any[] = [];
+                  if (indent.attachments && indent.attachments.length > 0) {
+                    docList.push(...indent.attachments);
+                  }
+                  if (indent.scannedCopyDataUrl || indent.scannedCopyFilename) {
+                    const alreadyExists = docList.some((d: any) =>
+                      d.name === indent.scannedCopyFilename || (d.dataUrl && d.dataUrl === indent.scannedCopyDataUrl)
+                    );
+                    if (!alreadyExists) {
+                      docList.unshift({
+                        name: indent.scannedCopyFilename || "Scanned_Physical_Indent.pdf",
+                        size: indent.scannedCopyDataUrl ? `${(indent.scannedCopyDataUrl.length * 0.75 / (1024 * 1024)).toFixed(1)} MB` : "Scanned Copy",
+                        type: "Facility Sanction Order & Requisition Copy",
+                        dataUrl: indent.scannedCopyDataUrl,
+                        date: safeFormat(indent.createdAt),
+                        status: "Verified",
+                      });
+                    }
+                  }
+
+                  if (docList.length === 0) {
+                    return (
+                      <p className="text-xs text-muted-foreground text-center py-4">No documents attached with this requisition.</p>
+                    );
+                  }
+
+                  return docList.map((doc: any, dIdx: number) => {
+                    const docWithUrl = {
+                      ...doc,
+                      dataUrl: doc.dataUrl || (doc.name === indent.scannedCopyFilename ? indent.scannedCopyDataUrl : undefined)
+                    };
+                    return (
+                      <div key={dIdx} className="flex items-center justify-between p-2.5 rounded-xl border border-border/60 bg-muted/15 hover:bg-muted/30 transition-colors">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="h-8 w-8 rounded-lg bg-red-50 border border-red-200 flex items-center justify-center shrink-0">
+                            <FileText className="h-4 w-4 text-red-600" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-foreground truncate max-w-[220px]" title={docWithUrl.name}>{docWithUrl.name}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">{docWithUrl.type || "Document"} · {docWithUrl.size || "Document"}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-[11px] text-primary hover:bg-primary/10 gap-1 px-2"
+                            onClick={() => {
+                              setActiveDoc(docWithUrl);
+                              setSideBySide(true);
+                              setRightPanelTab("scanned_doc");
+                            }}
+                          >
+                            <Eye className="h-3 w-3" /> View
                           </Button>
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                          {docWithUrl.dataUrl && (
+                            <a href={docWithUrl.dataUrl} download={docWithUrl.name} target="_blank" rel="noreferrer">
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-500 hover:text-slate-900" title="Download">
+                                <Download className="h-3 w-3" />
+                              </Button>
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
               </CardContent>
             </Card>
           </div>
 
           {/* ── Requested Products / Line Items ── */}
           {hasLineItems ? (
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Requested Products / Equipment Schedule</CardTitle>
-                  <span className="text-xs text-muted-foreground">{lineItems.length} line item{lineItems.length !== 1 ? "s" : ""}</span>
+            <Card className="border border-[#e4eaf2] rounded-xl shadow-xs overflow-hidden bg-white">
+              <CardHeader className="py-3 px-4 border-b border-[#e4eaf2] bg-[#f8fafc] flex flex-row items-center justify-between space-y-0">
+                <div className="flex items-center gap-2">
+                  <Package className="h-4 w-4 text-slate-700" />
+                  <CardTitle className="text-sm font-bold text-[#152340]">Requested Products / Equipment Schedule</CardTitle>
                 </div>
+                <span className="neo-chip gry text-[10px] font-semibold">
+                  {lineItems.length} line item{lineItems.length !== 1 ? "s" : ""}
+                </span>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="border-b bg-muted/30">
-                        <th className="px-3 py-2.5 text-left font-medium text-muted-foreground text-xs w-8">#</th>
-                        <th className="px-3 py-2.5 text-left font-medium text-muted-foreground text-xs">Category</th>
-                        <th className="px-3 py-2.5 text-left font-medium text-muted-foreground text-xs">Product</th>
-                        <th className="px-3 py-2.5 text-left font-medium text-muted-foreground text-xs">Specifications</th>
-                        <th className="px-3 py-2.5 text-right font-medium text-muted-foreground text-xs">Qty</th>
-                        <th className="px-3 py-2.5 text-left font-medium text-muted-foreground text-xs">Unit</th>
-                        <th className="px-3 py-2.5 text-right font-medium text-muted-foreground text-xs">Est. Unit Rate</th>
-                        <th className="px-3 py-2.5 text-right font-medium text-muted-foreground text-xs">Est. Total</th>
-                        <th className="px-3 py-2.5 text-left font-medium text-muted-foreground text-xs">RC Tag / Routing</th>
-                        <th className="px-3 py-2.5 text-center font-medium text-muted-foreground text-xs">Technical Specs</th>
+                      <tr className="border-b border-[#e4eaf2] bg-[#f8fafc] text-[#6b7a93] font-bold uppercase tracking-wider text-[10.5px]">
+                        <th className="py-2.5 px-3 text-center w-10 shrink-0">#</th>
+                        <th className="py-2.5 px-3 text-left whitespace-nowrap min-w-[130px]">Category</th>
+                        <th className="py-2.5 px-3 text-left min-w-[220px]">Product / Equipment</th>
+                        <th className="py-2.5 px-3 text-left min-w-[170px] max-w-[240px]">Specifications</th>
+                        <th className="py-2.5 px-3 text-center whitespace-nowrap w-16">Req Qty</th>
+                        {lineItems.some((li: any) => li.approvedQty !== undefined) && (
+                          <th className="py-2.5 px-3 text-center whitespace-nowrap w-20">App Qty</th>
+                        )}
+                        <th className="py-2.5 px-3 text-center whitespace-nowrap w-14">Unit</th>
+                        <th className="py-2.5 px-3 text-right whitespace-nowrap min-w-[110px]">Est. Unit Rate</th>
+                        <th className="py-2.5 px-3 text-right whitespace-nowrap min-w-[110px]">Est. Total</th>
+                        <th className="py-2.5 px-3 text-left whitespace-nowrap min-w-[180px]">RC Tag / Routing</th>
+                        <th className="py-2.5 px-3 text-center whitespace-nowrap min-w-[110px]">Technical Specs</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="divide-y divide-[#eff3f8]">
                       {lineItems.map((li: any, idx: number) => {
                         const catMeta = getCategoryMeta(li.category || "medical_equipment");
                         const CatIcon = catMeta.icon;
@@ -949,21 +1644,28 @@ export default function IndentDetail() {
                         const unit = li.unitOfMeasure ?? li.unit ?? "No.";
                         const specText = li.specifications || li.justification || getSpecSummary(li.equipmentId) || "As per technical specification";
                         return (
-                          <tr key={`${li.equipmentId || idx}-${idx}`} className="border-b last:border-b-0 hover:bg-muted/20 transition-colors">
-                            <td className="px-3 py-3 text-xs text-muted-foreground">{idx + 1}</td>
-                            <td className="px-3 py-3">
+                          <tr key={`${li.equipmentId || idx}-${idx}`} className="hover:bg-[#eff5ff] transition-colors">
+                            {/* Sl. No. */}
+                            <td className="py-3 px-3 text-center text-xs text-muted-foreground font-mono align-middle">
+                              {idx + 1}
+                            </td>
+
+                            {/* Category */}
+                            <td className="py-3 px-3 whitespace-nowrap align-middle">
                               <span className={cn(
-                                "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium border",
+                                "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium border",
                                 catMeta.bgColor, catMeta.color, catMeta.borderColor
                               )}>
-                                <CatIcon className="h-2.5 w-2.5" />
+                                <CatIcon className="h-3 w-3 shrink-0" />
                                 {catMeta.label}
                               </span>
                             </td>
-                            <td className="px-3 py-3">
+
+                            {/* Product Name */}
+                            <td className="py-3 px-3 min-w-[220px] align-middle">
                               <button
                                 type="button"
-                                className="text-left font-medium text-primary hover:underline underline-offset-2 transition-colors"
+                                className="text-left font-semibold text-xs sm:text-[13px] text-slate-900 hover:underline underline-offset-2 transition-colors block leading-snug"
                                 onClick={() => setSpecProduct({ equipmentId: String(li.equipmentId), name: li.equipmentName })}
                               >
                                 {li.equipmentName}
@@ -1001,77 +1703,253 @@ export default function IndentDetail() {
                                 </div>
                               ) : null}
                             </td>
-                            <td className="px-3 py-3 max-w-[180px]">
-                              <p className="text-xs text-foreground/80 line-clamp-2">{specText}</p>
+
+                            {/* Specifications */}
+                            <td className="py-3 px-3 min-w-[170px] max-w-[240px] align-middle">
+                              <p className="text-xs text-[#4b5563] leading-relaxed line-clamp-2" title={specText}>
+                                {specText}
+                              </p>
                             </td>
-                            <td className="px-3 py-3 text-right font-semibold tabular-nums">{qty}</td>
-                            <td className="px-3 py-3 text-xs text-muted-foreground">{unit}</td>
-                            <td className="px-3 py-3 text-right tabular-nums text-sm">₹{rate.toLocaleString("en-IN")}</td>
-                            <td className="px-3 py-3 text-right font-semibold tabular-nums text-sm">{formatINR(qty * rate)}</td>
-                            <td className="px-3 py-3">
-                              {li.rcStatus === "active" ? (
-                                <button
-                                  type="button"
-                                  onClick={() => setRcModal({
-                                    contractNumber: li.rateContractNumber,
-                                    vendorName: li.rateContractVendor,
-                                    unitPrice: li.rateContractUnitPrice,
-                                    validityEnd: li.rateContractValidityEnd,
-                                    equipmentName: li.equipmentName,
-                                    id: li.rateContractId,
-                                    status: "active",
-                                  })}
-                                  className="text-left group/rc inline-block cursor-pointer"
-                                  title="Click to view Ratecard preview"
-                                >
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 group-hover/rc:bg-emerald-100 transition-colors">
-                                    <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                                    {li.rateContractNumber || "RC Active"}
+
+                            {/* Qty & Priority */}
+                            <td className="py-3 px-3 text-center whitespace-nowrap tabular-nums text-xs sm:text-sm align-middle">
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span className={cn("font-bold", li.deferred ? "line-through text-slate-400" : "text-slate-900")}>
+                                  {qty}
+                                </span>
+                                {li.originalRequestedQty && li.originalRequestedQty !== qty && (
+                                  <span className="text-[10px] text-slate-500 font-normal">
+                                    (Orig: {li.originalRequestedQty})
                                   </span>
-                                  <span className="text-[10px] text-muted-foreground block mt-0.5 truncate max-w-[150px]">
-                                    ₹{(li.rateContractUnitPrice || 0).toLocaleString("en-IN")} · {li.rateContractVendor}
-                                  </span>
-                                </button>
-                              ) : li.rcStatus === "expired" ? (
-                                <button
-                                  type="button"
-                                  onClick={() => setRcModal({
-                                    contractNumber: li.rateContractNumber,
-                                    vendorName: li.rateContractVendor,
-                                    unitPrice: li.rateContractUnitPrice,
-                                    validityEnd: li.rateContractValidityEnd,
-                                    equipmentName: li.equipmentName,
-                                    id: li.rateContractId,
-                                    status: "expired",
-                                  })}
-                                  className="text-left group/rc inline-block cursor-pointer"
-                                  title="Click to view expired Ratecard details"
-                                >
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-red-50 text-red-700 border border-red-200 group-hover/rc:bg-red-100 transition-colors">
-                                    <AlertTriangle className="h-3 w-3 text-red-600" />
-                                    Expired: {li.rateContractNumber}
-                                  </span>
-                                  <span className="text-[10px] text-[#dc2f3c] font-semibold block mt-0.5">
-                                    Tender Required (BR-02)
-                                  </span>
-                                </button>
+                                )}
+                                <div className="flex items-center gap-1 mt-0.5">
+                                  <Badge variant="outline" className="text-[9px] px-1 py-0 border-slate-200 bg-slate-50 text-slate-700">
+                                    P{li.priority || 1}
+                                  </Badge>
+                                  {li.deferred && (
+                                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-slate-300 bg-slate-100 text-slate-600">
+                                      Deferred
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* App Qty */}
+                            {lineItems.some((l: any) => l.approvedQty !== undefined) && (
+                              <td className="py-3 px-3 text-center whitespace-nowrap font-bold text-slate-800 tabular-nums text-xs sm:text-sm align-middle">
+                                {li.approvedQty !== undefined ? (
+                                  <div className="flex flex-col items-center">
+                                    <span>{li.approvedQty}</span>
+                                    {li.approvedQty < qty && (
+                                      <Badge variant="outline" className="mt-1 text-[9px] bg-slate-50 text-slate-700 border-slate-200 px-1 py-0 h-4" title={li.partialReason || "Partial approval"}>
+                                        Partial
+                                      </Badge>
+                                    )}
+                                  </div>
+                                ) : "—"}
+                              </td>
+                            )}
+
+                            {/* Unit */}
+                            <td className="py-3 px-3 text-center whitespace-nowrap text-xs text-muted-foreground align-middle">
+                              {unit}
+                            </td>
+
+                            {/* Est. Unit Rate */}
+                            <td className="py-3 px-3 text-right whitespace-nowrap tabular-nums text-xs font-medium text-slate-700 align-middle">
+                              ₹{rate.toLocaleString("en-IN")}
+                            </td>
+
+                            {/* Est. Total */}
+                            <td className="py-3 px-3 text-right whitespace-nowrap tabular-nums font-bold text-xs sm:text-sm text-slate-900 align-middle">
+                              {li.deferred ? (
+                                <span className="text-slate-400 font-normal text-xs">Deferred (₹0)</span>
                               ) : (
-                                <div>
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                                    <AlertCircle className="h-3 w-3 text-amber-600" />
+                                formatINR((li.approvedQty ?? qty) * rate)
+                              )}
+                            </td>
+
+                            {/* RC Tag / Decoupled Line Routing */}
+                            <td className="py-3 px-3 whitespace-nowrap align-middle">
+                              {li.deferred ? (
+                                <div className="flex flex-col items-start gap-0.5">
+                                  <Badge variant="outline" className="bg-slate-100 text-slate-600 border-slate-200 text-[10px]">
+                                    Deferred from Procurement
+                                  </Badge>
+                                  <span className="text-[10px] text-slate-500">
+                                    Excluded from current PO cycle
+                                  </span>
+                                </div>
+                              ) : li.lineStatus === "po_raised" || li.lineStatus === "po_drafted" || li.poNumber ? (
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-300">
+                                    <CheckCheck className="h-3 w-3 text-emerald-700 shrink-0" />
+                                    {li.lineStatus === "po_drafted" ? "Draft PO: " : "PO Raised: "} {li.poNumber}
+                                  </span>
+                                  <Link href={li.poId || li.purchaseOrderId ? `/purchase-orders/${li.poId || li.purchaseOrderId}` : `/purchase-orders`}>
+                                    <span className="text-[10.5px] text-slate-700 hover:underline cursor-pointer flex items-center gap-1 font-medium">
+                                      View PO Details <ExternalLink className="h-2.5 w-2.5" />
+                                    </span>
+                                  </Link>
+                                </div>
+                              ) : li.lineStatus === "tender_initiated" || li.tenderNumber ? (
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-300">
+                                    <Layers className="h-3 w-3 text-slate-700 shrink-0" />
+                                    Tender #{li.tenderNumber}
+                                  </span>
+                                  <Link href={li.tenderId ? `/tenders/${li.tenderId}` : `/tenders`}>
+                                    <span className="text-[10.5px] text-slate-700 hover:underline cursor-pointer flex items-center gap-1 font-medium">
+                                      View Tender <ExternalLink className="h-2.5 w-2.5" />
+                                    </span>
+                                  </Link>
+                                </div>
+                              ) : li.lineStatus === "multiple_rcs_found" || (!li.rateContractId && Array.isArray(li.candidateRateContracts) && li.candidateRateContracts.length > 1) ? (
+                                <div className="flex flex-col items-start gap-1.5">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-300">
+                                    <AlertCircle className="h-3 w-3 text-slate-600 shrink-0" />
+                                    {Array.isArray(li.candidateRateContracts) ? li.candidateRateContracts.length : 2} RCs Eligible
+                                  </span>
+                                  {user?.role === "deo" ? (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      disabled
+                                      className="h-6 text-[11px] px-2 border-slate-200 text-slate-400 bg-slate-50 gap-1 font-normal cursor-not-allowed shadow-none"
+                                      title="Non-editable for DEO. Rate Contract selection is handled by TGMSIDC User."
+                                    >
+                                      Select RC
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-6 text-[11px] px-2 border-slate-300 text-slate-800 bg-white hover:bg-slate-50 gap-1 font-semibold shadow-xs"
+                                      onClick={() => setMultiRcSelectModal({ lineIndex: idx, item: li, candidates: Array.isArray(li.candidateRateContracts) ? li.candidateRateContracts : [] })}
+                                      disabled={lineActionLoading === idx}
+                                    >
+                                      Select RC
+                                    </Button>
+                                  )}
+                                </div>
+                              ) : li.lineStatus === "matched_active_rc" || (li.rateContractId && !li.poNumber) ? (
+                                <div className="flex flex-col items-start gap-1">
+                                  {user?.role === "deo" ? (
+                                    <div className="text-left inline-block select-none cursor-default" title="Tagged Rate Contract (View Only for DEO)">
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                                        <CheckCircle2 className="h-3 w-3 text-slate-700 shrink-0" />
+                                        {li.rateContractNumber || "RC Active"}
+                                      </span>
+                                      <span className="text-[10px] text-muted-foreground block mt-0.5 max-w-[170px] truncate">
+                                        ₹{(li.rateContractUnitPrice || 0).toLocaleString("en-IN")} · {li.rateContractVendor}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setRcModal({
+                                        contractNumber: li.rateContractNumber,
+                                        vendorName: li.rateContractVendor,
+                                        unitPrice: li.rateContractUnitPrice,
+                                        validityEnd: li.rateContractValidityEnd,
+                                        equipmentName: li.equipmentName,
+                                        id: li.rateContractId,
+                                        status: "active",
+                                      })}
+                                      className="text-left group/rc inline-block cursor-pointer"
+                                      title="Click to view Ratecard details"
+                                    >
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200 group-hover/rc:bg-slate-200 transition-colors">
+                                        <CheckCircle2 className="h-3 w-3 text-slate-700 shrink-0" />
+                                        {li.rateContractNumber || "RC Active"}
+                                      </span>
+                                      <span className="text-[10px] text-muted-foreground block mt-0.5 max-w-[170px] truncate">
+                                        ₹{(li.rateContractUnitPrice || 0).toLocaleString("en-IN")} · {li.rateContractVendor}
+                                      </span>
+                                    </button>
+                                  )}
+
+                                  {user?.role === "deo" ? (
+                                    <Button
+                                      size="sm"
+                                      disabled
+                                      className="h-6 text-[11px] px-2 bg-slate-100 text-slate-400 border border-slate-200 gap-1 mt-0.5 shadow-none font-normal cursor-not-allowed"
+                                      title="Non-editable for DEO. Purchase Order drafting is handled by TGMSIDC User."
+                                    >
+                                      <FileText className="h-3 w-3 text-slate-400" />
+                                      Draft PO
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      size="sm"
+                                      className="h-6 text-[11px] px-2.5 gap-1.5 mt-0.5 shadow-xs font-semibold disabled:opacity-50 cursor-pointer"
+                                      onClick={() => {
+                                        const targetRcId =
+                                          (Array.isArray(li.candidateRateContracts) && li.candidateRateContracts.length > 0 ? (
+                                            li.candidateRateContracts.find((c: any) => c.unitPrice === (li.estimatedUnitCost || li.rateContractUnitPrice))?.rcId ||
+                                            li.candidateRateContracts[0]?.rcId ||
+                                            li.candidateRateContracts[0]?.rateContractId
+                                          ) : undefined) ||
+                                          li.rateContractId ||
+                                          indent.rateContractId || "";
+                                        setLocation(`/purchase-orders/new?indentId=${indent.id || (indent as any)._id}&lineIndex=${idx}&equipmentId=${li.equipmentId || ''}&rcId=${targetRcId}`);
+                                      }}
+                                      disabled={lineActionLoading === idx || indent.status === "reprioritization_required" || indent.budgetSufficiency === "insufficient"}
+                                      title={indent.status === "reprioritization_required" ? "Reprioritization required before drafting PO" : "Click to review RC details & Draft PO"}
+                                    >
+                                      <FileText className="h-3 w-3 text-emerald-400" />
+                                      Draft PO
+                                    </Button>
+                                  )}
+                                </div>
+                              ) : (indent.verificationStatus === "completed" || indent.status === "verification_completed" || indent.status === "in_procurement" || indent.status === "ready_for_procurement") ? (
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                                    <AlertCircle className="h-3 w-3 text-slate-600 shrink-0" />
                                     No Active RC
                                   </span>
-                                  <span className="text-[10px] text-amber-700 font-semibold block mt-0.5">
-                                    Tender Required
+                                  {user?.role === "deo" ? (
+                                    <Button
+                                      size="sm"
+                                      disabled
+                                      className="h-6 text-[11px] px-2 bg-slate-100 text-slate-400 border border-slate-200 gap-1 mt-0.5 shadow-none font-normal cursor-not-allowed"
+                                      title="Non-editable for DEO. Tender initiation is handled by TGMSIDC User."
+                                    >
+                                      <Layers className="h-3 w-3 text-slate-400" />
+                                      Initiate Tender
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      size="sm"
+                                      className="h-6 text-[11px] px-2 gap-1 mt-0.5 shadow-xs font-semibold"
+                                      onClick={() => handleInitiateLineTender(idx, li)}
+                                      disabled={lineActionLoading === idx}
+                                    >
+                                      <Layers className="h-3 w-3" />
+                                      {lineActionLoading === idx ? "Initiating..." : "Initiate Tender"}
+                                    </Button>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="flex flex-col items-start gap-0.5">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                                    <Clock className="h-3 w-3 text-slate-500 shrink-0" />
+                                    Pending Verification
+                                  </span>
+                                  <span className="text-[10px] text-muted-foreground">
+                                    RC evaluated upon verification
                                   </span>
                                 </div>
                               )}
                             </td>
-                            <td className="px-3 py-3 text-center">
+
+                            {/* Technical Specs */}
+                            <td className="py-3 px-3 text-center whitespace-nowrap min-w-[110px] align-middle">
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="h-7 text-xs gap-1 border-primary/30 text-primary hover:bg-primary hover:text-white"
+                                className="h-7 text-xs gap-1 border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors shadow-xs"
                                 onClick={() => setSpecProduct({
                                   equipmentId: String(li.equipmentCode || li.equipmentId || li.equipmentName),
                                   equipmentCode: li.equipmentCode,
@@ -1087,11 +1965,14 @@ export default function IndentDetail() {
                       })}
                     </tbody>
                     <tfoot>
-                      <tr className="border-t bg-muted/20">
-                        <td colSpan={7} className="px-3 py-2.5 text-right font-semibold text-sm">Total Estimated Value</td>
-                        <td className="px-3 py-2.5 text-right font-bold text-base tabular-nums">{formatINR(totalEstimated)}</td>
-                        <td className="px-3 py-2.5" />
-                        <td className="px-3 py-2.5" />
+                      <tr className="border-t border-[#e4eaf2] bg-[#f8fafc]">
+                        <td colSpan={7} className="py-3.5 px-4 text-right font-bold text-xs uppercase tracking-wider text-[#6b7a93] whitespace-nowrap">
+                          Total Estimated Value
+                        </td>
+                        <td className="py-3.5 px-3 text-right font-bold text-sm text-[#152340] tabular-nums whitespace-nowrap">
+                          {formatINR(totalEstimated)}
+                        </td>
+                        <td colSpan={2} className="py-3.5 px-3" />
                       </tr>
                     </tfoot>
                   </table>
@@ -1136,6 +2017,86 @@ export default function IndentDetail() {
                   </div>
                 )}
 
+                {/* Draft PO Scrutiny Console for Approvers (GM / SO / ED) */}
+                {linkedPOs.filter((p: any) => p.status === "draft" || p.status === "pending_approval").length > 0 && (
+                  <div className="rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-slate-50 p-3.5 space-y-2.5 shadow-2xs">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-blue-700 shrink-0" />
+                        <span className="text-xs font-bold text-blue-950 uppercase tracking-wide">
+                          Draft Purchase Order Awaiting Scrutiny
+                        </span>
+                      </div>
+                      <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-800 border-amber-300 font-medium">
+                        Draft PO Stage · Pending ED Sanction
+                      </Badge>
+                    </div>
+
+                    {linkedPOs.filter((p: any) => p.status === "draft" || p.status === "pending_approval").map((p: any) => (
+                      <div key={p.id} className="rounded-lg border border-blue-200/80 bg-white p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-xs text-blue-900">{p.poNumber}</span>
+                            {p.rcNumber && (
+                              <Badge variant="outline" className="text-[10px] bg-purple-50 text-purple-700 border-purple-200">
+                                RC #{p.rcNumber}
+                              </Badge>
+                            )}
+                          </div>
+                          <Link href={`/purchase-orders/${p.id}`} target="_blank">
+                            <Button size="sm" variant="ghost" className="h-6 text-[11px] px-2 text-blue-700 hover:text-blue-900 hover:bg-blue-50 gap-1 font-semibold">
+                              <Eye className="h-3 w-3" /> View Draft PO Details <ExternalLink className="h-2.5 w-2.5 ml-0.5" />
+                            </Button>
+                          </Link>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                          <div>
+                            <span className="text-[10px] text-muted-foreground block font-medium uppercase">Equipment</span>
+                            <span className="font-semibold text-slate-800 truncate block" title={p.equipmentName}>{p.equipmentName || "Medical Equipment"}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-muted-foreground block font-medium uppercase">Quantity</span>
+                            <span className="font-semibold text-slate-800 tabular-nums">{p.quantity || 1} No.</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-muted-foreground block font-medium uppercase">Landed Rate</span>
+                            <span className="font-semibold text-slate-800 tabular-nums">₹{(p.unitPriceInclTax || p.unitPrice * 1.12 || 0).toLocaleString("en-IN")}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-muted-foreground block font-medium uppercase">Total PO Value</span>
+                            <span className="font-bold text-emerald-700 tabular-nums">₹{(p.totalAmount || 0).toLocaleString("en-IN")}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[11px] text-slate-600">
+                          <div>
+                            <span className="text-muted-foreground">Vendor: </span>
+                            <span className="font-semibold text-slate-800">{p.vendorName || "Empanelled Vendor"}</span>
+                          </div>
+                          {p.deliveryAddress && (
+                            <div className="max-w-[280px] truncate text-right text-muted-foreground">
+                              Consignee: <span className="text-slate-700 font-medium">{p.deliveryAddress.split(",")[0]}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    <div className="text-[11px] text-slate-600 bg-blue-100/40 rounded-md p-2 border border-blue-200/60 leading-relaxed">
+                      {pendingStep.requiredRole === "gm_equipment" ? (
+                        <><strong>GM Equipment Scrutiny:</strong> Verify technical specifications, Rate Contract pricing compliance (₹4,00,000 unit), and empanelled vendor allocation. Your approval endorses this drafted PO for administrative concurrence.</>
+                      ) : pendingStep.requiredRole === "so_equipment" ? (
+                        <><strong>SO Equipment Concurrence:</strong> Confirm hospital consignee allocation and administrative alignment. Forwarding endorses this PO for final sanction.</>
+                      ) : pendingStep.requiredRole === "executive_director" ? (
+                        <><strong>Executive Director Final Sanction:</strong> Approving this indent accords final statutory authorization and will <strong>automatically transition the drafted PO to &apos;PO Issued&apos;</strong> to the vendor.</>
+                      ) : (
+                        <><strong>Workflow Notice:</strong> This PO was drafted by TGMSIDC User. Approving this indent endorses the PO. Final issuance occurs upon Executive Director (ED) sanction.</>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-1.5">
                   <Label className="text-sm font-medium">
                     {pendingStep.status === "returned" ? "Resubmission Notes" : "Comments / Observations"}
@@ -1158,7 +2119,7 @@ export default function IndentDetail() {
                     disabled={processing}
                   >
                     <CheckCircle2 className="h-4 w-4" />
-                    {processing ? "Processing..." : `Approve & Forward (Step ${pendingStep.stepNumber})`}
+                    {processing ? "Processing..." : "Approve"}
                   </Button>
                   <Button
                     variant="outline"
@@ -1168,7 +2129,7 @@ export default function IndentDetail() {
                     title={!comments.trim() ? "Enter a revision reason before returning" : undefined}
                   >
                     <RotateCcw className="h-4 w-4" />
-                    Return to DEO for Revision
+                    Return to DEO
                   </Button>
                   <Button
                     variant="destructive"
@@ -1177,7 +2138,7 @@ export default function IndentDetail() {
                     disabled={processing}
                   >
                     <XCircle className="h-4 w-4" />
-                    Reject Indent
+                    Reject
                   </Button>
                 </div>
               </CardContent>
@@ -1319,20 +2280,7 @@ export default function IndentDetail() {
 
               {/* Action Buttons */}
               <div className="flex items-center gap-2 flex-wrap">
-                {/* 1. Confirm Delivery */}
-                {(!firstDeliveredDelivery && (indent.status === "po_issued" || linkedPOs.length > 0)) && (
-                  <Button
-                    size="sm"
-                    disabled={lifecycleLoading}
-                    onClick={() => handleAdvanceLifecycle("confirm_delivery")}
-                    className="bg-sky-600 hover:bg-sky-700 text-white text-xs gap-1.5 shadow-xs"
-                  >
-                    <Truck className="h-3.5 w-3.5" />
-                    <span>Confirm Hospital Delivery</span>
-                  </Button>
-                )}
-
-                {/* 2. Perform QA */}
+                {/* 1. Perform QA */}
                 {(firstDeliveredDelivery && !firstQAPassedDelivery) && (
                   <Button
                     size="sm"
@@ -1345,44 +2293,29 @@ export default function IndentDetail() {
                   </Button>
                 )}
 
-                {/* 3. Issue GRN & Annexure 6 */}
+                {/* 2. Issue GRN & Annexure 6 */}
                 {(firstQAPassedDelivery && !firstAcceptedDelivery) && (
                   <Button
                     size="sm"
                     disabled={lifecycleLoading}
                     onClick={() => handleAdvanceLifecycle("issue_grn")}
-                    className="bg-[#186812] hover:bg-[#124e0d] text-white text-xs gap-1.5 shadow-xs"
+                    className="text-xs gap-1.5 shadow-xs"
                   >
                     <ClipboardCheck className="h-3.5 w-3.5" />
                     <span>Issue GRN &amp; Annexure 6 Certificate</span>
                   </Button>
                 )}
 
-                {/* 4. Release Payment */}
+                {/* 3. Release Payment */}
                 {(firstAcceptedDelivery && !isPOPaid) && (
                   <Button
                     size="sm"
                     disabled={lifecycleLoading}
                     onClick={() => handleAdvanceLifecycle("record_payment")}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs gap-1.5 shadow-xs"
+                    className="text-xs gap-1.5 shadow-xs"
                   >
                     <Receipt className="h-3.5 w-3.5" />
                     <span>Release Payment (Accounts)</span>
-                  </Button>
-                )}
-
-                {/* 1-Click Fast-Track Button */}
-                {(!firstAcceptedDelivery || !isPOPaid) && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={lifecycleLoading}
-                    onClick={() => handleAdvanceLifecycle("auto_complete_all")}
-                    className="border-amber-500/50 text-amber-900 bg-amber-50/50 hover:bg-amber-100/50 text-xs gap-1.5 shadow-xs font-semibold cursor-pointer"
-                    title="Simulate all remaining procurement steps through to Commissioning & Payment"
-                  >
-                    <Zap className="h-3.5 w-3.5 text-amber-600 fill-amber-500" />
-                    <span>Fast-Track Full Flow (1-Click)</span>
                   </Button>
                 )}
 
@@ -1399,7 +2332,11 @@ export default function IndentDetail() {
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-4 pt-3 border-t border-border/60">
               {[
                 { title: "1. Indent Approved", done: !!indent.approvedBy || !["pending_review", "pending_approval", "rejected"].includes(indent.status), active: indent.status === "pending_approval" },
-                { title: "2. PO Issued", done: linkedPOs.length > 0 || indent.status === "po_issued" || indent.status === "completed", active: !linkedPOs.length && indent.status === "po_issued" },
+                {
+                  title: linkedPOs.some((p: any) => p.status === "draft") && !linkedPOs.some((p: any) => p.status === "issued" || p.status === "po_approved") ? "2. PO Drafted" : "2. PO Issued",
+                  done: linkedPOs.some((p: any) => p.status === "issued" || p.status === "po_approved" || p.status === "approved" || p.status === "delivered" || p.status === "in_transit") || indent.status === "po_issued" || indent.status === "completed",
+                  active: linkedPOs.some((p: any) => p.status === "draft") && indent.status !== "po_issued"
+                },
                 { title: "3. Dispatched & In Transit", done: linkedDeliveries.length > 0, active: linkedDeliveries.length > 0 && !firstDeliveredDelivery },
                 { title: "4. Delivered at Site", done: !!firstDeliveredDelivery, active: !!firstDeliveredDelivery && !firstQAPassedDelivery },
                 { title: "5. QA Inspected (100%)", done: !!firstQAPassedDelivery, active: !!firstQAPassedDelivery && !firstAcceptedDelivery },
@@ -1472,21 +2409,23 @@ export default function IndentDetail() {
                     <span className="text-muted-foreground text-[11px]">Approved Unit Rate</span>
                     <span className="font-semibold">{formatINR(indent.rateContractUnitPrice || (totalEstimated / (indent.quantity || 1)))}</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setRcModal({
-                      contractNumber: indent.rateContractNumber || "RC Agreement",
-                      vendorName: indent.rateContractVendor || "Empanelled Vendor",
-                      unitPrice: indent.rateContractUnitPrice || 0,
-                      validityEnd: indent.rateContractValidityEnd ?? undefined,
-                      equipmentName: indent.equipmentName ?? undefined,
-                      id: indent.rateContractId ?? undefined,
-                      status: indent.rateContractStatus || "active",
-                    })}
-                    className="w-full text-center text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:underline pt-1 block cursor-pointer"
-                  >
-                    View Ratecard Preview →
-                  </button>
+                  {user?.role !== "deo" && (
+                    <button
+                      type="button"
+                      onClick={() => setRcModal({
+                        contractNumber: indent.rateContractNumber || "RC Agreement",
+                        vendorName: indent.rateContractVendor || "Empanelled Vendor",
+                        unitPrice: indent.rateContractUnitPrice || 0,
+                        validityEnd: indent.rateContractValidityEnd ?? undefined,
+                        equipmentName: indent.equipmentName ?? undefined,
+                        id: indent.rateContractId ?? undefined,
+                        status: indent.rateContractStatus || "active",
+                      })}
+                      className="w-full text-center text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:underline pt-1 block cursor-pointer"
+                    >
+                      View Ratecard Preview →
+                    </button>
+                  )}
                 </div>
               ) : indent.tenderId ? (
                 <div className="space-y-1.5 pt-1">
@@ -1524,8 +2463,8 @@ export default function IndentDetail() {
                   </div>
                 </div>
                 {linkedPOs.length > 0 && (
-                  <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
-                    {linkedPOs[0].status || "Issued"}
+                  <Badge variant="outline" className={cn("text-[10px]", linkedPOs[0].status === "draft" ? "bg-amber-50 text-amber-800 border-amber-300" : "bg-emerald-50 text-emerald-700 border-emerald-200")}>
+                    {linkedPOs[0].status === "draft" ? "Draft PO" : (linkedPOs[0].status === "issued" ? "Issued" : (linkedPOs[0].status || "Issued"))}
                   </Badge>
                 )}
               </div>
@@ -1543,9 +2482,12 @@ export default function IndentDetail() {
                   <div className="space-y-1">
                     {linkedPOs.map((po) => (
                       <Link key={po.id} href={`/purchase-orders/${po.id}`}>
-                        <div className="p-1.5 bg-emerald-50/70 border border-emerald-200/80 rounded-md hover:bg-emerald-100/70 transition-colors cursor-pointer flex items-center justify-between">
-                          <span className="text-[11px] font-mono font-bold text-emerald-800">{po.poNumber || "PO"}</span>
-                          <span className="text-[10px] text-emerald-700 font-semibold">{formatINR(po.totalAmount)}</span>
+                        <div className={cn("p-1.5 border rounded-md transition-colors cursor-pointer flex items-center justify-between", po.status === "draft" ? "bg-amber-50/70 border-amber-200/80 hover:bg-amber-100/70" : "bg-emerald-50/70 border-emerald-200/80 hover:bg-emerald-100/70")}>
+                          <div className="flex items-center gap-1.5">
+                            <span className={cn("text-[11px] font-mono font-bold", po.status === "draft" ? "text-amber-900" : "text-emerald-800")}>{po.poNumber || "PO"}</span>
+                            {po.status === "draft" && <Badge variant="outline" className="text-[9px] px-1 py-0 bg-white text-amber-700 border-amber-200">Draft</Badge>}
+                          </div>
+                          <span className={cn("text-[10px] font-semibold", po.status === "draft" ? "text-amber-800" : "text-emerald-700")}>{formatINR(po.totalAmount)}</span>
                         </div>
                       </Link>
                     ))}
@@ -1692,60 +2634,6 @@ export default function IndentDetail() {
         </div>
       </div>
 
-      {/* Reviewer Data Edit Audit Trail (Process Book §1 Step 11) */}
-      {indent.editAuditTrail && indent.editAuditTrail.length > 0 && (
-        <Card className="border-blue-200 bg-blue-50/20">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <CardTitle className="text-base flex items-center gap-2 text-blue-950">
-                <FileCheck2 className="h-4 w-4 text-blue-600" />
-                Reviewer Data Correction Audit Trail
-              </CardTitle>
-              <Badge variant="outline" className="text-xs bg-blue-100 text-blue-800 border-blue-300">
-                Process Book §1 Step 11 — Blue Highlighted Corrections
-              </Badge>
-            </div>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Statutory verification corrections made by Reviewers are tracked with original facility values preserved and verified values highlighted.
-            </p>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-blue-200 bg-blue-100/50">
-                    <th className="px-3 py-2 text-left font-semibold text-blue-950">Timestamp &amp; Reviewer</th>
-                    <th className="px-3 py-2 text-left font-semibold text-blue-950">Field Corrected</th>
-                    <th className="px-3 py-2 text-left font-semibold text-blue-950">Facility Submitted Value</th>
-                    <th className="px-3 py-2 text-left font-semibold text-blue-950">Verified Value</th>
-                    <th className="px-3 py-2 text-left font-semibold text-blue-950">Regulatory / Technical Justification</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-blue-100">
-                  {indent.editAuditTrail.map((edit: any, idx: number) => (
-                    <tr key={idx} className="hover:bg-blue-50/50 transition-colors">
-                      <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
-                        <div className="font-medium text-foreground">{edit.editedBy || "Procurement Officer"}</div>
-                        <div className="text-[10px]">{safeFormat(edit.editedAt, "dd MMM yyyy, HH:mm")}</div>
-                      </td>
-                      <td className="px-3 py-2.5 font-mono font-medium text-foreground">{edit.field}</td>
-                      <td className="px-3 py-2.5 line-through text-muted-foreground">
-                        {String(edit.originalValue ?? "—")}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span className="inline-block bg-blue-100 text-blue-900 border border-blue-300 font-semibold px-2 py-0.5 rounded shadow-2xs">
-                          {String(edit.correctedValue ?? "—")}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5 text-foreground/80">{edit.reason || "Corrected as per statutory equipment master / sanction rules"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Audit Log */}
       <Accordion type="single" collapsible className="border rounded-lg bg-card">
@@ -1883,14 +2771,14 @@ export default function IndentDetail() {
                       setRcModal(null);
                       setTenderDialogOpen(true);
                     }}
-                    className="bg-[#186812] hover:bg-[#124e0d] text-white text-xs gap-1.5"
+                    className="text-xs gap-1.5"
                   >
                     <GitBranch className="w-3.5 h-3.5" />
                     Initiate Tendering Process
                   </Button>
                 ) : rcModal.id ? (
                   <Link href={`/rate-contracts/${rcModal.id}`}>
-                    <Button size="sm" className="bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs gap-1.5">
+                    <Button size="sm" className="text-xs gap-1.5">
                       Open Full Agreement <ExternalLink className="w-3 h-3" />
                     </Button>
                   </Link>
@@ -1969,7 +2857,7 @@ export default function IndentDetail() {
                 size="sm"
                 onClick={() => initiateTenderMutation.mutate()}
                 disabled={processing}
-                className="bg-[#186812] hover:bg-[#124e0d] text-white text-xs gap-1.5"
+                className="text-xs gap-1.5"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 {processing ? "Initiating Tender…" : "Confirm & Initiate Tender"}
@@ -1985,7 +2873,7 @@ export default function IndentDetail() {
           <DialogHeader>
             <DialogTitle className="text-base font-bold text-[#152340] flex items-center gap-2">
               <CheckCheck className="h-4 w-4 text-[#186812]" />
-              Resolve Write-in Equipment (Process Book §1 Step 12)
+              Resolve Write-in Equipment
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleResolveWriteIn} className="space-y-4 py-2">
@@ -2094,7 +2982,7 @@ export default function IndentDetail() {
                 type="submit"
                 size="sm"
                 disabled={writeInSubmitting || (writeInAction === "map_to_master" && !mappedEquipmentId) || (writeInAction === "new_addition_requested" && !newEquipmentName.trim())}
-                className="bg-[#186812] hover:bg-[#124e0d] text-white text-xs gap-1.5"
+                className="text-xs gap-1.5"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 {writeInSubmitting ? "Submitting…" : writeInAction === "map_to_master" ? "Confirm & Map to Master" : "Submit Request to GM"}
@@ -2143,6 +3031,132 @@ export default function IndentDetail() {
             >
               <XCircle className="h-4 w-4 mr-1.5" />
               Confirm Rejection
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Return Indent to DEO Dialog */}
+      <Dialog open={returnDEODialog} onOpenChange={setReturnDEODialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-amber-900 flex items-center gap-2">
+              <RotateCcw className="h-5 w-5 text-amber-600" />
+              Return Indent to Facility DEO
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-xs text-muted-foreground">
+              Please specify clear, actionable instructions on what needs revision (e.g. quantity reduction, specification correction, or budget head discrepancy).
+            </p>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Revision Reason / Instructions *</Label>
+              <Textarea
+                placeholder="Enter mandatory revision remarks for the facility Data Entry Operator..."
+                value={returnRemarks}
+                onChange={(e) => setReturnRemarks(e.target.value)}
+                rows={3}
+                className="text-xs resize-none"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setReturnDEODialog(false); setReturnRemarks(""); }}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700 text-white text-xs gap-1.5 shadow-xs"
+              onClick={handleReturnToDEO}
+              disabled={verifying || !returnRemarks.trim()}
+            >
+              <RotateCcw className="h-4 w-4" />
+              {verifying ? "Returning..." : "Confirm Return to DEO"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Select Rate Contract from Candidates Modal */}
+      <Dialog open={!!multiRcSelectModal} onOpenChange={(open) => { if (!open) setMultiRcSelectModal(null); }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+              Select Active Rate Contract for Line Item
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs">
+              <p className="font-semibold text-slate-900">Equipment: {multiRcSelectModal?.item?.equipmentName}</p>
+              <p className="text-muted-foreground mt-0.5">
+                Requested Quantity: {multiRcSelectModal?.item?.requestedQty ?? multiRcSelectModal?.item?.qty ?? 1} Units
+              </p>
+            </div>
+
+            <p className="text-xs font-medium text-slate-700">
+              Multiple eligible Rate Contracts were found. Select the approved vendor and contract to tag:
+            </p>
+
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              {(multiRcSelectModal?.candidates || []).map((cand: any) => {
+                const isSelected = selectedCandidateRcId === (cand._id || cand.id);
+                return (
+                  <div
+                    key={cand._id || cand.id}
+                    onClick={() => setSelectedCandidateRcId(cand._id || cand.id)}
+                    className={cn(
+                      "p-3 rounded-lg border text-xs cursor-pointer transition-all flex items-center justify-between",
+                      isSelected
+                        ? "border-emerald-500 bg-emerald-50/70 shadow-xs"
+                        : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/50"
+                    )}
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-900">{cand.rateContractNumber || cand.contractNumber}</span>
+                        <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold">
+                          Active
+                        </Badge>
+                      </div>
+                      <p className="text-slate-600 font-medium">Vendor: {cand.vendorName || "Empanelled Supplier"}</p>
+                      <p className="text-slate-500 text-[11px]">
+                        Validity: until {safeFormat(cand.validityEndDate || cand.validityEnd)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-bold text-emerald-700">
+                        ₹{(cand.unitPrice || cand.unitRate || 0).toLocaleString("en-IN")}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground block">per unit (excl. GST)</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <DialogFooter className="gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setMultiRcSelectModal(null); setSelectedCandidateRcId(""); }}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 shadow-xs"
+              onClick={handleConfirmSelectRC}
+              disabled={!selectedCandidateRcId}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Confirm & Tag Rate Contract
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2211,11 +3225,17 @@ export default function IndentDetail() {
                 className="max-h-[75vh] max-w-full object-contain rounded-lg shadow-sm"
               />
             ) : docModal?.dataUrl?.startsWith("data:application/pdf") || /\.pdf$/i.test(docModal?.name || "") ? (
-              <iframe
-                src={docModal.dataUrl}
-                title={docModal.name}
+              <object
+                data={docModal.dataUrl}
+                type="application/pdf"
                 className="w-full h-[75vh] rounded-lg border-0 bg-white shadow-sm"
-              />
+              >
+                <iframe
+                  src={docModal.dataUrl}
+                  title={docModal.name}
+                  className="w-full h-[75vh] rounded-lg border-0 bg-white shadow-sm"
+                />
+              </object>
             ) : (
               <div className="text-center p-8 bg-white rounded-2xl shadow-sm border max-w-md">
                 <FileText className="h-16 w-16 text-blue-500/50 mx-auto mb-3" />
@@ -2223,7 +3243,7 @@ export default function IndentDetail() {
                 <p className="text-xs text-muted-foreground mt-1 mb-4">Click below to download and view this document.</p>
                 {docModal?.dataUrl && (
                   <a href={docModal.dataUrl} download={docModal.name}>
-                    <Button className="gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
+                    <Button className="gap-2 shadow-sm">
                       <Download className="h-4 w-4" /> Download Document
                     </Button>
                   </a>
@@ -2233,7 +3253,200 @@ export default function IndentDetail() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── DEO Reprioritization & Revised AS Modal ── */}
+      <Dialog open={reprioritizeModalOpen} onOpenChange={setReprioritizeModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-slate-900">
+              Reprioritize Equipment Requisition &amp; Submit Revised AS
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-600">
+              Review line items, adjust quantities, set priority order (P1 = Critical, P2 = Essential, P3 = Desirable), defer non-critical items, or provide Revised Administrative Sanction Order details.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleReprioritizeSubmit} className="space-y-4 pt-1">
+            {/* Line items reprioritization table */}
+            <div className="border border-slate-200 rounded-lg overflow-hidden">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[10px]">
+                  <tr>
+                    <th className="p-2 text-center w-8">#</th>
+                    <th className="p-2 text-left">Equipment</th>
+                    <th className="p-2 text-center w-20">Orig Qty</th>
+                    <th className="p-2 text-center w-24">Revised Qty</th>
+                    <th className="p-2 text-center w-28">Priority</th>
+                    <th className="p-2 text-center w-20">Defer?</th>
+                    <th className="p-2 text-right w-24">Est. Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {reprioritizeLines.map((line, idx) => {
+                    const lineTotal = line.deferred ? 0 : Number(line.requestedQty || 0) * (line.estimatedUnitRate || 0);
+                    return (
+                      <tr key={idx} className={cn("hover:bg-slate-50/50", line.deferred && "opacity-60 bg-slate-50/30")}>
+                        <td className="p-2 text-center font-mono text-slate-400">{idx + 1}</td>
+                        <td className="p-2">
+                          <p className="font-semibold text-slate-900">{line.equipmentName}</p>
+                          <p className="text-[10px] text-slate-500">₹{(line.estimatedUnitRate || 0).toLocaleString("en-IN")} / unit</p>
+                        </td>
+                        <td className="p-2 text-center font-mono text-slate-600">{line.originalRequestedQty}</td>
+                        <td className="p-2 text-center">
+                          <Input
+                            type="number"
+                            min="0"
+                            disabled={line.deferred}
+                            value={line.requestedQty}
+                            onChange={(e) => {
+                              const val = Math.max(0, parseInt(e.target.value) || 0);
+                              setReprioritizeLines((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, requestedQty: val } : item))
+                              );
+                            }}
+                            className="h-7 text-xs text-center w-20 mx-auto"
+                          />
+                        </td>
+                        <td className="p-2 text-center">
+                          <Select
+                            value={String(line.priority || 1)}
+                            onValueChange={(v) => {
+                              setReprioritizeLines((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, priority: parseInt(v) } : item))
+                              );
+                            }}
+                          >
+                            <SelectTrigger className="h-7 text-[11px] w-24 mx-auto">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="1">P1 - Critical</SelectItem>
+                              <SelectItem value="2">P2 - Essential</SelectItem>
+                              <SelectItem value="3">P3 - Desirable</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="p-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={line.deferred}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setReprioritizeLines((prev) =>
+                                prev.map((item, i) => (i === idx ? { ...item, deferred: checked } : item))
+                              );
+                            }}
+                            className="h-4 w-4 rounded border-slate-300 text-slate-900 cursor-pointer"
+                          />
+                        </td>
+                        <td className="p-2 text-right font-mono font-medium text-slate-800">
+                          {line.deferred ? <span className="text-slate-400">Deferred</span> : `₹${lineTotal.toLocaleString("en-IN")}`}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Revised AS Section */}
+            <div className="p-3 border border-slate-200 rounded-lg bg-slate-50/50 space-y-2.5">
+              <span className="text-xs font-semibold text-slate-900">
+                Optional: Revised Administrative Sanction (AS) Details
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                <div>
+                  <Label className="text-[11px] text-slate-600">Revised AS Amount (₹)</Label>
+                  <Input
+                    type="number"
+                    placeholder="Enter revised AS amount"
+                    value={revisedAsAmountInput}
+                    onChange={(e) => setRevisedAsAmountInput(e.target.value)}
+                    className="h-8 text-xs mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[11px] text-slate-600">Revised AS Order / G.O. Ref</Label>
+                  <Input
+                    placeholder="e.g. G.O. Rt. No. 204"
+                    value={revisedAsRefInput}
+                    onChange={(e) => setRevisedAsRefInput(e.target.value)}
+                    className="h-8 text-xs mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[11px] text-slate-600">Revised AS Date</Label>
+                  <Input
+                    type="date"
+                    value={revisedAsDateInput}
+                    onChange={(e) => setRevisedAsDateInput(e.target.value)}
+                    className="h-8 text-xs mt-1"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label className="text-[11px] text-slate-600">Reprioritization Notes / Justification</Label>
+                <Input
+                  placeholder="Justification for quantity adjustments, deferrals, or revised AS order..."
+                  value={revisedAsRemarksInput}
+                  onChange={(e) => setRevisedAsRemarksInput(e.target.value)}
+                  className="h-8 text-xs mt-1"
+                />
+              </div>
+            </div>
+
+            {/* Dynamic Real-time Calculation Summary */}
+            {(() => {
+              const projectedCost = reprioritizeLines.reduce((sum, item) => {
+                if (item.deferred) return sum;
+                return sum + (Number(item.requestedQty || 0) * (item.estimatedUnitRate || 0));
+              }, 0);
+              const targetAs = revisedAsAmountInput ? Number(revisedAsAmountInput) : effectiveAsAmount;
+              const projectedDiff = targetAs - projectedCost;
+
+              return (
+                <div className="p-3 border border-slate-200 rounded-lg bg-slate-50 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-slate-500">Projected Procurement Cost: </span>
+                    <strong className="text-slate-900 font-mono">₹{projectedCost.toLocaleString("en-IN")}</strong>
+                    <span className="text-slate-400 mx-2">|</span>
+                    <span className="text-slate-500">Available AS: </span>
+                    <strong className="text-slate-900 font-mono">₹{targetAs.toLocaleString("en-IN")}</strong>
+                  </div>
+                  <div className="font-medium">
+                    <span>Balance: </span>
+                    <strong className="font-mono text-slate-900">
+                      {projectedDiff < 0 ? `- ₹${Math.abs(projectedDiff).toLocaleString("en-IN")} (Shortfall)` : `+ ₹${projectedDiff.toLocaleString("en-IN")} (Within Budget)`}
+                    </strong>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <DialogFooter className="gap-2 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setReprioritizeModalOpen(false)}
+                className="text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={reprioritizing}
+                className="text-xs"
+              >
+                {reprioritizing ? "Submitting..." : "Submit Reprioritized Indent to TGMSIDC"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
+    </ErrorBoundary>
   );
 }
 
@@ -2266,11 +3479,16 @@ function ScannedIndentViewer({
   onClose: () => void;
   onOpenModal?: (doc: any) => void;
 }) {
-  const effectiveDoc = activeDoc || (indent.scannedCopyDataUrl ? {
-    name: indent.scannedCopyFilename || "Scanned_Physical_Indent.pdf",
-    dataUrl: indent.scannedCopyDataUrl,
-    type: "Facility Sanction Copy & Indent Form"
-  } : null);
+  const effectiveDoc = activeDoc?.dataUrl ? activeDoc : (
+    activeDoc?.name === indent.scannedCopyFilename && indent.scannedCopyDataUrl ? {
+      ...activeDoc,
+      dataUrl: indent.scannedCopyDataUrl
+    } : (indent.scannedCopyDataUrl ? {
+      name: indent.scannedCopyFilename || "Scanned_Physical_Indent.pdf",
+      dataUrl: indent.scannedCopyDataUrl,
+      type: "Facility Sanction Copy & Indent Form"
+    } : activeDoc)
+  );
 
   const [viewMode, setViewMode] = useState<"file" | "template">(effectiveDoc?.dataUrl ? "file" : "template");
 
@@ -2279,6 +3497,28 @@ function ScannedIndentViewer({
       setViewMode("file");
     }
   }, [effectiveDoc?.dataUrl]);
+
+  const pdfBlobUrl = useMemo(() => {
+    if (!effectiveDoc?.dataUrl) return null;
+    if (effectiveDoc.dataUrl.startsWith("data:application/pdf") || effectiveDoc.name?.endsWith(".pdf")) {
+      try {
+        const parts = effectiveDoc.dataUrl.split(",");
+        if (parts.length > 1) {
+          const binaryStr = atob(parts[1]);
+          const len = binaryStr.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+          }
+          const blob = new Blob([bytes], { type: "application/pdf" });
+          return URL.createObjectURL(blob);
+        }
+      } catch (err) {
+        console.error("Failed to create PDF blob URL:", err);
+      }
+    }
+    return effectiveDoc.dataUrl;
+  }, [effectiveDoc?.dataUrl, effectiveDoc?.name]);
 
   return (
     <Card className="border-[#186812]/30 bg-muted/20 overflow-hidden shadow-md">
@@ -2319,7 +3559,7 @@ function ScannedIndentViewer({
               size="icon"
               variant="ghost"
               className="h-6 w-6 text-gray-300 hover:text-white hover:bg-white/10"
-              onClick={() => onOpenModal(effectiveDoc)}
+              onClick={() => onOpenModal({ ...effectiveDoc, dataUrl: pdfBlobUrl || effectiveDoc.dataUrl })}
               title="Open Large Preview"
             >
               <ExternalLink className="h-3.5 w-3.5" />
@@ -2327,7 +3567,7 @@ function ScannedIndentViewer({
           )}
 
           {effectiveDoc?.dataUrl && (
-            <a href={effectiveDoc.dataUrl} download={effectiveDoc.name} target="_blank" rel="noreferrer">
+            <a href={pdfBlobUrl || effectiveDoc.dataUrl} download={effectiveDoc.name} target="_blank" rel="noreferrer">
               <Button
                 size="icon"
                 variant="ghost"
@@ -2382,11 +3622,17 @@ function ScannedIndentViewer({
             </div>
           ) : effectiveDoc.dataUrl.startsWith("data:application/pdf") || /\.pdf$/i.test(effectiveDoc.name || "") ? (
             <div className="w-full h-full min-h-[580px] flex flex-col">
-              <iframe
-                src={effectiveDoc.dataUrl}
-                title={effectiveDoc.name}
+              <object
+                data={pdfBlobUrl || effectiveDoc.dataUrl}
+                type="application/pdf"
                 className="w-full min-h-[580px] rounded-lg border bg-white shadow-xs"
-              />
+              >
+                <iframe
+                  src={pdfBlobUrl || effectiveDoc.dataUrl}
+                  title={effectiveDoc.name}
+                  className="w-full min-h-[580px] rounded-lg border bg-white shadow-xs"
+                />
+              </object>
             </div>
           ) : (
             <div className="text-center p-8 bg-white rounded-xl shadow-xs border my-8 max-w-xs">
@@ -2394,7 +3640,7 @@ function ScannedIndentViewer({
               <p className="text-xs font-bold text-slate-800 truncate">{effectiveDoc.name}</p>
               <p className="text-[10px] text-muted-foreground mt-1 mb-3">Binary reference document</p>
               <a href={effectiveDoc.dataUrl} download={effectiveDoc.name}>
-                <Button size="sm" className="bg-blue-600 text-white text-xs gap-1.5 h-8">
+                <Button size="sm" className="text-xs gap-1.5 h-8">
                   <Download className="h-3.5 w-3.5" /> Download File
                 </Button>
               </a>

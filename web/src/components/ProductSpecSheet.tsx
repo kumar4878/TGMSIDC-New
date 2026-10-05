@@ -261,7 +261,7 @@ export function ProductSpecSheet({ equipmentId, equipmentCode, equipmentName, co
         )}
         {editing && (
           <div className="flex gap-2 shrink-0">
-            <Button size="sm" className="gap-1.5 h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white" onClick={saveEdit}>
+            <Button size="sm" className="gap-1.5 h-8 text-xs" onClick={saveEdit}>
               <Save className="h-3.5 w-3.5" />Save
             </Button>
             <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" onClick={cancelEdit}>

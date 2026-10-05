@@ -40,8 +40,31 @@ const IndentLineItemSchema = new Schema({
   estimatedUnitCost: { type: Number, default: 0 },
   procurementMode: { type: String, enum: ["rate_contract", "tender", "local_purchase", ""], default: "" },
   rateContractId: { type: Schema.Types.Mixed, ref: "RateContract" },
+  rateContractNumber: { type: String, default: "" },
+  rateContractVendor: { type: String, default: "" },
+  rateContractUnitPrice: { type: Number, default: 0 },
+  candidateRateContracts: [
+    {
+      rcId: { type: Schema.Types.Mixed, ref: "RateContract" },
+      contractNumber: String,
+      vendorName: String,
+      unitPrice: Number,
+      endDate: Date,
+    },
+  ],
+  priority: { type: Number, default: 1 },
+  originalRequestedQty: { type: Number },
+  deferred: { type: Boolean, default: false },
+  estimatedTotalCost: { type: Number, default: 0 },
+  costEstimationBasis: { type: String, default: "rc_rate" },
   tenderId: { type: Schema.Types.Mixed, ref: "Tender" },
+  tenderNumber: { type: String, default: "" },
   poId: { type: Schema.Types.Mixed, ref: "PurchaseOrder" },
+  poNumber: { type: String, default: "" },
+  lineStatus: {
+    type: String,
+    default: "draft",
+  },
 });
 
 const IndentInstitutionSchema = new Schema({
@@ -106,9 +129,15 @@ export interface IIndent extends Document {
 
   /* Workflow */
   status: string;
+  verificationStatus?: string;
+  verifiedBy?: string;
+  verifiedAt?: Date;
+  verificationRemarks?: string;
   procurementMode?: string;
   rateContractId?: Types.ObjectId;
   tenderId?: Types.ObjectId;
+  purchaseOrderId?: Types.ObjectId;
+  poNumber?: string;
   rejectionReason?: string;
   returnComments?: string;
 
@@ -117,6 +146,21 @@ export interface IIndent extends Document {
   createdByUserId?: string;
   reviewedBy?: string;
   approvedBy?: string;
+
+  /* Administrative Sanction & Cost Estimation Validation */
+  asAmount?: number;
+  asDate?: Date;
+  asReferenceNo?: string;
+  revisedAsAmount?: number;
+  revisedAsDate?: Date;
+  revisedAsReferenceNo?: string;
+  revisedAsRemarks?: string;
+  estimatedTotalProcurementValue?: number;
+  budgetSurplusOrShortfall?: number;
+  budgetSufficiency?: string;
+  budgetValidationStatus?: string;
+  reprioritizationNotes?: string;
+  reprioritizationHistory?: any[];
 
   /* Approval chain & audit */
   approvalSteps: any[];
@@ -138,7 +182,7 @@ const IndentSchema = new Schema<IIndent>(
       default: "letter",
       enum: ["letter", "go", "proceeding"],
     },
-    financialYear: { type: String, required: true, default: "2025-26" },
+    financialYear: { type: String, required: true, default: "2026-27" },
     indentDate: { type: Date, required: true, default: () => new Date() },
 
     facilityId: { type: Schema.Types.Mixed, ref: "Institution", required: true },
@@ -172,9 +216,15 @@ const IndentSchema = new Schema<IIndent>(
     estimatedTotalValue: { type: Number, default: 0 },
 
     status: { type: String, required: true, default: "draft" },
+    verificationStatus: { type: String, default: "draft" },
+    verifiedBy: { type: String },
+    verifiedAt: { type: Date },
+    verificationRemarks: { type: String },
     procurementMode: { type: String },
     rateContractId: { type: Schema.Types.Mixed, ref: "RateContract" },
     tenderId: { type: Schema.Types.Mixed, ref: "Tender" },
+    purchaseOrderId: { type: Schema.Types.Mixed, ref: "PurchaseOrder" },
+    poNumber: { type: String, default: "" },
     rejectionReason: { type: String },
     returnComments: { type: String },
 
@@ -182,6 +232,21 @@ const IndentSchema = new Schema<IIndent>(
     createdByUserId: { type: String },
     reviewedBy: { type: String },
     approvedBy: { type: String },
+
+    /* Budget & Administrative Sanction */
+    asAmount: { type: Number, default: 0 },
+    asDate: { type: Date },
+    asReferenceNo: { type: String, default: "" },
+    revisedAsAmount: { type: Number },
+    revisedAsDate: { type: Date },
+    revisedAsReferenceNo: { type: String },
+    revisedAsRemarks: { type: String },
+    estimatedTotalProcurementValue: { type: Number, default: 0 },
+    budgetSurplusOrShortfall: { type: Number, default: 0 },
+    budgetSufficiency: { type: String, default: "pending_validation" },
+    budgetValidationStatus: { type: String, default: "pending" },
+    reprioritizationNotes: { type: String, default: "" },
+    reprioritizationHistory: { type: Array, default: [] },
 
     approvalSteps: [ApprovalStepSchema],
     editAuditTrail: [EditAuditEntrySchema],

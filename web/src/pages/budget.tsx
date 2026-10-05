@@ -40,7 +40,7 @@ export default function Budget() {
   const [budgets, setBudgets] = useState<BudgetHead[]>(INITIAL_BUDGETS);
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
-  const [form, setForm] = useState({ directorate: "DME", scheme: "", fy: "2025-26", allocated: "" });
+  const [form, setForm] = useState({ directorate: "DME", scheme: "", fy: "2026-27", allocated: "" });
 
   const filtered = budgets.filter(b =>
     !search || b.code.toLowerCase().includes(search.toLowerCase()) ||
@@ -61,7 +61,7 @@ export default function Budget() {
     const alloc = parseFloat(form.allocated) || 0;
     const newItem: BudgetHead = {
       id: budgets.length + 1,
-      code: `BH-2526-${String(budgets.length + 1).padStart(3, "0")}`,
+      code: `BH-2627-${String(budgets.length + 1).padStart(3, "0")}`,
       directorate: form.directorate,
       scheme: form.scheme,
       fy: form.fy,
@@ -72,7 +72,7 @@ export default function Budget() {
     };
     setBudgets([...budgets, newItem]);
     setAddOpen(false);
-    setForm({ directorate: "DME", scheme: "", fy: "2025-26", allocated: "" });
+    setForm({ directorate: "DME", scheme: "", fy: "2026-27", allocated: "" });
   }
 
   return (
@@ -268,8 +268,8 @@ export default function Budget() {
                 <Select value={form.fy} onValueChange={v => setForm({ ...form, fy: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="2025-26">2025-26</SelectItem>
                     <SelectItem value="2026-27">2026-27</SelectItem>
+                    <SelectItem value="2025-26">2025-26</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

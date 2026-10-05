@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useLocation, Link } from "wouter";
 import {
-  useCreateIndent, useListInstitutions, useListEquipment, useListIndents,
+  useCreateIndent, useListInstitutions, useListEquipment, useListIndents, useListRateContracts,
   type CreateIndentBody, type Equipment,
 } from "@/lib/api-hooks";
 import { useQueryClient } from "@tanstack/react-query";
@@ -66,6 +66,8 @@ interface LineItemDraft {
   justification: string;
   specOpen: boolean;
   searchOpen: boolean;
+  procurementMode?: string;
+  rateContractId?: number;
 }
 
 let _counter = 0;
@@ -124,6 +126,7 @@ export default function IndentNew() {
   const { data: institutions } = useListInstitutions();
   const { data: equipment } = useListEquipment();
   const { data: indents } = useListIndents();
+  const { data: rcs = [] } = useListRateContracts();
   const createIndent = useCreateIndent();
   const scanRef = useRef<HTMLInputElement>(null);
   const attachRef = useRef<HTMLInputElement>(null);
@@ -149,7 +152,7 @@ export default function IndentNew() {
     indentType: "letter",
     indentRefNumber: "",
     indentDate: new Date().toISOString().split("T")[0],
-    financialYear: "2025-26",
+    financialYear: "2026-27",
     accountHeadName: "",
     programmeName: "",
     fundingSourceName: "",
@@ -205,7 +208,17 @@ export default function IndentNew() {
   const findEq = useCallback((id: string) => (equipment ?? []).find(e => e.id === id), [equipment]);
 
   /* File handlers with Base64 Data URL for real preview and verification */
+  const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB restriction
+
   function processScanFile(file: File) {
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      toast({
+        title: "File Exceeds 10 MB Limit",
+        description: `"${file.name}" is ${(file.size / (1024 * 1024)).toFixed(1)} MB. The maximum allowed file size is 10 MB.`,
+        variant: "destructive",
+      });
+      return;
+    }
     const size = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(file.size / 1024)} KB`;
     const reader = new FileReader();
     reader.onload = () => {
@@ -230,7 +243,28 @@ export default function IndentNew() {
 
   function processAttachmentFiles(files: File[]) {
     if (!files.length) return;
+    const oversizedFiles: File[] = [];
+    const validFiles: File[] = [];
+
     files.forEach(file => {
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        oversizedFiles.push(file);
+      } else {
+        validFiles.push(file);
+      }
+    });
+
+    if (oversizedFiles.length > 0) {
+      toast({
+        title: "File(s) Exceed 10 MB Limit",
+        description: `${oversizedFiles.map(f => `"${f.name}" (${(f.size / (1024 * 1024)).toFixed(1)} MB)`).join(", ")} exceed the 10 MB limit and were skipped.`,
+        variant: "destructive",
+      });
+    }
+
+    if (validFiles.length === 0) return;
+
+    validFiles.forEach(file => {
       const size = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.round(file.size / 1024)} KB`;
       const reader = new FileReader();
       reader.onload = () => {
@@ -246,7 +280,7 @@ export default function IndentNew() {
       };
       reader.readAsDataURL(file);
     });
-    toast({ title: "📎 Document Added", description: `${files.length} supporting document(s) uploaded.` });
+    toast({ title: "📎 Document Added", description: `${validFiles.length} supporting document(s) uploaded.` });
   }
 
   function handleAttachment(e: React.ChangeEvent<HTMLInputElement>) {
@@ -262,19 +296,37 @@ export default function IndentNew() {
   function updateSignatory(i: number, field: string, val: string) { setSignatories(p => p.map((s, idx) => idx === i ? { ...s, [field]: val } : s)); }
   function removeSignatory(i: number) { setSignatories(p => p.filter((_, idx) => idx !== i)); }
 
+  function getRCOrBenchmarkRate(eq: Equipment | undefined): { rate: number; rc?: any } {
+    if (!eq) return { rate: 0 };
+    const matchedRc = (rcs ?? []).find((r: any) =>
+      (r.status === "active" || !r.status) &&
+      ((r.equipmentId && String(r.equipmentId) === String(eq.id)) ||
+       (r.equipmentName && r.equipmentName.toLowerCase() === eq.name.toLowerCase()))
+    );
+    if (matchedRc && matchedRc.unitPrice > 0) {
+      return { rate: matchedRc.unitPrice, rc: matchedRc };
+    }
+    const rate = getRealisticRate(eq);
+    return { rate };
+  }
+
   /* Line item CRUD */
   function updateItem(localId: string, patch: Partial<LineItemDraft>) {
     setLineItems(prev => prev.map(li => {
       if (li.localId !== localId) return li;
       const updated = { ...li, ...patch };
-      // Auto-fill price & GST when equipment selected with realistic benchmark rate
+      // Auto-fill price & GST when equipment selected — prioritized by active Rate Contract
       if (patch.equipmentId && patch.equipmentId !== li.equipmentId) {
         const eq = findEq(patch.equipmentId);
         if (eq) {
-          const rate = getRealisticRate(eq);
+          const { rate, rc } = getRCOrBenchmarkRate(eq);
           updated.unitPrice = rate > 0 ? String(rate) : (updated.unitPrice || "0");
-          updated.gstRate = String(eq.gstRate ?? 12);
+          updated.gstRate = String(rc?.gstRate ?? eq.gstRate ?? 12);
           if (!updated.unit) updated.unit = "No.";
+          if (rc) {
+            updated.procurementMode = "rate_contract";
+            updated.rateContractId = rc.id;
+          }
         }
       }
       return updated;
@@ -304,10 +356,14 @@ export default function IndentNew() {
       const eq = findEq(id);
       const item = newLineItem();
       item.equipmentId = id;
-      const rate = getRealisticRate(eq);
+      const { rate, rc } = getRCOrBenchmarkRate(eq);
       if (rate > 0) item.unitPrice = String(rate);
-      if (eq?.gstRate) item.gstRate = String(eq.gstRate);
+      if (rc?.gstRate || eq?.gstRate) item.gstRate = String(rc?.gstRate ?? eq?.gstRate);
       item.unit = "No.";
+      if (rc) {
+        item.procurementMode = "rate_contract";
+        item.rateContractId = rc.id;
+      }
       return item;
     });
 
@@ -433,8 +489,18 @@ export default function IndentNew() {
       })),
       scannedCopyFilename: scanFile?.name || undefined,
       scannedCopyDataUrl: scanFile?.dataUrl || undefined,
+      procurementMode: completeItems.some(li => getRCOrBenchmarkRate(findEq(li.equipmentId)).rc) ? "rate_contract" : undefined,
+      rateContractId: (() => {
+        const itemWithRc = completeItems.find(li => getRCOrBenchmarkRate(findEq(li.equipmentId)).rc);
+        if (itemWithRc) {
+          const { rc } = getRCOrBenchmarkRate(findEq(itemWithRc.equipmentId));
+          return rc?.id || rc?._id;
+        }
+        return undefined;
+      })(),
       lineItems: completeItems.map(li => {
         const eq = findEq(li.equipmentId);
+        const { rc } = getRCOrBenchmarkRate(eq);
         return {
           category: eq?.category ?? "Medical Equipment",
           equipmentId: li.equipmentId,
@@ -445,6 +511,8 @@ export default function IndentNew() {
           unitOfMeasure: li.unit || "No.",
           estimatedUnitRate: getUnitPrice(li),
           estimatedUnitCost: getUnitPrice(li),
+          procurementMode: rc ? "rate_contract" : (li.procurementMode || "tender"),
+          rateContractId: rc?.id || rc?._id || li.rateContractId || undefined,
           justification: li.justification || "As per technical specification.",
           specifications: li.justification || eq?.specifications || "As per technical specification.",
         };
@@ -517,7 +585,7 @@ export default function IndentNew() {
                   {isSavingDraft ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : <Save className="h-3.5 w-3.5" />}
                   {isSavingDraft ? "Saving Draft…" : "Save Draft"}
                 </Button>
-                <Button size="sm" className="gap-1.5 text-xs h-8 rounded-lg bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-md shadow-blue-200/50" disabled={createIndent.isPending || isSavingDraft} onClick={handleSubmit as any}>
+                <Button size="sm" className="gap-1.5 text-xs h-8 rounded-lg" disabled={createIndent.isPending || isSavingDraft} onClick={handleSubmit as any}>
                   {createIndent.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                   {createIndent.isPending ? "Submitting to DB…" : "Submit for Approval"}
                 </Button>
@@ -699,10 +767,10 @@ export default function IndentNew() {
                         <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Financial Year</Label>
                         <Select value={form.financialYear} onValueChange={v => setForm({ ...form, financialYear: v })}>
                           <SelectTrigger className="h-10 rounded-xl shadow-sm"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="2024-25">2024-25</SelectItem>
-                            <SelectItem value="2025-26">2025-26</SelectItem>
+                        <SelectContent>
                             <SelectItem value="2026-27">2026-27</SelectItem>
+                            <SelectItem value="2025-26">2025-26</SelectItem>
+                            <SelectItem value="2024-25">2024-25</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -710,6 +778,33 @@ export default function IndentNew() {
                     <div className="mt-4 space-y-2">
                       <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Remarks / Special Instructions</Label>
                       <Textarea value={form.remarks} onChange={e => setForm({ ...form, remarks: e.target.value })} rows={2} className="resize-none rounded-xl shadow-sm" placeholder="Any special conditions, delivery constraints…" />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Statutory Fund Sanction Details */}
+                <Card className="shadow-md border-0 rounded-2xl ring-1 ring-black/[0.04]">
+                  <CardHeader className="pb-3 px-6 pt-5">
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-200/50">
+                        <IndianRupee className="h-4.5 w-4.5 text-white" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-sm font-bold">Fund Sanction Details</CardTitle>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">Administrative sanction amount and sanction date</p>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="px-6 pb-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Fund Sanctioned (AS) Amount (₹)</Label>
+                        <Input type="number" value={form.fundSanctionedAmount} onChange={e => setForm({ ...form, fundSanctionedAmount: e.target.value })} placeholder="e.g. 5000000" className="h-10 rounded-xl shadow-sm" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Fund Sanction Date</Label>
+                        <Input type="date" value={form.fundSanctionDate} onChange={e => setForm({ ...form, fundSanctionDate: e.target.value })} className="h-10 rounded-xl shadow-sm" />
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -903,7 +998,16 @@ export default function IndentNew() {
                                               <div className="flex items-center gap-2 mt-1 flex-wrap">
                                                 <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-md", c.bg, c.text)}>{eq.category}</span>
                                                 <span className="font-mono text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{eq.equipmentCode}</span>
-                                                <span className="text-[11px] font-semibold text-emerald-700">{formatINR(eq.estimatedUnitCost ?? 0)}/unit</span>
+                                                {(() => {
+                                                  const { rate, rc } = getRCOrBenchmarkRate(eq);
+                                                  return rc ? (
+                                                    <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                                      RC: {formatINR(rate)}/unit
+                                                    </span>
+                                                  ) : (
+                                                    <span className="text-[11px] font-semibold text-emerald-700">{formatINR(rate)}/unit</span>
+                                                  );
+                                                })()}
                                                 <span className="text-[10px] text-muted-foreground">GST {eq.gstRate}%</span>
                                               </div>
                                               {eq.specifications && (
@@ -1150,7 +1254,7 @@ export default function IndentNew() {
                         })
                         .map(eq => {
                           const isChecked = selectedMultiEqIds.includes(eq.id);
-                          const rate = getRealisticRate(eq);
+                          const { rate, rc } = getRCOrBenchmarkRate(eq);
                           const alreadyInIndent = lineItems.some(li => li.equipmentId === eq.id);
                           return (
                             <div
@@ -1185,7 +1289,9 @@ export default function IndentNew() {
                                 <span className="text-xs font-bold text-emerald-700 block">
                                   {rate > 0 ? formatINR(rate) : "—"}
                                 </span>
-                                <span className="text-[10px] text-muted-foreground">Standard Est. Rate</span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {rc ? "Rate Contract Rate" : "Standard Est. Rate"}
+                                </span>
                               </div>
                             </div>
                           );
@@ -1197,7 +1303,7 @@ export default function IndentNew() {
                         <span className="font-semibold text-foreground">{selectedMultiEqIds.length}</span> item(s) selected
                         {selectedMultiEqIds.length > 0 && (
                           <span className="text-muted-foreground ml-2">
-                            (Total Est: <strong className="text-emerald-700">{formatINR(selectedMultiEqIds.reduce((sum, id) => sum + getRealisticRate(findEq(id)), 0))}</strong>)
+                            (Total Est: <strong className="text-emerald-700">{formatINR(selectedMultiEqIds.reduce((sum, id) => sum + getRCOrBenchmarkRate(findEq(id)).rate, 0))}</strong>)
                           </span>
                         )}
                       </div>
@@ -1345,7 +1451,7 @@ export default function IndentNew() {
                       >
                         <Upload className="h-10 w-10 text-blue-400 mx-auto mb-2" />
                         <p className="text-sm font-semibold text-blue-800">Click to upload physical scanned indent or drag and drop</p>
-                        <p className="text-xs text-muted-foreground mt-1">PDF, JPG, PNG — Signed &amp; Stamped Document (Max 15MB)</p>
+                        <p className="text-xs text-muted-foreground mt-1">PDF, JPG, PNG — Signed &amp; Stamped Document (Max 10MB)</p>
                         <Button
                           type="button"
                           variant="outline"
@@ -1443,7 +1549,7 @@ export default function IndentNew() {
                     >
                       <Paperclip className="h-9 w-9 text-violet-400 mx-auto mb-2" />
                       <p className="text-sm font-semibold text-violet-950">Click to upload supporting documents or drag and drop</p>
-                      <p className="text-xs text-muted-foreground mt-1">PDF, Word (DOC/DOCX), Images (PNG/JPG) — Multiple files supported</p>
+                      <p className="text-xs text-muted-foreground mt-1">PDF, Word (DOC/DOCX), Images (PNG/JPG) — Max 10MB per file</p>
                       <Button
                         type="button"
                         variant="outline"
@@ -1512,7 +1618,7 @@ export default function IndentNew() {
 
             {/* Bottom action bar */}
             <div className="flex items-center gap-3 pt-4 pb-8 border-t">
-              <Button type="submit" disabled={createIndent.isPending || isSavingDraft} className="gap-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-lg shadow-blue-200/50 rounded-xl h-11 px-6">
+              <Button type="submit" disabled={createIndent.isPending || isSavingDraft} className="gap-2 rounded-xl h-11 px-6">
                 {createIndent.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 {createIndent.isPending ? "Saving Indent to Database…" : `Submit Indent${completeItems.length > 1 ? ` (${completeItems.length} items)` : ""}`}
               </Button>
@@ -1653,7 +1759,7 @@ export default function IndentNew() {
             <h2 className="text-xl font-extrabold">Indent Created Successfully!</h2>
             <p className="text-sm text-muted-foreground mt-3 leading-relaxed">Your procurement indent has been saved. You can review the details and submit for approval.</p>
             <div className="flex gap-3 mt-8 justify-center">
-              <Button className="gap-2 bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl h-11 px-6 shadow-md" onClick={() => { setShowSuccessDialog(false); if (createdIndentId) navigate(`/indents/${createdIndentId}`); }}>
+              <Button className="gap-2 rounded-xl h-11 px-6 shadow-md" onClick={() => { setShowSuccessDialog(false); if (createdIndentId) navigate(`/indents/${createdIndentId}`); }}>
                 <Eye className="h-4 w-4" /> View Indent
               </Button>
               <Link href="/indents">
@@ -1707,7 +1813,7 @@ export default function IndentNew() {
                 <p className="text-xs text-muted-foreground mt-1 mb-4">Binary reference document preview ready.</p>
                 {viewingDoc?.dataUrl && (
                   <a href={viewingDoc.dataUrl} download={viewingDoc.name}>
-                    <Button className="gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm">
+                    <Button className="gap-2 shadow-sm">
                       <Download className="h-4 w-4" /> Download / Open Document
                     </Button>
                   </a>

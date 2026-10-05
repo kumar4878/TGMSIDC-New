@@ -10,6 +10,7 @@ import { Tender } from "../models/Tender.js";
 import { PurchaseOrder } from "../models/PurchaseOrder.js";
 import { Delivery } from "../models/Delivery.js";
 import { Vendor } from "../models/Vendor.js";
+import { AuditLog } from "../models/AuditLog.js";
 import { notifyPOStatusChange } from "./purchase-orders.js";
 
 const router = Router();
@@ -122,45 +123,78 @@ async function formatIndent(r: any) {
     equipmentName = `${r.lineItems.length} items`;
   }
 
-  let rateContractNumber = null;
-  let rateContractVendor = null;
-  let rateContractUnitPrice = null;
-  let rateContractValidityEnd = null;
-  let rateContractStatus = null;
-  if (r.rateContractId) {
-    const rc = await RateContract.findById(r.rateContractId).catch(() => null);
-    if (rc) {
-      rateContractNumber = rc.contractNumber;
-      rateContractVendor = rc.vendorName;
-      rateContractUnitPrice = rc.unitPrice;
-      rateContractValidityEnd = rc.endDate ? (rc.endDate instanceof Date ? rc.endDate.toISOString() : new Date(rc.endDate).toISOString()) : null;
-      rateContractStatus = rc.status;
-    }
-  }
-
   // Enrich each line item with RC coverage and tendering requirement
   const enrichedLineItems = await Promise.all((r.lineItems ?? []).map(async (li: any) => {
     const liObj = typeof li.toObject === "function" ? li.toObject() : { ...li };
     let itemRC = null;
-    if (li.equipmentId) {
-      itemRC = await RateContract.findOne({ equipmentId: li.equipmentId, status: "active" }).catch(() => null);
-      if (!itemRC) {
-        itemRC = await RateContract.findOne({ equipmentId: li.equipmentId }).sort({ endDate: -1 }).catch(() => null);
+
+    const eqIdStr = li.equipmentId ? String(li.equipmentId) : null;
+    const eqIdObj = eqIdStr && mongoose.Types.ObjectId.isValid(eqIdStr) ? new mongoose.Types.ObjectId(eqIdStr) : null;
+
+    const matchConditions: any[] = [];
+    if (eqIdStr) matchConditions.push({ equipmentId: eqIdStr });
+    if (eqIdObj) matchConditions.push({ equipmentId: eqIdObj });
+    if (li.equipmentCode) matchConditions.push({ equipmentCode: li.equipmentCode });
+    if (li.equipmentName) matchConditions.push({ equipmentName: li.equipmentName });
+
+    let activeRCs: any[] = [];
+    if (matchConditions.length > 0) {
+      activeRCs = await RateContract.find({
+        $or: matchConditions,
+        status: "active",
+        endDate: { $gte: new Date() },
+      }).catch(() => []);
+
+      if (activeRCs.length > 0) {
+        itemRC = (liObj.rateContractId && activeRCs.find((c: any) => c._id.toString() === liObj.rateContractId.toString())) || activeRCs[0];
+      } else {
+        itemRC = await RateContract.findOne({
+          $or: matchConditions,
+        }).sort({ endDate: -1 }).catch(() => null);
       }
     }
 
-    const hasActiveRC = !!(itemRC && itemRC.status === "active");
-    const isExpiredRC = !!(itemRC && itemRC.status === "expired");
+    const hasActiveRC = !!(itemRC && itemRC.status === "active" && (!itemRC.endDate || new Date(itemRC.endDate) >= new Date()));
+    const isExpiredRC = !!(itemRC && (itemRC.status === "expired" || (itemRC.endDate && new Date(itemRC.endDate) < new Date())));
+
+    let computedLineStatus = liObj.lineStatus;
+    if (!computedLineStatus || computedLineStatus === "draft") {
+      if (liObj.poId) {
+        computedLineStatus = "po_drafted";
+      } else if (liObj.tenderId) {
+        computedLineStatus = "tender_initiated";
+      } else if (activeRCs.length > 1) {
+        computedLineStatus = "multiple_rcs_found_selection_required";
+      } else if (hasActiveRC) {
+        computedLineStatus = "active_rc_matched_po_eligible";
+      } else if (isExpiredRC) {
+        computedLineStatus = "rc_unavailable_tender_required";
+      } else {
+        computedLineStatus = "no_active_rc_tender_required";
+      }
+    }
 
     return {
       ...liObj,
+      lineStatus: computedLineStatus,
+      candidateRateContracts: activeRCs.map((arc: any) => ({
+        rcId: arc._id.toString(),
+        contractNumber: arc.contractNumber,
+        vendorName: arc.vendorName,
+        unitPrice: arc.unitPrice,
+        endDate: arc.endDate,
+      })),
       rcStatus: hasActiveRC ? "active" : isExpiredRC ? "expired" : "not_available",
       hasActiveRC,
-      rateContractId: itemRC?._id?.toString() ?? null,
-      rateContractNumber: itemRC?.contractNumber ?? null,
-      rateContractVendor: itemRC?.vendorName ?? null,
-      rateContractUnitPrice: itemRC?.unitPrice ?? null,
+      rateContractId: itemRC?._id?.toString() ?? (liObj.rateContractId ? liObj.rateContractId.toString() : null),
+      rateContractNumber: itemRC?.contractNumber ?? liObj.rateContractNumber ?? null,
+      rateContractVendor: itemRC?.vendorName ?? liObj.rateContractVendor ?? null,
+      rateContractUnitPrice: itemRC?.unitPrice ?? liObj.rateContractUnitPrice ?? null,
       rateContractValidityEnd: itemRC?.endDate ? (itemRC.endDate instanceof Date ? itemRC.endDate.toISOString() : new Date(itemRC.endDate).toISOString()) : null,
+      poId: liObj.poId?.toString() ?? null,
+      poNumber: liObj.poNumber ?? null,
+      tenderId: liObj.tenderId?.toString() ?? null,
+      tenderNumber: liObj.tenderNumber ?? null,
       isTenderRequired: !hasActiveRC,
     };
   }));
@@ -172,6 +206,29 @@ async function formatIndent(r: any) {
   const hasPartialRCCoverage = hasItems && activeRCCount > 0 && missingRCCount > 0;
   const tenderRequired = hasItems ? missingRCCount > 0 : !r.rateContractId;
   const missingRCItems = enrichedLineItems.filter((i: any) => !i.hasActiveRC).map((i: any) => i.equipmentName);
+
+  let rateContractNumber = null;
+  let rateContractVendor = null;
+  let rateContractUnitPrice = null;
+  let rateContractValidityEnd = null;
+  let rateContractStatus = null;
+
+  let effectiveRateContractId = r.rateContractId;
+  if (!effectiveRateContractId && enrichedLineItems.length > 0) {
+    const activeRCItem = enrichedLineItems.find((li: any) => li.hasActiveRC && li.rateContractId);
+    if (activeRCItem) effectiveRateContractId = activeRCItem.rateContractId;
+  }
+
+  if (effectiveRateContractId) {
+    const rc = await RateContract.findById(effectiveRateContractId).catch(() => null);
+    if (rc) {
+      rateContractNumber = rc.contractNumber;
+      rateContractVendor = rc.vendorName;
+      rateContractUnitPrice = rc.unitPrice;
+      rateContractValidityEnd = rc.endDate ? (rc.endDate instanceof Date ? rc.endDate.toISOString() : new Date(rc.endDate).toISOString()) : null;
+      rateContractStatus = rc.status;
+    }
+  }
 
   // Enrich linked tender details
   let tenderNumber = null;
@@ -197,7 +254,7 @@ async function formatIndent(r: any) {
     indentNumber: r.indentNumber,
     indentRefNumber: r.indentRefNumber ?? null,
     indentType: r.indentType ?? "letter",
-    financialYear: r.financialYear ?? "2025-26",
+    financialYear: r.financialYear ?? "2026-27",
     indentDate: r.indentDate ? r.indentDate.toISOString() : r.createdAt.toISOString(),
     facilityId: r.facilityId.toString(),
     facilityName: facility?.name ?? r.facilityName ?? "Unknown",
@@ -210,8 +267,12 @@ async function formatIndent(r: any) {
     technicalRequirements: r.technicalRequirements,
     estimatedTotalValue: r.estimatedTotalValue ?? 0,
     status: r.status,
-    procurementMode: r.procurementMode ?? null,
-    rateContractId: r.rateContractId?.toString() ?? null,
+    verificationStatus: r.verificationStatus ?? (["approved", "po_issued", "completed", "in_procurement", "tgmsidc_verification_completed"].includes(r.status) ? "tgmsidc_verification_completed" : r.status),
+    verifiedBy: r.verifiedBy ?? r.reviewedBy ?? null,
+    verifiedAt: r.verifiedAt ? (r.verifiedAt instanceof Date ? r.verifiedAt.toISOString() : new Date(r.verifiedAt).toISOString()) : null,
+    verificationRemarks: r.verificationRemarks ?? null,
+    procurementMode: (hasFullRCCoverage && !r.tenderId) ? "rate_contract" : (r.procurementMode ?? null),
+    rateContractId: (effectiveRateContractId ? effectiveRateContractId.toString() : r.rateContractId?.toString()) ?? null,
     rateContractNumber,
     rateContractVendor,
     rateContractUnitPrice,
@@ -260,34 +321,57 @@ async function formatIndent(r: any) {
         status: "Digitised & Submitted",
       },
     ],
-    attachments: (r.attachments && r.attachments.length > 0) ? r.attachments : [
-      {
-        name: r.scannedCopyFilename || `Official_Sanction_${r.indentNumber.replace(/[\/\\:]/g, '_')}.pdf`,
-        size: "1.4 MB",
-        type: "Facility Sanction Order & Requisition Copy",
-        date: r.createdAt.toISOString(),
-        status: "Verified",
-      },
-      {
-        name: "Technical_Specifications_Compliance.pdf",
-        size: "840 KB",
-        type: "Technical Requirement Spec Sheet",
-        date: r.createdAt.toISOString(),
-        status: "Verified",
-      },
-      {
-        name: "Administrative_Sanction_GO.pdf",
-        size: "620 KB",
-        type: "G.O. Ms. / Directorate Approval Ref",
-        date: r.createdAt.toISOString(),
-        status: "Verified",
-      },
-    ],
+    attachments: (() => {
+      const userAttachments = Array.isArray(r.attachments)
+        ? r.attachments.map((a: any) => (typeof a.toObject === "function" ? a.toObject() : { ...a }))
+        : [];
+      const allAttachments: any[] = [];
+
+      if (r.scannedCopyDataUrl || r.scannedCopyFilename) {
+        allAttachments.push({
+          name: r.scannedCopyFilename || `Official_Sanction_${r.indentNumber.replace(/[\/\\:]/g, '_')}.pdf`,
+          size: r.scannedCopyDataUrl ? `${(r.scannedCopyDataUrl.length * 0.75 / (1024 * 1024)).toFixed(1)} MB` : "Scanned Copy",
+          type: "Facility Sanction Order & Requisition Copy",
+          dataUrl: r.scannedCopyDataUrl || undefined,
+          isScannedCopy: true,
+          date: r.createdAt ? (r.createdAt instanceof Date ? r.createdAt.toISOString() : new Date(r.createdAt).toISOString()) : new Date().toISOString(),
+          status: "Verified",
+        });
+      }
+
+      allAttachments.push(...userAttachments);
+
+      return allAttachments.length > 0 ? allAttachments : [
+        {
+          name: r.scannedCopyFilename || `Official_Sanction_${r.indentNumber.replace(/[\/\\:]/g, '_')}.pdf`,
+          size: "1.4 MB",
+          type: "Facility Sanction Order & Requisition Copy",
+          date: r.createdAt ? (r.createdAt instanceof Date ? r.createdAt.toISOString() : new Date(r.createdAt).toISOString()) : new Date().toISOString(),
+          status: "Verified",
+        },
+      ];
+    })(),
     scannedCopyFilename: r.scannedCopyFilename ?? null,
     scannedCopyDataUrl: r.scannedCopyDataUrl ?? null,
     accountHeadName: r.accountHeadName ?? null,
     programmeName: r.programmeName ?? null,
     fundingSourceName: r.fundingSourceName ?? null,
+
+    /* Administrative Sanction & Cost Estimation Validation */
+    asAmount: r.asAmount ?? r.institutions?.reduce((sum: number, inst: any) => sum + (inst.fundSanctionedAmount || 0), 0) ?? 0,
+    asDate: r.asDate ? (r.asDate instanceof Date ? r.asDate.toISOString() : new Date(r.asDate).toISOString()) : null,
+    asReferenceNo: r.asReferenceNo ?? null,
+    revisedAsAmount: r.revisedAsAmount ?? null,
+    revisedAsDate: r.revisedAsDate ? (r.revisedAsDate instanceof Date ? r.revisedAsDate.toISOString() : new Date(r.revisedAsDate).toISOString()) : null,
+    revisedAsReferenceNo: r.revisedAsReferenceNo ?? null,
+    revisedAsRemarks: r.revisedAsRemarks ?? null,
+    estimatedTotalProcurementValue: r.estimatedTotalProcurementValue ?? r.estimatedTotalValue ?? 0,
+    budgetSurplusOrShortfall: r.budgetSurplusOrShortfall ?? ((r.revisedAsAmount || r.asAmount || (r.institutions?.reduce((sum: number, inst: any) => sum + (inst.fundSanctionedAmount || 0), 0) ?? 0)) - (r.estimatedTotalProcurementValue ?? r.estimatedTotalValue ?? 0)),
+    budgetSufficiency: r.budgetSufficiency ?? "pending_validation",
+    budgetValidationStatus: r.budgetValidationStatus ?? "pending",
+    reprioritizationNotes: r.reprioritizationNotes ?? "",
+    reprioritizationHistory: r.reprioritizationHistory ?? [],
+
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   };
@@ -320,8 +404,8 @@ router.post("/indents", async (req, res): Promise<void> => {
     }
 
     const count = await Indent.countDocuments();
-    const fy = financialYear || "2025-26";
-    const indentNumber = `IND-${fy.replace("-", "")}-${padNum(count + 1)}`;
+    const fy = financialYear || "2026-27";
+    const indentNumber = `IND-${fy.replace("-", "").slice(2)}-${padNum(count + 1)}`;
 
     let facility = null;
     if (facilityId) {
@@ -405,8 +489,22 @@ router.post("/indents", async (req, res): Promise<void> => {
     }
 
     const allEqIds = [resolvedEquipmentId, ...normalizedLineItems.map((li: any) => li.equipmentId)].filter(Boolean);
-    const activeRc = allEqIds.length > 0 ? await RateContract.findOne({
-      equipmentId: { $in: allEqIds },
+    const eqNames = [resolvedEquipmentName, ...normalizedLineItems.map((li: any) => li.equipmentName)].filter(Boolean);
+
+    const rcOrConditions: any[] = [];
+    allEqIds.forEach(id => {
+      const idStr = String(id);
+      rcOrConditions.push({ equipmentId: idStr });
+      if (mongoose.Types.ObjectId.isValid(idStr)) {
+        rcOrConditions.push({ equipmentId: new mongoose.Types.ObjectId(idStr) });
+      }
+    });
+    eqNames.forEach(name => {
+      rcOrConditions.push({ equipmentName: name });
+    });
+
+    const activeRc = rcOrConditions.length > 0 ? await RateContract.findOne({
+      $or: rcOrConditions,
       status: "active",
       endDate: { $gte: new Date() },
     }) : null;
@@ -416,7 +514,10 @@ router.post("/indents", async (req, res): Promise<void> => {
 
     if (activeRc) {
       for (const li of normalizedLineItems) {
-        if (!li.equipmentId || String(li.equipmentId) === String(activeRc.equipmentId)) {
+        const matchesThis = !li.equipmentId ||
+          String(li.equipmentId) === String(activeRc.equipmentId) ||
+          (li.equipmentName && activeRc.equipmentName && li.equipmentName.toLowerCase() === activeRc.equipmentName.toLowerCase());
+        if (matchesThis) {
           li.rateContractId = activeRc._id;
           li.procurementMode = "rate_contract";
         }
@@ -447,6 +548,13 @@ router.post("/indents", async (req, res): Promise<void> => {
       quantity: totalQty,
       technicalRequirements: technicalRequirements || normalizedLineItems.map((li: any) => li.specifications).join("; ") || "—",
       estimatedTotalValue: totalEstVal,
+      estimatedTotalProcurementValue: totalEstVal,
+      asAmount: (institutions ?? []).reduce((sum: number, inst: any) => sum + Number(inst.fundSanctionedAmount || 0), 0) || Number(req.body.fundSanctionedAmount || req.body.asAmount || 0),
+      asDate: req.body.fundSanctionDate ? new Date(req.body.fundSanctionDate) : new Date(),
+      asReferenceNo: indentRefNumber || "",
+      budgetSurplusOrShortfall: ((institutions ?? []).reduce((sum: number, inst: any) => sum + Number(inst.fundSanctionedAmount || 0), 0) || Number(req.body.fundSanctionedAmount || req.body.asAmount || 0)) - totalEstVal,
+      budgetSufficiency: "pending_validation",
+      budgetValidationStatus: "pending",
       rateContractId: determinedRateContractId,
       procurementMode: determinedProcurementMode,
       accountHeadName,
@@ -458,12 +566,13 @@ router.post("/indents", async (req, res): Promise<void> => {
       approvalSteps: [],
     });
 
-    /* Build approval chain — Standard 4-tier TGMSIDC Indent approval workflow */
+    /* Build approval chain — Standard 5-tier TGMSIDC Indent approval workflow */
     const steps: any[] = [
       { stepNumber: 1, requiredRole: "deo", roleLabel: "DEO (Initiator)", assignedUserName: digitisedBy, assignedUserId: createdByUserId || "sys", status: "approved", actionedAt: new Date(), comments: "Indent submitted." },
       { stepNumber: 2, requiredRole: "tgmsidc_user", roleLabel: "TGMSIDC User", assignedUserName: "K. Srinivas", assignedUserId: "u2", status: "pending", actionedAt: null, comments: "" },
       { stepNumber: 3, requiredRole: "gm_equipment", roleLabel: "GM Equipment", assignedUserName: "P. Narayan", assignedUserId: "u3", status: "pending", actionedAt: null, comments: "" },
       { stepNumber: 4, requiredRole: "so_equipment", roleLabel: "SO Equipment", assignedUserName: "R. Sharma", assignedUserId: "u4", status: "pending", actionedAt: null, comments: "" },
+      { stepNumber: 5, requiredRole: "executive_director", roleLabel: "Executive Director", assignedUserName: "D. Venkatesh", assignedUserId: "u5", status: "pending", actionedAt: null, comments: "" },
     ];
 
     indent.approvalSteps = steps;
@@ -516,14 +625,35 @@ router.post("/indents/:id/approve", async (req, res): Promise<void> => {
       indent.equipmentId,
       ...(indent.lineItems?.map((li: any) => li.equipmentId) || [])
     ].filter(Boolean);
+    const eqNames = [
+      indent.equipmentName,
+      ...(indent.lineItems?.map((li: any) => li.equipmentName) || [])
+    ].filter(Boolean);
 
     let finalRcId = rateContractId || indent.rateContractId;
     let activeRc: any = null;
     if (finalRcId) {
       activeRc = await RateContract.findOne({ _id: finalRcId, status: "active", endDate: { $gte: new Date() } });
     }
-    if (!activeRc && eqIds.length > 0) {
-      activeRc = await RateContract.findOne({ equipmentId: { $in: eqIds }, status: "active", endDate: { $gte: new Date() } });
+    if (!activeRc) {
+      const rcMatchConditions: any[] = [];
+      eqIds.forEach(id => {
+        const idStr = String(id);
+        rcMatchConditions.push({ equipmentId: idStr });
+        if (mongoose.Types.ObjectId.isValid(idStr)) {
+          rcMatchConditions.push({ equipmentId: new mongoose.Types.ObjectId(idStr) });
+        }
+      });
+      eqNames.forEach(name => {
+        rcMatchConditions.push({ equipmentName: name });
+      });
+      if (rcMatchConditions.length > 0) {
+        activeRc = await RateContract.findOne({
+          $or: rcMatchConditions,
+          status: "active",
+          endDate: { $gte: new Date() },
+        });
+      }
     }
 
     if (activeRc) {
@@ -533,9 +663,48 @@ router.post("/indents/:id/approve", async (req, res): Promise<void> => {
       indent.status = "po_issued";
       indent.approvedBy = approvedBy || "Authorised Officer";
 
-      // Auto-generate PO for RC Vendor
-      let po = await PurchaseOrder.findOne({ indentId: indent._id });
-      if (!po) {
+      // Check if PO(s) were already drafted for this indent
+      const existingDraftPOs = await PurchaseOrder.find({
+        $or: [{ indentId: indent._id }, { indentNumber: indent.indentNumber }]
+      });
+
+      if (existingDraftPOs.length > 0) {
+        for (const po of existingDraftPOs) {
+          po.status = "issued";
+          po.approvalStatus = "approved";
+          po.approvedBy = approvedBy || "D. Venkatesh, Executive Director";
+          po.approvedDate = new Date();
+          po.issuedDate = new Date();
+          po.approvalTrail = po.approvalTrail || [];
+          po.approvalTrail.push({
+            level: "Executive Director",
+            actorName: approvedBy || "Executive Director",
+            role: "executive_director",
+            action: "approved",
+            remarks: "Sanctioned on Indent approval. Purchase order officially issued to vendor.",
+            actionedAt: new Date(),
+          });
+          await po.save();
+          await notifyPOStatusChange(po, "issued_to_vendor", approvedBy || "Authorised Officer");
+        }
+        indent.purchaseOrderId = existingDraftPOs[0]._id;
+        indent.poNumber = existingDraftPOs[0].poNumber;
+        if (indent.lineItems && indent.lineItems.length > 0) {
+          for (const li of indent.lineItems) {
+            li.lineStatus = "po_issued";
+            const matchedPO = existingDraftPOs.find((p: any) =>
+              String(p.equipmentId) === String(li.equipmentId) ||
+              p.equipmentName === li.equipmentName ||
+              String(p._id) === String(li.poId)
+            ) || existingDraftPOs[0];
+            li.poId = matchedPO._id;
+            li.poNumber = matchedPO.poNumber;
+            li.procurementMode = "rate_contract";
+          }
+          indent.markModified("lineItems");
+        }
+      } else {
+        // Auto-generate fallback PO for RC Vendor if not already drafted
         const vn = await Vendor.findById(activeRc.vendorId).catch(() => null);
         const quantity = indent.quantity || indent.lineItems?.[0]?.requestedQty || 1;
         const unitPrice = activeRc.unitPrice || 100000;
@@ -543,12 +712,14 @@ router.post("/indents/:id/approve", async (req, res): Promise<void> => {
         const gstAmt = (unitPrice * quantity * gstRate) / 100;
         const total = unitPrice * quantity + gstAmt;
         const count = await PurchaseOrder.countDocuments();
-        const poNumber = `PO-2526-${String(count + 1).padStart(4, "0")}`;
+        const poFy = indent.financialYear || "2026-27";
+        const poFyCode = poFy.replace("-", "").slice(2);
+        const poNumber = `PO-${poFyCode}-${String(count + 1).padStart(4, "0")}`;
 
-        po = await PurchaseOrder.create({
+        const po = await PurchaseOrder.create({
           poNumber,
           poType: "rc_based",
-          financialYear: indent.financialYear || "2025-26",
+          financialYear: poFy,
           indentId: indent._id,
           indentNumber: indent.indentNumber,
           rateContractId: activeRc._id,
@@ -585,12 +756,17 @@ router.post("/indents/:id/approve", async (req, res): Promise<void> => {
           status: "issued",
           vendorAcknowledged: false,
           generatedBy: approvedBy || "Authorised Officer",
-          fileNo: indent.indentRefNumber || `RC/HPC/EQU/${indent.financialYear || "2025-26"}/${indent.indentNumber}`,
+          fileNo: indent.indentRefNumber || `RC/HPC/EQU/${indent.financialYear || "2026-27"}/${indent.indentNumber}`,
         });
+
+        indent.purchaseOrderId = po._id;
+        indent.poNumber = po.poNumber;
 
         if (indent.lineItems && indent.lineItems.length > 0) {
           for (const li of indent.lineItems) {
             li.poId = po._id;
+            li.poNumber = po.poNumber;
+            li.lineStatus = "po_issued";
             li.rateContractId = activeRc._id;
             li.procurementMode = "rate_contract";
           }
@@ -697,6 +873,917 @@ router.post("/indents/:id/return", async (req, res): Promise<void> => {
   }
 });
 
+/* ── TGMSIDC Verification, Cost Assessment & Budget Comparison (Steps 2, 3, 4, 5, 6A, 6B) ── */
+router.post("/indents/:id/verify", async (req, res): Promise<void> => {
+  try {
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+
+    // Check if any equipment line is write-in and unresolved
+    const unresolvedWriteIns = (indent.lineItems || []).filter(
+      (li: any) => li.isWriteIn && (!li.writeInResolution || li.writeInResolution === "pending")
+    );
+    if (unresolvedWriteIns.length > 0) {
+      indent.status = "write_in_resolution_pending";
+      indent.verificationStatus = "write_in_resolution_pending";
+      await indent.save();
+      res.status(400).json({
+        error: `Cannot complete verification. ${unresolvedWriteIns.length} write-in equipment lines must be mapped to master or flagged as new master request first.`,
+        indent: await formatIndent(indent),
+      });
+      return;
+    }
+
+    indent.verifiedBy = req.body.verifiedBy || "TGMSIDC Verification Officer";
+    indent.verifiedAt = new Date();
+    indent.verificationRemarks = req.body.remarks || "Physical indent, fund sanction, and equipment lines verified against scanned copy.";
+
+    // Automatic RC Assessment and item-wise cost calculation for each equipment line (Steps 3 & 4)
+    const now = new Date();
+    let totalEstimatedProcurementValue = 0;
+
+    for (let i = 0; i < (indent.lineItems || []).length; i++) {
+      const li = indent.lineItems[i];
+      const matchConditions: any[] = [];
+      if (li.equipmentId) {
+        matchConditions.push({ equipmentId: String(li.equipmentId) });
+        if (mongoose.Types.ObjectId.isValid(String(li.equipmentId))) {
+          matchConditions.push({ equipmentId: new mongoose.Types.ObjectId(String(li.equipmentId)) });
+        }
+      }
+      if (li.equipmentName) matchConditions.push({ equipmentName: li.equipmentName });
+
+      const activeRCs = matchConditions.length > 0
+        ? await RateContract.find({ $or: matchConditions, status: "active", endDate: { $gte: now } })
+        : [];
+
+      let unitRate = 0;
+      if (activeRCs.length === 1) {
+        const rc = activeRCs[0];
+        li.rateContractId = rc._id;
+        li.rateContractNumber = rc.contractNumber;
+        li.rateContractVendor = rc.vendorName;
+        li.rateContractUnitPrice = rc.unitPrice;
+        li.procurementMode = "rate_contract";
+        li.lineStatus = "active_rc_matched_po_eligible";
+        li.candidateRateContracts = [];
+        unitRate = rc.unitPrice || 0;
+        li.costEstimationBasis = "rc_rate";
+      } else if (activeRCs.length > 1) {
+        li.lineStatus = "multiple_rcs_found_selection_required";
+        li.candidateRateContracts = activeRCs.map((arc: any) => ({
+          rcId: arc._id,
+          contractNumber: arc.contractNumber,
+          vendorName: arc.vendorName,
+          unitPrice: arc.unitPrice,
+          endDate: arc.endDate,
+        }));
+        unitRate = activeRCs[0].unitPrice || 0;
+        li.costEstimationBasis = "rc_rate";
+      } else {
+        const closedOrExpired = matchConditions.length > 0
+          ? await RateContract.findOne({ $or: matchConditions })
+          : null;
+        li.lineStatus = closedOrExpired ? "rc_unavailable_tender_required" : "no_active_rc_tender_required";
+        li.procurementMode = "tender";
+        li.candidateRateContracts = [];
+        unitRate = li.estimatedUnitCost || 100000;
+        li.costEstimationBasis = "configured_estimation_rule";
+      }
+
+      if (!li.originalRequestedQty) {
+        li.originalRequestedQty = li.requestedQty || 1;
+      }
+      li.estimatedTotalCost = (li.requestedQty || 1) * unitRate;
+      if (!li.deferred) {
+        totalEstimatedProcurementValue += li.estimatedTotalCost;
+      }
+    }
+
+    indent.estimatedTotalProcurementValue = totalEstimatedProcurementValue;
+    indent.estimatedTotalValue = totalEstimatedProcurementValue;
+
+    // Compare Administrative Sanction (AS) with estimated cost (Step 5, 6A, 6B)
+    const effectiveAs = indent.revisedAsAmount || indent.asAmount || (indent.institutions || []).reduce((s: number, inst: any) => s + (inst.fundSanctionedAmount || 0), 0) || 0;
+    indent.asAmount = effectiveAs;
+    const surplusOrShortfall = effectiveAs - totalEstimatedProcurementValue;
+    indent.budgetSurplusOrShortfall = surplusOrShortfall;
+
+    if (effectiveAs > 0 && totalEstimatedProcurementValue > effectiveAs) {
+      // Step 6B: Budget Shortfall detected -> Return to DEO for Reprioritization
+      indent.budgetSufficiency = "insufficient";
+      indent.budgetValidationStatus = "shortfall_detected";
+      indent.status = "reprioritization_required";
+      indent.verificationStatus = "reprioritization_required";
+    } else {
+      // Step 6A: AS is sufficient -> Ready for Procurement
+      indent.budgetSufficiency = "sufficient";
+      indent.budgetValidationStatus = "validated_within_as";
+      indent.status = "ready_for_procurement";
+      indent.verificationStatus = "completed";
+    }
+
+    indent.markModified("lineItems");
+    await indent.save();
+    await notifyIndentStatusChange(indent, indent.status === "reprioritization_required" ? "reprioritization_required" : "verified", indent.verifiedBy);
+    res.json(await formatIndent(indent));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to verify indent" });
+  }
+});
+
+/* ── Reprioritize Requirement (Steps 7 & 8: DEO / HoD Facility) ────── */
+router.post("/indents/:id/reprioritize", async (req, res): Promise<void> => {
+  try {
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+
+    const { lineItems = [], revisedAsAmount, revisedAsReferenceNo, revisedAsDate, revisedAsRemarks, reprioritizedBy } = req.body;
+
+    if (!indent.reprioritizationHistory) indent.reprioritizationHistory = [];
+    if (!indent.editAuditTrail) indent.editAuditTrail = [];
+    const prevEstimated = indent.estimatedTotalProcurementValue || indent.estimatedTotalValue || 0;
+    const prevAs = indent.revisedAsAmount || indent.asAmount || (indent.institutions || []).reduce((s: number, inst: any) => s + (inst.fundSanctionedAmount || 0), 0) || 0;
+
+    // Apply line item adjustments with precise Rate Contract / estimated rate lookup
+    const lineChanges: any[] = [];
+    for (const update of lineItems) {
+      const idx = Number(update.lineIndex);
+      if (indent.lineItems && indent.lineItems[idx]) {
+        const li = indent.lineItems[idx];
+        const prevQty = li.requestedQty ?? 1;
+        const prevDeferred = !!li.deferred;
+        const prevPriority = li.priority || 1;
+
+        if (li.originalRequestedQty === undefined || li.originalRequestedQty === null) {
+          li.originalRequestedQty = prevQty;
+        }
+
+        if (update.requestedQty !== undefined) li.requestedQty = Math.max(0, Number(update.requestedQty));
+        if (update.priority !== undefined) li.priority = Number(update.priority);
+        if (update.deferred !== undefined) li.deferred = Boolean(update.deferred);
+
+        // Ensure RC rate or estimated unit cost is accurately resolved
+        let unitRate = Number(li.rateContractUnitPrice || 0);
+        if (!unitRate) {
+          const matchConditions: any[] = [];
+          if (li.equipmentId) matchConditions.push({ equipmentId: li.equipmentId });
+          if (li.equipmentCode) matchConditions.push({ equipmentCode: li.equipmentCode });
+          if (li.equipmentName) matchConditions.push({ equipmentName: li.equipmentName });
+          if (matchConditions.length > 0) {
+            const activeRC = await RateContract.findOne({
+              $or: matchConditions,
+              status: "active",
+              endDate: { $gte: new Date() },
+            }).catch(() => null);
+            if (activeRC) {
+              unitRate = activeRC.unitPrice || 0;
+              li.rateContractId = activeRC._id;
+              li.rateContractNumber = activeRC.contractNumber;
+              li.rateContractVendor = activeRC.vendorName;
+              li.rateContractUnitPrice = unitRate;
+              li.costEstimationBasis = "rc_rate";
+            }
+          }
+        }
+        if (!unitRate) {
+          unitRate = Number(li.estimatedUnitCost || 0);
+        }
+
+        li.estimatedTotalCost = li.deferred ? 0 : (li.requestedQty || 0) * unitRate;
+
+        lineChanges.push({
+          equipmentName: li.equipmentName,
+          previousQty: prevQty,
+          newQty: li.requestedQty,
+          previousDeferred: prevDeferred,
+          newDeferred: li.deferred,
+          previousPriority: prevPriority,
+          newPriority: li.priority,
+          unitRate,
+          estimatedTotalCost: li.estimatedTotalCost,
+        });
+      }
+    }
+
+    // Recalculate total estimated procurement value accurately across non-deferred items
+    let newEstimatedTotal = 0;
+    for (const li of (indent.lineItems || [])) {
+      if (!li.deferred) {
+        newEstimatedTotal += (li.estimatedTotalCost || 0);
+      }
+    }
+    indent.estimatedTotalProcurementValue = newEstimatedTotal;
+    indent.estimatedTotalValue = newEstimatedTotal;
+
+    // Apply revised AS details if submitted
+    if (revisedAsAmount !== undefined && revisedAsAmount !== null && revisedAsAmount !== "" && Number(revisedAsAmount) > 0) {
+      indent.revisedAsAmount = Number(revisedAsAmount);
+      indent.asAmount = Number(revisedAsAmount);
+      if (revisedAsReferenceNo) indent.revisedAsReferenceNo = revisedAsReferenceNo;
+      if (revisedAsDate) indent.revisedAsDate = new Date(revisedAsDate);
+      if (revisedAsRemarks) indent.revisedAsRemarks = revisedAsRemarks;
+    }
+
+    const currentAs = indent.revisedAsAmount || indent.asAmount || (indent.institutions || []).reduce((s: number, inst: any) => s + (inst.fundSanctionedAmount || 0), 0) || 0;
+    const surplusOrShortfall = currentAs - newEstimatedTotal;
+    indent.budgetSurplusOrShortfall = surplusOrShortfall;
+
+    if (currentAs > 0 && newEstimatedTotal > currentAs) {
+      indent.budgetSufficiency = "insufficient";
+      indent.budgetValidationStatus = "shortfall_detected";
+    } else {
+      indent.budgetSufficiency = "sufficient";
+      indent.budgetValidationStatus = "validated_within_as";
+    }
+
+    const actorName = reprioritizedBy || indent.digitisedBy || "DEO User";
+    indent.reprioritizationNotes = req.body.notes || `Reprioritized by ${actorName}. Revised Procurement Value: ₹${newEstimatedTotal.toLocaleString("en-IN")}, AS: ₹${currentAs.toLocaleString("en-IN")}.`;
+
+    // 1. Record detailed Reprioritization History
+    indent.reprioritizationHistory.push({
+      revisedAt: new Date(),
+      revisedBy: actorName,
+      previousEstimatedTotal: prevEstimated,
+      newEstimatedTotal,
+      previousAsAmount: prevAs,
+      newAsAmount: currentAs,
+      budgetSurplusOrShortfall: surplusOrShortfall,
+      lineChanges,
+      notes: indent.reprioritizationNotes,
+    });
+
+    // 2. Record in editAuditTrail
+    indent.editAuditTrail.push({
+      field: "Reprioritization & Revised AS",
+      originalValue: `Est: ₹${prevEstimated.toLocaleString("en-IN")}, AS: ₹${prevAs.toLocaleString("en-IN")}`,
+      correctedValue: `Est: ₹${newEstimatedTotal.toLocaleString("en-IN")}, AS: ₹${currentAs.toLocaleString("en-IN")}, Balance: ${surplusOrShortfall < 0 ? `-₹${Math.abs(surplusOrShortfall).toLocaleString("en-IN")}` : `+₹${surplusOrShortfall.toLocaleString("en-IN")}`}`,
+      correctedBy: actorName,
+      correctedAt: new Date(),
+    });
+
+    // 3. Record in AuditLog collection
+    try {
+      const summaryText = `Reprioritization revision submitted. Est. Value ₹${prevEstimated.toLocaleString("en-IN")} → ₹${newEstimatedTotal.toLocaleString("en-IN")}, AS ₹${prevAs.toLocaleString("en-IN")} → ₹${currentAs.toLocaleString("en-IN")}, Balance: ${surplusOrShortfall < 0 ? `-₹${Math.abs(surplusOrShortfall).toLocaleString("en-IN")}` : `+₹${surplusOrShortfall.toLocaleString("en-IN")}`}. ${indent.reprioritizationNotes}`;
+      await AuditLog.create({
+        entityType: "indent",
+        entityId: indent._id.toString(),
+        action: "REPRIORITIZATION_SUBMITTED",
+        field: "lineItems, asAmount, estimatedTotalProcurementValue, budgetSurplusOrShortfall",
+        beforeValue: `Est: ₹${prevEstimated.toLocaleString("en-IN")}, AS: ₹${prevAs.toLocaleString("en-IN")}`,
+        afterValue: summaryText,
+        userId: req.body.userId || indent.createdByUserId || "deo_user",
+        userName: actorName,
+        userRole: "deo",
+        timestamp: new Date(),
+      });
+      if (indent.indentNumber) {
+        await AuditLog.create({
+          entityType: "indent",
+          entityId: indent.indentNumber,
+          action: "REPRIORITIZATION_SUBMITTED",
+          field: "lineItems, asAmount, estimatedTotalProcurementValue, budgetSurplusOrShortfall",
+          beforeValue: `Est: ₹${prevEstimated.toLocaleString("en-IN")}, AS: ₹${prevAs.toLocaleString("en-IN")}`,
+          afterValue: summaryText,
+          userId: req.body.userId || indent.createdByUserId || "deo_user",
+          userName: actorName,
+          userRole: "deo",
+          timestamp: new Date(),
+        });
+      }
+    } catch (auditErr) {
+      console.error("[AUDIT LOG ERROR]", auditErr);
+    }
+
+    // 4. Update workflow status to route to TGMSIDC user for review (Step 9)
+    indent.status = "resubmitted_for_review";
+    indent.verificationStatus = "resubmitted_for_review";
+
+    // 5. Update Approval Steps & Timeline: Step 1 (DEO) approved, Step 2 (TGMSIDC User) pending
+    if (!indent.approvalSteps || indent.approvalSteps.length === 0) {
+      indent.approvalSteps = [
+        {
+          stepNumber: 1,
+          requiredRole: "deo",
+          roleLabel: "DEO (Initiator)",
+          assignedUserName: actorName,
+          assignedUserId: indent.createdByUserId || "deo_user",
+          status: "approved",
+          actionedAt: new Date(),
+          comments: `Reprioritized: Revised Est. Value ₹${newEstimatedTotal.toLocaleString("en-IN")}, AS ₹${currentAs.toLocaleString("en-IN")}. Routed to TGMSIDC for revalidation.`,
+        },
+        {
+          stepNumber: 2,
+          requiredRole: "tgmsidc_user",
+          roleLabel: "TGMSIDC User (Scrutiny & Revalidation)",
+          assignedUserName: "K. Srinivas (TGMSIDC)",
+          assignedUserId: "u2",
+          status: "pending",
+          actionedAt: null,
+          comments: "Awaiting TGMSIDC scrutiny and budget revalidation (Step 9).",
+        },
+        {
+          stepNumber: 3,
+          requiredRole: "gm_equipment",
+          roleLabel: "GM Equipment",
+          assignedUserName: "P. Narayan",
+          assignedUserId: "u3",
+          status: "pending",
+          actionedAt: null,
+          comments: "",
+        },
+        {
+          stepNumber: 4,
+          requiredRole: "so_equipment",
+          roleLabel: "SO Equipment",
+          assignedUserName: "R. Sharma",
+          assignedUserId: "u4",
+          status: "pending",
+          actionedAt: null,
+          comments: "",
+        },
+        {
+          stepNumber: 5,
+          requiredRole: "executive_director",
+          roleLabel: "Executive Director",
+          assignedUserName: "D. Venkatesh",
+          assignedUserId: "u5",
+          status: "pending",
+          actionedAt: null,
+          comments: "",
+        },
+      ];
+    } else {
+      const step1 = indent.approvalSteps.find((s: any) => s.stepNumber === 1 || s.requiredRole === "deo");
+      if (step1) {
+        step1.status = "approved";
+        step1.actionedAt = new Date();
+        step1.comments = `Reprioritization submitted: Revised Est. Value ₹${newEstimatedTotal.toLocaleString("en-IN")}, AS ₹${currentAs.toLocaleString("en-IN")}. Routed to TGMSIDC for revalidation.`;
+      }
+      const step2 = indent.approvalSteps.find((s: any) => s.stepNumber === 2 || s.requiredRole === "tgmsidc_user");
+      if (step2) {
+        step2.status = "pending";
+        step2.actionedAt = null;
+        step2.roleLabel = "TGMSIDC User (Scrutiny & Revalidation)";
+        step2.comments = "Awaiting TGMSIDC scrutiny and budget revalidation (Step 9).";
+      }
+      for (const s of indent.approvalSteps) {
+        if (s.stepNumber > 2) {
+          s.status = "pending";
+          s.actionedAt = null;
+        }
+      }
+    }
+
+    indent.markModified("lineItems");
+    indent.markModified("reprioritizationHistory");
+    indent.markModified("editAuditTrail");
+    indent.markModified("approvalSteps");
+    await indent.save();
+
+    await notifyIndentStatusChange(indent, "reprioritized_resubmitted", actorName);
+    res.json({ message: "Reprioritized indent submitted to TGMSIDC for revalidation", indent: await formatIndent(indent) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to reprioritize indent" });
+  }
+});
+
+/* ── Revalidate Revised Indent (Steps 9 & 10: TGMSIDC User) ────────── */
+router.post("/indents/:id/revalidate", async (req, res): Promise<void> => {
+  try {
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+
+    const revalidatedBy = req.body.revalidatedBy || "TGMSIDC Revalidation Officer";
+
+    // Recalculate total estimated value accurately
+    let totalEstimated = 0;
+    for (const li of (indent.lineItems || [])) {
+      if (!li.deferred) {
+        const rate = li.rateContractUnitPrice || li.estimatedUnitCost || 0;
+        li.estimatedTotalCost = (li.requestedQty || 0) * rate;
+        totalEstimated += li.estimatedTotalCost;
+      }
+    }
+    indent.estimatedTotalProcurementValue = totalEstimated;
+    indent.estimatedTotalValue = totalEstimated;
+
+    const effectiveAs = indent.revisedAsAmount || indent.asAmount || (indent.institutions || []).reduce((s: number, inst: any) => s + (inst.fundSanctionedAmount || 0), 0) || 0;
+    const surplusOrShortfall = effectiveAs - totalEstimated;
+    indent.budgetSurplusOrShortfall = surplusOrShortfall;
+
+    if (effectiveAs > 0 && totalEstimated > effectiveAs) {
+      indent.budgetSufficiency = "insufficient";
+      indent.budgetValidationStatus = "shortfall_detected";
+      indent.status = "reprioritization_required";
+      indent.verificationStatus = "reprioritization_required";
+
+      if (indent.approvalSteps) {
+        const step2 = indent.approvalSteps.find((s: any) => s.stepNumber === 2 || s.requiredRole === "tgmsidc_user");
+        if (step2) {
+          step2.status = "returned";
+          step2.actionedAt = new Date();
+          step2.comments = `Revised requirement (₹${totalEstimated.toLocaleString("en-IN")}) still exceeds available AS (₹${effectiveAs.toLocaleString("en-IN")}) by ₹${Math.abs(surplusOrShortfall).toLocaleString("en-IN")}. Returned for further reprioritization.`;
+        }
+        indent.markModified("approvalSteps");
+      }
+
+      if (!indent.editAuditTrail) indent.editAuditTrail = [];
+      indent.editAuditTrail.push({
+        field: "TGMSIDC Revalidation Shortfall",
+        originalValue: "resubmitted_for_review",
+        correctedValue: "reprioritization_required",
+        correctedBy: revalidatedBy,
+        correctedAt: new Date(),
+      });
+      indent.markModified("editAuditTrail");
+
+      try {
+        await AuditLog.create({
+          entityType: "indent",
+          entityId: indent._id.toString(),
+          action: "BUDGET_REVALIDATION_SHORTFALL",
+          field: "budgetValidationStatus, status",
+          beforeValue: "resubmitted_for_review",
+          afterValue: `Requirement exceeds AS by ₹${Math.abs(surplusOrShortfall).toLocaleString("en-IN")}. Returned to DEO.`,
+          userId: req.body.userId || "tgmsidc_user",
+          userName: revalidatedBy,
+          userRole: "tgmsidc_user",
+          timestamp: new Date(),
+        });
+        if (indent.indentNumber) {
+          await AuditLog.create({
+            entityType: "indent",
+            entityId: indent.indentNumber,
+            action: "BUDGET_REVALIDATION_SHORTFALL",
+            field: "budgetValidationStatus, status",
+            beforeValue: "resubmitted_for_review",
+            afterValue: `Requirement exceeds AS by ₹${Math.abs(surplusOrShortfall).toLocaleString("en-IN")}. Returned to DEO.`,
+            userId: req.body.userId || "tgmsidc_user",
+            userName: revalidatedBy,
+            userRole: "tgmsidc_user",
+            timestamp: new Date(),
+          });
+        }
+      } catch (e) {
+        console.error("[AUDIT LOG ERROR]", e);
+      }
+
+      indent.markModified("lineItems");
+      await indent.save();
+      res.status(400).json({
+        error: `Revised estimated requirement (₹${totalEstimated.toLocaleString("en-IN")}) still exceeds available AS (₹${effectiveAs.toLocaleString("en-IN")}) by ₹${Math.abs(surplusOrShortfall).toLocaleString("en-IN")}. Further reprioritization or additional AS is required.`,
+        indent: await formatIndent(indent),
+      });
+      return;
+    }
+
+    // Step 10: Budget validation complete -> Unlock procurement routing
+    indent.budgetSufficiency = "sufficient";
+    indent.budgetValidationStatus = "validated_within_as";
+    indent.status = "ready_for_procurement";
+    indent.verificationStatus = "completed";
+
+    // Unlock line items for PO or Tender
+    for (const li of (indent.lineItems || [])) {
+      if (li.deferred) {
+        li.lineStatus = "deferred";
+      } else if (li.rateContractId && li.rateContractUnitPrice) {
+        li.lineStatus = "active_rc_matched_po_eligible";
+        li.procurementMode = "rate_contract";
+      } else {
+        li.lineStatus = "no_active_rc_tender_required";
+        li.procurementMode = "tender";
+      }
+    }
+
+    // Step 2: TGMSIDC User approved in approval steps
+    if (indent.approvalSteps) {
+      const step2 = indent.approvalSteps.find((s: any) => s.stepNumber === 2 || s.requiredRole === "tgmsidc_user");
+      if (step2) {
+        step2.status = "approved";
+        step2.actionedAt = new Date();
+        step2.comments = `Budget revalidated within AS (₹${effectiveAs.toLocaleString("en-IN")}). Procurement routing unlocked (Step 10).`;
+      }
+      const step3 = indent.approvalSteps.find((s: any) => s.stepNumber === 3 || s.requiredRole === "gm_equipment");
+      if (step3) {
+        step3.status = "pending";
+      }
+      indent.markModified("approvalSteps");
+    }
+
+    if (!indent.editAuditTrail) indent.editAuditTrail = [];
+    indent.editAuditTrail.push({
+      field: "TGMSIDC Budget Revalidation",
+      originalValue: "resubmitted_for_review",
+      correctedValue: "ready_for_procurement",
+      correctedBy: revalidatedBy,
+      correctedAt: new Date(),
+    });
+    indent.markModified("editAuditTrail");
+
+    try {
+      await AuditLog.create({
+        entityType: "indent",
+        entityId: indent._id.toString(),
+        action: "BUDGET_REVALIDATED_APPROVED",
+        field: "budgetValidationStatus, status",
+        beforeValue: "resubmitted_for_review",
+        afterValue: `Validated within AS (₹${effectiveAs.toLocaleString("en-IN")}). Procurement routing unlocked.`,
+        userId: req.body.userId || "tgmsidc_user",
+        userName: revalidatedBy,
+        userRole: "tgmsidc_user",
+        timestamp: new Date(),
+      });
+      if (indent.indentNumber) {
+        await AuditLog.create({
+          entityType: "indent",
+          entityId: indent.indentNumber,
+          action: "BUDGET_REVALIDATED_APPROVED",
+          field: "budgetValidationStatus, status",
+          beforeValue: "resubmitted_for_review",
+          afterValue: `Validated within AS (₹${effectiveAs.toLocaleString("en-IN")}). Procurement routing unlocked.`,
+          userId: req.body.userId || "tgmsidc_user",
+          userName: revalidatedBy,
+          userRole: "tgmsidc_user",
+          timestamp: new Date(),
+        });
+      }
+    } catch (e) {
+      console.error("[AUDIT LOG ERROR]", e);
+    }
+
+    indent.markModified("lineItems");
+    await indent.save();
+    await notifyIndentStatusChange(indent, "budget_validated_ready_for_procurement", revalidatedBy);
+
+    res.json({ message: "Budget validated successfully. Procurement routing unlocked.", indent: await formatIndent(indent) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to revalidate indent" });
+  }
+});
+
+/* ── Return to DEO for Correction (§3A Step 9A) ───────────────────────── */
+router.post("/indents/:id/return-to-deo", async (req, res): Promise<void> => {
+  try {
+    // Accept either 'returnComments' or 'remarks' from the client
+    const returnComments = req.body.returnComments || req.body.remarks || "";
+    const returnedBy = req.body.returnedBy || "TGMSIDC User";
+
+    if (!returnComments) {
+      res.status(400).json({ error: "Remarks explaining required corrections are mandatory." });
+      return;
+    }
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+
+    const prevStatus = indent.status;
+    indent.status = "returned_to_deo_for_correction";
+    indent.verificationStatus = "returned_to_deo_for_correction";
+    indent.returnComments = returnComments;
+    indent.reviewedBy = returnedBy;
+
+    // Update approval steps: mark step 2 (TGMSIDC) as returned, reset DEO step to pending
+    if (!indent.approvalSteps) indent.approvalSteps = [];
+    const step2 = indent.approvalSteps.find((s: any) => s.stepNumber === 2 || s.requiredRole === "tgmsidc_user");
+    if (step2) {
+      step2.status = "returned";
+      step2.actionedAt = new Date();
+      step2.comments = `Returned to DEO for reprioritization. Reason: ${returnComments}`;
+    }
+    const step1 = indent.approvalSteps.find((s: any) => s.stepNumber === 1 || s.requiredRole === "deo");
+    if (step1) {
+      step1.status = "pending";
+      step1.actionedAt = null;
+      step1.comments = `Awaiting DEO reprioritization. TGMSIDC remarks: ${returnComments}`;
+    }
+    // Keep steps 3+ as pending (no change needed)
+    indent.markModified("approvalSteps");
+
+    // Audit trail
+    if (!indent.editAuditTrail) indent.editAuditTrail = [];
+    indent.editAuditTrail.push({
+      field: "Status",
+      originalValue: prevStatus,
+      correctedValue: "returned_to_deo_for_correction",
+      correctedBy: returnedBy,
+      correctedAt: new Date(),
+    });
+    indent.markModified("editAuditTrail");
+
+    try {
+      await AuditLog.create({
+        entityType: "indent",
+        entityId: indent._id.toString(),
+        action: "RETURNED_TO_DEO",
+        field: "status, verificationStatus, approvalSteps",
+        beforeValue: prevStatus,
+        afterValue: `returned_to_deo_for_correction — Reason: ${returnComments}`,
+        userId: req.body.userId || "tgmsidc_user",
+        userName: returnedBy,
+        userRole: "tgmsidc_user",
+        timestamp: new Date(),
+      });
+      if (indent.indentNumber) {
+        await AuditLog.create({
+          entityType: "indent",
+          entityId: indent.indentNumber,
+          action: "RETURNED_TO_DEO",
+          field: "status, verificationStatus, approvalSteps",
+          beforeValue: prevStatus,
+          afterValue: `returned_to_deo_for_correction — Reason: ${returnComments}`,
+          userId: req.body.userId || "tgmsidc_user",
+          userName: returnedBy,
+          userRole: "tgmsidc_user",
+          timestamp: new Date(),
+        });
+      }
+    } catch (auditErr) {
+      console.error("[AUDIT LOG ERROR]", auditErr);
+    }
+
+    await indent.save();
+    await notifyIndentStatusChange(indent, "returned_to_deo", returnedBy);
+    res.json(await formatIndent(indent));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ── Resubmit Indent for TGMSIDC Verification (§3A Step 9B) ──────────── */
+router.post("/indents/:id/resubmit", async (req, res): Promise<void> => {
+  try {
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+
+    indent.status = "pending_tgmsidc_verification";
+    indent.verificationStatus = "resubmitted_for_tgmsidc_verification";
+    await indent.save();
+    await notifyIndentStatusChange(indent, "resubmitted", indent.digitisedBy);
+    res.json(await formatIndent(indent));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ── Resolve Multiple RCs for Line Item (§3B Step 12C) ─────────────────── */
+router.post("/indents/:id/lines/:lineIndex/select-rc", async (req, res): Promise<void> => {
+  try {
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+    const idx = parseInt(req.params.lineIndex);
+    if (!indent.lineItems || !indent.lineItems[idx]) {
+      res.status(404).json({ error: "Line item not found" });
+      return;
+    }
+    const userRole = (req as any).user?.role || req.body.role;
+    if (userRole === "deo" || req.body.selectedBy?.toLowerCase().includes("deo")) {
+      res.status(403).json({ error: "DEO user cannot select Rate Contracts. Rate Contract tagging is performed by TGMSIDC User (Step 3/11A)." });
+      return;
+    }
+    const { rateContractId } = req.body;
+    if (!rateContractId) {
+      res.status(400).json({ error: "rateContractId is required" });
+      return;
+    }
+    const rc = await RateContract.findById(rateContractId);
+    if (!rc) {
+      res.status(404).json({ error: "Selected Rate Contract not found" });
+      return;
+    }
+    const li = indent.lineItems[idx];
+    li.rateContractId = rc._id;
+    li.rateContractNumber = rc.contractNumber;
+    li.rateContractVendor = rc.vendorName;
+    li.rateContractUnitPrice = rc.unitPrice;
+    li.procurementMode = "rate_contract";
+    li.lineStatus = "active_rc_matched_po_eligible";
+    indent.markModified("lineItems");
+    await indent.save();
+    res.json(await formatIndent(indent));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ── Raise Purchase Order for Line Item (§3D Step 31-33) ─────────────── */
+router.post("/indents/:id/lines/:lineIndex/raise-po", async (req, res): Promise<void> => {
+  try {
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+    const idx = parseInt(req.params.lineIndex);
+    if (!indent.lineItems || !indent.lineItems[idx]) {
+      res.status(404).json({ error: "Line item not found" });
+      return;
+    }
+    const userRole = (req as any).user?.role || req.body.role;
+    if (userRole === "deo" || req.body.createdBy?.toLowerCase().includes("deo")) {
+      res.status(403).json({ error: "DEO user cannot raise Purchase Orders. PO issuance is performed by TGMSIDC User (Step 16)." });
+      return;
+    }
+    const li = indent.lineItems[idx];
+    if (li.deferred) {
+      res.status(400).json({ error: "Cannot raise Purchase Order for a deferred equipment line." });
+      return;
+    }
+    if (indent.status === "reprioritization_required" || indent.budgetSufficiency === "insufficient") {
+      res.status(400).json({ error: "Cannot raise Purchase Order while indent is pending budget reprioritization. Administrative Sanction must be validated." });
+      return;
+    }
+    let rcId = req.body.rateContractId || li.rateContractId;
+    if (!rcId && li.candidateRateContracts && li.candidateRateContracts.length > 0) {
+      rcId = li.candidateRateContracts[0].rcId || li.candidateRateContracts[0].rateContractId;
+    }
+    if (!rcId && indent.rateContractId) {
+      rcId = indent.rateContractId;
+    }
+    if (!rcId) {
+      const matchConditions: any[] = [];
+      if (li.equipmentId) {
+        matchConditions.push({ equipmentId: li.equipmentId });
+        if (mongoose.Types.ObjectId.isValid(String(li.equipmentId))) {
+          matchConditions.push({ equipmentId: new mongoose.Types.ObjectId(String(li.equipmentId)) });
+        }
+      }
+      if (li.equipmentName) {
+        matchConditions.push({ equipmentName: li.equipmentName });
+      }
+      if (matchConditions.length > 0) {
+        const activeRc = await RateContract.findOne({
+          $or: matchConditions,
+          status: "active"
+        }).sort({ endDate: -1 });
+        if (activeRc) rcId = activeRc._id;
+      }
+    }
+
+    if (!rcId) {
+      res.status(400).json({ error: "Line item does not have an active rate contract tagged. Please select or tag an active RC first." });
+      return;
+    }
+    const rc = await RateContract.findById(rcId);
+    if (!rc) {
+      res.status(404).json({ error: "Rate Contract not found" });
+      return;
+    }
+
+    const vn = await Vendor.findById(rc.vendorId).catch(() => null);
+    const quantity = li.requestedQty || 1;
+    const unitPrice = rc.unitPrice || 100000;
+    const gstRate = rc.gstRate ?? 12;
+    const gstAmt = (unitPrice * quantity * gstRate) / 100;
+    const total = unitPrice * quantity + gstAmt;
+
+    const count = await PurchaseOrder.countDocuments();
+    const poFy = indent.financialYear || "2026-27";
+    const poFyCode = poFy.replace("-", "").slice(2);
+    const poNumber = `PO-${poFyCode}-${padNum(count + 1)}`;
+
+    const psRequired = req.body.psRequired ?? false;
+    const psPercent = req.body.psPercent ?? 5;
+    const psAmount = psRequired ? (total * psPercent) / 100 : 0;
+    const bgDueDate = psRequired ? (req.body.bgDueDate ? new Date(req.body.bgDueDate) : new Date(Date.now() + 30 * 86400000)) : undefined;
+
+    const indentSnapshot = {
+      facilityName: indent.facilityName,
+      hodName: indent.hodName,
+      indentType: indent.indentType,
+      financialYear: indent.financialYear,
+      indentDate: indent.indentDate,
+      programmeName: indent.programmeName,
+      fundingSourceName: indent.fundingSourceName,
+      accountHeadName: indent.accountHeadName,
+      scannedCopyFilename: indent.scannedCopyFilename,
+      scannedCopyDataUrl: indent.scannedCopyDataUrl,
+      technicalRequirements: li.specifications || indent.technicalRequirements,
+    };
+
+    const po = await PurchaseOrder.create({
+      poNumber,
+      poType: "rc_based",
+      financialYear: poFy,
+      indentId: indent._id,
+      indentNumber: indent.indentNumber,
+      indentLineItemIndex: idx,
+      indentDetails: indentSnapshot,
+      rateContractId: rc._id,
+      rcNumber: rc.contractNumber,
+      vendorId: rc.vendorId,
+      vendorName: vn?.name || rc.vendorName || "Empanelled Vendor",
+      vendorTier: req.body.vendorTier ?? "L1",
+      allocationRatio: req.body.allocationRatio ?? "100%",
+      equipmentId: li.equipmentId || rc.equipmentId,
+      equipmentName: li.equipmentName || rc.equipmentName || "Medical Equipment",
+      quantity,
+      unitPrice,
+      gstRate,
+      gstAmount: gstAmt,
+      unitPriceInclTax: unitPrice * (1 + gstRate / 100),
+      totalEquipmentCost: unitPrice * quantity,
+      totalAmount: total,
+      deliveryAddress: req.body.deliveryAddress || indent.facilityName || "Telangana Medical Facility",
+      supplyPeriodDays: rc.supplyPeriodDays ?? 45,
+      expectedDeliveryDate: req.body.expectedDeliveryDate ? new Date(req.body.expectedDeliveryDate) : new Date(Date.now() + (rc.supplyPeriodDays ?? 45) * 86400000),
+      consignees: indent.institutions?.length ? indent.institutions.map((inst: any) => ({
+        institutionId: inst.institutionId,
+        institutionName: inst.institutionName,
+        district: inst.district,
+        address: `${inst.institutionName}, ${inst.district || "Telangana"}`,
+        quantity: inst.quantities?.find((q: any) => q.lineItemIndex === idx)?.sanctionedQty || quantity,
+        deliveryStatus: "pending",
+      })) : [{
+        institutionId: indent.facilityId,
+        institutionName: indent.facilityName,
+        address: indent.facilityName,
+        quantity,
+        deliveryStatus: "pending",
+      }],
+      psRequired,
+      psPercent,
+      psAmount,
+      bgDueDate,
+      bgStatus: psRequired ? "pending" : "not_applicable",
+      generatedBy: req.body.generatedBy || "TGMSIDC User",
+      status: "draft",
+      approvalStatus: "draft",
+      fulfilmentStatus: "not_fulfilled",
+      paymentStatus: "payment_status_not_updated",
+      closureStatus: "open",
+    });
+
+    li.poId = po._id;
+    li.poNumber = po.poNumber;
+    li.rateContractId = rc._id;
+    li.rateContractNumber = rc.contractNumber;
+    li.rateContractVendor = vn?.name || rc.vendorName || "Empanelled Vendor";
+    li.rateContractUnitPrice = rc.unitPrice;
+    li.lineStatus = "po_drafted";
+    indent.markModified("lineItems");
+    indent.status = "in_procurement";
+    await indent.save();
+
+    await notifyPOStatusChange(po, "created_as_draft", req.body.generatedBy || "TGMSIDC User");
+
+    res.status(201).json({
+      message: `Purchase Order ${po.poNumber} created for line item ${idx + 1}`,
+      purchaseOrder: po,
+      indent: await formatIndent(indent),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ── Initiate Tender for Line Item (§3C Step 14) ─────────────────────── */
+router.post("/indents/:id/lines/:lineIndex/initiate-tender", async (req, res): Promise<void> => {
+  try {
+    const indent = await findIndentDoc(req.params.id);
+    if (!indent) { res.status(404).json({ error: "Indent not found" }); return; }
+    const idx = parseInt(req.params.lineIndex);
+    if (!indent.lineItems || !indent.lineItems[idx]) {
+      res.status(404).json({ error: "Line item not found" });
+      return;
+    }
+    const li = indent.lineItems[idx];
+    const { tenderType = "open", portal = "gem", notes, initiatedBy } = req.body;
+
+    const count = await Tender.countDocuments();
+    const tenderYear = new Date().getFullYear();
+    const tenderNumber = `TND-${tenderYear}-${padNum(count + 1)}`;
+
+    const tender = await Tender.create({
+      tenderNumber,
+      indentId: indent._id,
+      equipmentId: li.equipmentId,
+      equipmentName: li.equipmentName,
+      equipmentCategory: li.category || "Medical Equipment",
+      tenderType,
+      portal,
+      financialYear: indent.financialYear || "2026-27",
+      status: "tender_initiated",
+      currentStageNumber: 1,
+      specsStatus: "pending",
+      specsConfirmationType: "existing_review",
+      notes: notes || `Tender initiated for ${li.equipmentName} (Line ${idx + 1} of Indent ${indent.indentNumber}).`,
+    });
+
+    li.tenderId = tender._id;
+    li.tenderNumber = tender.tenderNumber;
+    li.lineStatus = "tender_initiated";
+    indent.markModified("lineItems");
+    indent.status = "in_procurement";
+    await indent.save();
+
+    res.status(201).json({
+      message: `Tender ${tender.tenderNumber} initiated for ${li.equipmentName}`,
+      tender,
+      indent: await formatIndent(indent),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/indents/:id/approval-steps", async (req, res): Promise<void> => {
   try {
     const indent = await findIndentDoc(req.params.id);
@@ -715,11 +1802,21 @@ router.patch("/indents/:id/approval-steps/:stepNumber", async (req, res): Promis
     const stepIndex = indent.approvalSteps.findIndex((s: any) => s.stepNumber === stepNumber);
     if (stepIndex === -1) { res.status(404).json({ error: "Step not found" }); return; }
 
-    const { status, comments, approvedBy, procurementMode, rateContractId } = req.body;
+    const { status, comments, approvedBy, procurementMode, rateContractId, lineItemApprovals } = req.body;
     const step = indent.approvalSteps[stepIndex];
     step.status = status;
     step.comments = comments;
     step.actionedAt = new Date();
+
+    if (lineItemApprovals && Array.isArray(lineItemApprovals)) {
+      lineItemApprovals.forEach((app: any) => {
+        if (indent.lineItems && indent.lineItems[app.lineItemIndex]) {
+          indent.lineItems[app.lineItemIndex].approvedQty = app.approvedQty;
+          indent.lineItems[app.lineItemIndex].partialReason = app.partialReason;
+        }
+      });
+      indent.markModified("lineItems");
+    }
 
     if (status === "rejected") {
       indent.status = "rejected";
@@ -738,14 +1835,35 @@ router.patch("/indents/:id/approval-steps/:stepNumber", async (req, res): Promis
         indent.equipmentId,
         ...(indent.lineItems?.map((li: any) => li.equipmentId) || [])
       ].filter(Boolean);
+      const eqNames = [
+        indent.equipmentName,
+        ...(indent.lineItems?.map((li: any) => li.equipmentName) || [])
+      ].filter(Boolean);
 
       let finalRcId = rateContractId || indent.rateContractId;
       let activeRc: any = null;
       if (finalRcId) {
         activeRc = await RateContract.findOne({ _id: finalRcId, status: "active", endDate: { $gte: new Date() } });
       }
-      if (!activeRc && eqIds.length > 0) {
-        activeRc = await RateContract.findOne({ equipmentId: { $in: eqIds }, status: "active", endDate: { $gte: new Date() } });
+      if (!activeRc) {
+        const rcMatchConditions: any[] = [];
+        eqIds.forEach(id => {
+          const idStr = String(id);
+          rcMatchConditions.push({ equipmentId: idStr });
+          if (mongoose.Types.ObjectId.isValid(idStr)) {
+            rcMatchConditions.push({ equipmentId: new mongoose.Types.ObjectId(idStr) });
+          }
+        });
+        eqNames.forEach(name => {
+          rcMatchConditions.push({ equipmentName: name });
+        });
+        if (rcMatchConditions.length > 0) {
+          activeRc = await RateContract.findOne({
+            $or: rcMatchConditions,
+            status: "active",
+            endDate: { $gte: new Date() },
+          });
+        }
       }
 
       if (activeRc) {
@@ -756,19 +1874,97 @@ router.patch("/indents/:id/approval-steps/:stepNumber", async (req, res): Promis
         }
       }
 
-      if (isLastStep && allApproved) {
+      // Update linked drafted POs with scrutiny trails from GM / SO
+      const linkedPOs = await PurchaseOrder.find({
+        $or: [{ indentId: indent._id }, { indentNumber: indent.indentNumber }]
+      });
+
+      if (step.requiredRole === "gm_equipment" || step.requiredRole === "gm") {
+        for (const po of linkedPOs) {
+          po.gmReviewedBy = approvedBy || step.assignedUserName || "P. Narayan, GM Equipment";
+          po.gmReviewNotes = comments || "Rate Contract and Draft PO scrutinized & endorsed.";
+          po.approvalTrail = po.approvalTrail || [];
+          po.approvalTrail.push({
+            level: "GM Equipment",
+            actorName: approvedBy || step.assignedUserName || "P. Narayan, GM Equipment",
+            role: "gm_equipment",
+            action: "approved",
+            remarks: comments || "Rate Contract and Draft PO scrutinized & endorsed.",
+            actionedAt: new Date(),
+          });
+          await po.save();
+        }
+      } else if (step.requiredRole === "so_equipment" || step.requiredRole === "so") {
+        for (const po of linkedPOs) {
+          po.soApprovedBy = approvedBy || step.assignedUserName || "R. Sharma, SO Equipment";
+          po.soApprovalNotes = comments || "Administrative and consignee review completed & endorsed.";
+          po.approvalTrail = po.approvalTrail || [];
+          po.approvalTrail.push({
+            level: "SO Equipment",
+            actorName: approvedBy || step.assignedUserName || "R. Sharma, SO Equipment",
+            role: "so_equipment",
+            action: "approved",
+            remarks: comments || "Administrative and consignee review completed & endorsed.",
+            actionedAt: new Date(),
+          });
+          await po.save();
+        }
+      }
+
+      const isEDStep = step.requiredRole === "executive_director";
+      const isTerminalApproval = (isLastStep && allApproved) || isEDStep;
+
+      if (isTerminalApproval) {
         /* Final approval — set terminal status */
         if (procurementMode) indent.procurementMode = procurementMode;
-        indent.approvedBy = approvedBy || step.assignedUserName;
+        indent.approvedBy = approvedBy || step.assignedUserName || "D. Venkatesh, Executive Director";
 
-        if (activeRc) {
-          indent.rateContractId = activeRc._id;
+        if (activeRc || linkedPOs.length > 0) {
+          indent.rateContractId = activeRc?._id || indent.rateContractId || linkedPOs[0]?.rateContractId;
           indent.procurementMode = "rate_contract";
           indent.status = "po_issued";
 
-          // Auto-generate and issue Purchase Order to RC Vendor
-          let po = await PurchaseOrder.findOne({ indentId: indent._id });
-          if (!po) {
+          if (linkedPOs.length > 0) {
+            // Existing drafted PO(s) transition directly to 'issued'
+            for (const po of linkedPOs) {
+              po.status = "issued";
+              po.approvalStatus = "approved";
+              po.approvedBy = approvedBy || step.assignedUserName || "D. Venkatesh, Executive Director";
+              po.approvedDate = new Date();
+              po.issuedDate = new Date();
+              po.generatedBy = po.generatedBy || approvedBy || step.assignedUserName || "Executive Director, TGMSIDC";
+              po.approvalTrail = po.approvalTrail || [];
+              po.approvalTrail.push({
+                level: "Executive Director",
+                actorName: approvedBy || step.assignedUserName || "D. Venkatesh, Executive Director",
+                role: "executive_director",
+                action: "approved",
+                remarks: comments || "Final sanction accorded on Indent approval. Purchase order officially issued to vendor.",
+                actionedAt: new Date(),
+              });
+              await po.save();
+              await notifyPOStatusChange(po, "issued_to_vendor", approvedBy || step.assignedUserName);
+            }
+
+            indent.purchaseOrderId = linkedPOs[0]._id;
+            indent.poNumber = linkedPOs[0].poNumber;
+
+            if (indent.lineItems && indent.lineItems.length > 0) {
+              for (const li of indent.lineItems) {
+                li.lineStatus = "po_issued";
+                const matchedPO = linkedPOs.find((p: any) =>
+                  String(p.equipmentId) === String(li.equipmentId) ||
+                  p.equipmentName === li.equipmentName ||
+                  String(p._id) === String(li.poId)
+                ) || linkedPOs[0];
+                li.poId = matchedPO._id;
+                li.poNumber = matchedPO.poNumber;
+                li.procurementMode = "rate_contract";
+              }
+              indent.markModified("lineItems");
+            }
+          } else {
+            // Auto-generate fallback PO if no PO was drafted beforehand
             const vn = await Vendor.findById(activeRc.vendorId).catch(() => null);
             const quantity = indent.quantity || indent.lineItems?.[0]?.requestedQty || 1;
             const unitPrice = activeRc.unitPrice || 100000;
@@ -776,12 +1972,14 @@ router.patch("/indents/:id/approval-steps/:stepNumber", async (req, res): Promis
             const gstAmt = (unitPrice * quantity * gstRate) / 100;
             const total = unitPrice * quantity + gstAmt;
             const count = await PurchaseOrder.countDocuments();
-            const poNumber = `PO-2526-${String(count + 1).padStart(4, "0")}`;
+            const poFy = indent.financialYear || "2026-27";
+            const poFyCode = poFy.replace("-", "").slice(2);
+            const poNumber = `PO-${poFyCode}-${String(count + 1).padStart(4, "0")}`;
 
-            po = await PurchaseOrder.create({
+            const po = await PurchaseOrder.create({
               poNumber,
               poType: "rc_based",
-              financialYear: indent.financialYear || "2025-26",
+              financialYear: poFy,
               indentId: indent._id,
               indentNumber: indent.indentNumber,
               rateContractId: activeRc._id,
@@ -821,16 +2019,19 @@ router.patch("/indents/:id/approval-steps/:stepNumber", async (req, res): Promis
               fileNo: indent.indentRefNumber || `RC/HPC/EQU/${indent.financialYear || "2025-26"}/${indent.indentNumber}`,
             });
 
-            // Update line items
+            indent.purchaseOrderId = po._id;
+            indent.poNumber = po.poNumber;
+
             if (indent.lineItems && indent.lineItems.length > 0) {
               for (const li of indent.lineItems) {
                 li.poId = po._id;
+                li.poNumber = po.poNumber;
+                li.lineStatus = "po_issued";
                 li.rateContractId = activeRc._id;
                 li.procurementMode = "rate_contract";
               }
               indent.markModified("lineItems");
             }
-
             await notifyPOStatusChange(po, "issued_to_vendor", approvedBy || step.assignedUserName);
           }
         } else {
@@ -1076,8 +2277,20 @@ router.post("/indents/:id/advance-lifecycle", async (req, res): Promise<void> =>
       let rc = indent.rateContractId ? await RateContract.findById(indent.rateContractId) : null;
       if (!rc) {
         const eqIds = [indent.equipmentId, ...(indent.lineItems?.map((li: any) => li.equipmentId) || [])].filter(Boolean);
-        if (eqIds.length > 0) {
-          rc = await RateContract.findOne({ equipmentId: { $in: eqIds }, status: "active" });
+        const eqNames = [indent.equipmentName, ...(indent.lineItems?.map((li: any) => li.equipmentName) || [])].filter(Boolean);
+        const rcConditions: any[] = [];
+        eqIds.forEach(id => {
+          const idStr = String(id);
+          rcConditions.push({ equipmentId: idStr });
+          if (mongoose.Types.ObjectId.isValid(idStr)) {
+            rcConditions.push({ equipmentId: new mongoose.Types.ObjectId(idStr) });
+          }
+        });
+        eqNames.forEach(name => {
+          rcConditions.push({ equipmentName: name });
+        });
+        if (rcConditions.length > 0) {
+          rc = await RateContract.findOne({ $or: rcConditions, status: "active" });
         }
       }
       if (!rc) rc = await RateContract.findOne({ status: "active" });

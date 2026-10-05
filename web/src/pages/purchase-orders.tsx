@@ -11,8 +11,11 @@ import {
   Calendar, Building2, Filter, AlertCircle, ArrowRight, IndianRupee,
 } from "lucide-react";
 import { format } from "date-fns";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+
+import { useAuth } from "@/contexts/AuthContext";
 
 function fmtINR(n: number | null | undefined): string {
   if (n == null || isNaN(n)) return "₹0";
@@ -23,7 +26,8 @@ function fmtINR(n: number | null | undefined): string {
 
 const STATUS_FILTERS = [
   { value: "all", label: "All Statuses" },
-  { value: "draft", label: "Draft" },
+  { value: "draft", label: "Draft POs" },
+  { value: "pending_approval", label: "Pending GM Review" },
   { value: "approved", label: "Approved" },
   { value: "dispatched", label: "Dispatched" },
   { value: "delivered", label: "Delivered" },
@@ -31,6 +35,8 @@ const STATUS_FILTERS = [
 ];
 
 export default function PurchaseOrders() {
+  const { user } = useAuth();
+  const isRaisePoAllowed = user?.role === "admin" || user?.role === "tgmsidc_user" || user?.role === "gm_equipment" || (user?.role as string) === "gm";
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [, navigate] = useLocation();
@@ -57,8 +63,9 @@ export default function PurchaseOrders() {
   const stats = useMemo(() => {
     return {
       total: pos.length,
-      draft: pos.filter((p) => p.status === "draft").length,
-      approved: pos.filter((p) => p.status === "approved").length,
+      draft: pos.filter((p) => p.status === "draft" && (p as any).approvalStatus !== "pending_gm_approval").length,
+      pendingGm: pos.filter((p) => p.status === "pending_approval" || (p as any).approvalStatus === "pending_gm_approval").length,
+      approved: pos.filter((p) => p.status === "approved" || p.status === "po_approved").length,
       dispatched: pos.filter((p) => p.status === "dispatched").length,
       delivered: pos.filter((p) => p.status === "delivered").length,
       totalValue: pos.reduce((s, p) => s + (p.totalAmount ?? 0), 0),
@@ -80,7 +87,7 @@ export default function PurchaseOrders() {
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#152340]">
               Purchase Orders
             </h1>
-            <span className="neo-chip vio">Statutory Contracts</span>
+            <span className="neo-chip gry">Statutory Contracts</span>
           </div>
           <p className="text-xs text-[#6b7a93] mt-0.5">
             Issued supply orders, vendor commitments, and dispatch milestones for healthcare equipment & consumables
@@ -88,12 +95,23 @@ export default function PurchaseOrders() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Link href="/purchase-orders/new">
-            <button className="flex items-center gap-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white px-3.5 py-1.5 rounded-md text-xs font-semibold shadow-xs transition-colors cursor-pointer">
+          {isRaisePoAllowed ? (
+            <Link href="/purchase-orders/new">
+              <Button size="sm" className="gap-1.5 cursor-pointer">
+                <Plus className="w-3.5 h-3.5" />
+                <span>Raise PO</span>
+              </Button>
+            </Link>
+          ) : (
+            <button
+              disabled
+              title="Only TGMSIDC User, General Manager (GM), and Admin are authorized to raise Purchase Orders"
+              className="flex items-center gap-1.5 bg-slate-200 text-slate-400 px-3.5 py-1.5 rounded-md text-xs font-semibold cursor-not-allowed opacity-60"
+            >
               <Plus className="w-3.5 h-3.5" />
               <span>Raise PO</span>
             </button>
-          </Link>
+          )}
         </div>
       </div>
 
@@ -111,12 +129,22 @@ export default function PurchaseOrders() {
 
         <div className="neo-kpi-card">
           <span className="text-[10px] font-bold text-[#e08a0b] uppercase tracking-wider block">
-            Pending Sanction
+            Draft POs
           </span>
           <span className="text-2xl font-bold text-[#e08a0b] tabular-nums mt-1 block">
             {stats.draft}
           </span>
-          <span className="text-[10.5px] text-[#6b7a93] mt-1 block">Draft POs</span>
+          <span className="text-[10.5px] text-[#6b7a93] mt-1 block">In Indent Approval</span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#d97706] uppercase tracking-wider block">
+            Pending GM Review
+          </span>
+          <span className="text-2xl font-bold text-[#d97706] tabular-nums mt-1 block">
+            {stats.pendingGm}
+          </span>
+          <span className="text-[10.5px] text-[#d97706] font-semibold mt-1 block">RC & PO Scrutiny</span>
         </div>
 
         <div className="neo-kpi-card">
@@ -264,28 +292,24 @@ export default function PurchaseOrders() {
 
                       {/* Status Badge */}
                       <td className="py-2.5 px-3">
-                        <StatusBadge status={po.status} />
+                        {(po as any).approvalStatus === "pending_gm_approval" ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-amber-50 text-amber-800 border border-amber-300">
+                            Pending GM
+                          </span>
+                        ) : (
+                          <StatusBadge status={po.status} />
+                        )}
                       </td>
 
                       {/* Actions */}
                       <td className="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1.5">
                           <Link href={`/purchase-orders/${po.id}`}>
-                            <button className="px-2 py-1 bg-white border border-[#e4eaf2] text-[#3c4a63] hover:border-[#2563eb] hover:text-[#2563eb] rounded text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer">
+                            <button className="px-2.5 py-1 bg-white border border-[#e4eaf2] text-[#3c4a63] hover:border-[#2563eb] hover:text-[#2563eb] rounded text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs">
                               <Eye className="w-3 h-3" />
-                              <span>View</span>
+                              <span>{(po as any).approvalStatus === "pending_gm_approval" ? "Review & Approve" : "View"}</span>
                             </button>
                           </Link>
-                          {po.status === "draft" && (
-                            <button
-                              onClick={() => handleApprove(po.id)}
-                              className="px-2 py-1 bg-[#159557] hover:bg-[#0f7a45] text-white rounded text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-                              title="Approve Purchase Order"
-                            >
-                              <Check className="w-3 h-3" />
-                              <span>Approve</span>
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>

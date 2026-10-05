@@ -8,6 +8,7 @@ import {
   XCircle, Package, Inbox, AlertTriangle, ArrowRight
 } from "lucide-react";
 import { format } from "date-fns";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
@@ -25,29 +26,51 @@ const STATUS_FILTERS = [
 
 function StepsBadge({ approvalSteps, indentStatus }: { approvalSteps?: any[]; indentStatus: string }) {
   const steps = approvalSteps ?? [];
-  const totalSteps = 4; // Canonical 4-gate workflow: DEO -> TGMSIDC User -> GM Equipment -> SO Equipment
+  const totalSteps = 5; // Canonical 5-gate workflow: DEO -> TGMSIDC User -> GM Equipment -> SO Equipment -> ED
+
   const isRejected = indentStatus === "rejected" || steps.some((s: any) => s.status === "rejected");
-  const isComplete = !isRejected && !["pending_approval", "pending_review", "draft"].includes(indentStatus);
+
+  // These statuses mean the workflow has been interrupted / sent back — NOT complete
+  const INCOMPLETE_STATUSES = new Set([
+    "draft", "pending_review", "pending_approval",
+    "reprioritization_required", "pending_deo_reprioritization",
+    "returned_to_deo_for_correction", "returned",
+    "resubmitted_for_review", "under_tgmsidc_revalidation",
+    "under_scrutiny", "rc_assessment_in_progress",
+    "cost_assessment_completed", "as_validation_in_progress",
+    "ready_for_procurement",
+  ]);
+
+  // A workflow is only "complete" (5/5) when all 5 approval steps have been actioned (approved/skipped)
+  const allStepsActioned = steps.length >= 5 && steps.every((s: any) => s.status === "approved" || s.status === "skipped");
+  const isComplete = !isRejected && !INCOMPLETE_STATUSES.has(indentStatus) && allStepsActioned;
+
   const rawCompleted = steps.filter((s: any) => s.status === "approved" || s.status === "skipped").length;
-  const completedSteps = isComplete ? 4 : Math.min(4, rawCompleted);
+  const completedSteps = isComplete ? 5 : Math.min(4, rawCompleted); // cap at 4 until truly complete
+
+  // Determine which step has a "returned" marker
+  const returnedStepIdx = steps.findIndex((s: any) => s.status === "returned");
+  const hasReturnedStep = returnedStepIdx >= 0;
 
   return (
-    <div className="flex items-center gap-1.5">
-      <div className="flex gap-1 items-center">
+    <div className="flex items-center justify-center gap-1.5">
+      <div className="flex gap-0.5 items-center">
         {Array.from({ length: totalSteps }).map((_, i) => {
           const done = i < completedSteps;
           const isThisStepRejected = isRejected && i === completedSteps;
-          const active = !isComplete && !isRejected && i === completedSteps;
+          const isThisStepReturned = hasReturnedStep && i === returnedStepIdx;
+          const active = !isComplete && !isRejected && !hasReturnedStep && i === completedSteps;
           return (
             <div
               key={i}
               className={cn(
                 "h-1.5 rounded-full transition-all",
-                done ? "w-3 bg-slate-500" :
-                isThisStepRejected ? "w-3 bg-rose-400" :
-                isRejected ? "w-2 bg-slate-200" :
-                active ? "w-3 bg-slate-400" :
-                "w-2 bg-slate-200"
+                done ? "w-2.5 bg-slate-500" :
+                isThisStepRejected ? "w-2.5 bg-rose-400" :
+                isThisStepReturned ? "w-2.5 bg-amber-400" :
+                isRejected || hasReturnedStep ? "w-1.5 bg-slate-200" :
+                active ? "w-2.5 bg-blue-500" :
+                "w-1.5 bg-slate-200"
               )}
             />
           );
@@ -55,9 +78,11 @@ function StepsBadge({ approvalSteps, indentStatus }: { approvalSteps?: any[]; in
       </div>
       <span className={cn(
         "text-[10px] font-medium tabular-nums",
-        isRejected ? "text-rose-600 font-semibold" : "text-slate-600"
+        isRejected ? "text-rose-600 font-semibold" :
+        hasReturnedStep ? "text-amber-600 font-semibold" :
+        "text-slate-600"
       )}>
-        {isRejected ? "Rejected" : `${completedSteps}/${totalSteps}`}
+        {isRejected ? "Rejected" : hasReturnedStep ? "Returned" : `${completedSteps}/${totalSteps}`}
       </span>
     </div>
   );
@@ -132,7 +157,7 @@ export default function Indents() {
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#152340]">
               Procurement Indents
             </h1>
-            <span className="neo-chip blu">Requisitions Ledger</span>
+            <span className="neo-chip gry">Requisitions Ledger</span>
           </div>
           <p className="text-xs text-[#6b7a93] mt-0.5">
             Digitised demand indents and institutional procurement workflows across Telangana health facilities
@@ -142,10 +167,10 @@ export default function Indents() {
         {canRaiseIndent && (
           <div className="flex items-center gap-2">
             <Link href="/indents/new">
-              <button className="flex items-center gap-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white px-3.5 py-1.5 rounded-md text-xs font-semibold shadow-xs transition-colors cursor-pointer">
+              <Button size="sm" className="gap-1.5 cursor-pointer">
                 <Plus className="w-3.5 h-3.5" />
                 <span>Raise Indent</span>
-              </button>
+              </Button>
             </Link>
           </div>
         )}
@@ -223,13 +248,14 @@ export default function Indents() {
                 </p>
               </div>
             </div>
-            <button
+            <Button
+              size="sm"
               onClick={() => navigate("/approval-inbox")}
-              className="px-3 py-1.5 bg-[#0f2b5b] hover:bg-[#0a2149] text-white text-xs font-semibold rounded-md flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+              className="gap-1.5 text-xs font-semibold cursor-pointer shrink-0"
             >
               <span>Review in Approval Inbox</span>
               <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -285,28 +311,37 @@ export default function Indents() {
             <p className="text-[11px] text-[#6b7a93] mt-0.5">Try clearing the search or changing status filter.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+          <div className="w-full overflow-hidden">
+            <table className="w-full table-fixed text-left text-xs border-collapse">
+              <colgroup>
+                <col className="w-[10%]" />
+                <col className="w-[15%]" />
+                <col className="w-[15%]" />
+                <col className="w-[4%]" />
+                <col className="w-[9%]" />
+                <col className="w-[8%]" />
+                <col className="w-[8%]" />
+                <col className="w-[12%]" />
+                <col className="w-[10%]" />
+                <col className="w-[9%]" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-[#e4eaf2] bg-[#f8fafc] text-[#6b7a93] font-bold uppercase tracking-wider text-[10.5px]">
-                  <th className="py-2.5 px-3">Indent No.</th>
-                  <th className="py-2.5 px-3">Facility / Consignee</th>
-                  <th className="py-2.5 px-3">Equipment / Supply</th>
-                  <th className="py-2.5 px-3 text-center">Qty</th>
-                  <th className="py-2.5 px-3">Estimated Value</th>
-                  <th className="py-2.5 px-3 text-center">RC Tag</th>
-                  <th className="py-2.5 px-3">Approval Gate</th>
-                  <th className="py-2.5 px-3">Status</th>
-                  <th className="py-2.5 px-3">Date</th>
+                  <th className="py-2.5 px-2.5 text-left">Indent No.</th>
+                  <th className="py-2.5 px-2.5 text-left">Facility / Consignee</th>
+                  <th className="py-2.5 px-2.5 text-left">Equipment / Supply</th>
+                  <th className="py-2.5 px-2 text-center">Qty</th>
+                  <th className="py-2.5 px-2.5 text-right">Estimated Value</th>
+                  <th className="py-2.5 px-2 text-center">RC Tag</th>
+                  <th className="py-2.5 px-2 text-center">Approval Gate</th>
+                  <th className="py-2.5 px-2.5 text-left">Status</th>
+                  <th className="py-2.5 px-2 text-center">Date</th>
                   <th className="py-2.5 px-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#eff3f8]">
                 {filtered.map((indent) => {
                   const myTurn = myPendingIds.has(indent.id);
-                  const hasRC = indent.rateContractId ||
-                    (indent.lineItems ?? []).some((li: any) => rcEquipmentIds.has(li.equipmentId)) ||
-                    rcEquipmentIds.has(indent.equipmentId ?? "");
 
                   return (
                     <tr
@@ -315,54 +350,54 @@ export default function Indents() {
                       className="hover:bg-[#eff5ff] cursor-pointer transition-colors group"
                     >
                       {/* Indent Number */}
-                      <td className="py-2.5 px-3">
-                        <span className="font-mono font-bold text-[#2563eb] text-[11.5px] group-hover:underline">
+                      <td className="py-2.5 px-2.5 truncate align-middle">
+                        <span className="font-mono font-bold text-[#2563eb] text-[11.5px] group-hover:underline truncate block" title={indent.indentNumber}>
                           {indent.indentNumber}
                         </span>
                       </td>
 
                       {/* Facility */}
-                      <td className="py-2.5 px-3">
-                        <div className="flex items-center gap-1.5">
+                      <td className="py-2.5 px-2.5 align-middle">
+                        <div className="flex items-center gap-1.5 min-w-0" title={indent.facilityName}>
                           <Building2 className="w-3.5 h-3.5 text-[#6b7a93] shrink-0" />
-                          <span className="font-medium text-[#152340] truncate max-w-[190px]">
+                          <span className="font-medium text-[#152340] truncate block">
                             {indent.facilityName}
                           </span>
                         </div>
                       </td>
 
                       {/* Equipment */}
-                      <td className="py-2.5 px-3">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-medium text-[#152340] truncate max-w-[210px]">
+                      <td className="py-2.5 px-2.5 align-middle">
+                        <div className="flex items-center gap-1.5 min-w-0" title={indent.equipmentName || "Multi-Item Requisition"}>
+                          <span className="font-medium text-[#152340] truncate block flex-1">
                             {indent.equipmentName || "Multi-Item Requisition"}
                           </span>
                           {myTurn && (
-                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                              Your Action
+                            <span className="text-[9px] font-semibold px-1 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 shrink-0">
+                              Action
                             </span>
                           )}
                         </div>
                       </td>
 
                       {/* Quantity */}
-                      <td className="py-2.5 px-3 text-center tabular-nums font-semibold text-[#152340]">
+                      <td className="py-2.5 px-2 text-center tabular-nums font-semibold text-[#152340] align-middle">
                         {indent.quantity}
                       </td>
 
                       {/* Value */}
-                      <td className="py-2.5 px-3 tabular-nums font-bold text-[#152340]">
+                      <td className="py-2.5 px-2.5 text-right tabular-nums font-bold text-[#152340] align-middle whitespace-nowrap">
                         {formatINR(indent.estimatedTotalValue ?? 0)}
                       </td>
 
                       {/* Rate Contract Tag */}
-                      <td className="py-2.5 px-3 text-center">
+                      <td className="py-2.5 px-2 text-center align-middle">
                         {indent.tenderId || indent.status === "tender_initiated" ? (
                           <span className="neo-chip gry text-[10px]">Tender Route</span>
                         ) : indent.hasFullRCCoverage && indent.rateContractId ? (
                           <span className="neo-chip gry text-[10px]">RC Tagged</span>
                         ) : indent.hasFullRCCoverage ? (
-                          <span className="neo-chip blu text-[10px]">RC Available</span>
+                          <span className="neo-chip gry text-[10px]">RC Available</span>
                         ) : indent.hasPartialRCCoverage ? (
                           <span className="neo-chip gry text-[10px]">Partial RC</span>
                         ) : (
@@ -371,33 +406,33 @@ export default function Indents() {
                       </td>
 
                       {/* Approval Timeline */}
-                      <td className="py-2.5 px-3">
+                      <td className="py-2.5 px-2 text-center align-middle">
                         <StepsBadge approvalSteps={indent.approvalSteps} indentStatus={indent.status} />
                       </td>
 
                       {/* Status Badge */}
-                      <td className="py-2.5 px-3">
-                        <StatusBadge status={indent.status} />
+                      <td className="py-2.5 px-2.5 text-left align-middle min-w-0">
+                        <StatusBadge status={indent.status} className="max-w-full truncate" />
                       </td>
 
                       {/* Date */}
-                      <td className="py-2.5 px-3 text-[#6b7a93] text-[11px] whitespace-nowrap">
+                      <td className="py-2.5 px-2 text-center text-[#6b7a93] text-[11px] whitespace-nowrap align-middle">
                         {format(new Date(indent.createdAt), "dd MMM yyyy")}
                       </td>
 
                       {/* Action */}
-                      <td className="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1.5">
+                      <td className="py-2.5 px-3 text-right align-middle" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end">
                           <button
                             onClick={() => navigate(`/indents/${indent.id}`)}
                             className={cn(
-                              "px-2.5 py-1 rounded text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer",
+                              "px-2.5 py-1 rounded text-xs font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0",
                               myTurn
                                 ? "bg-[#eff5ff] text-[#1e40af] border border-[#bfdbfe] hover:bg-[#dbeafe]"
                                 : "bg-white border border-[#e2e8f0] text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                             )}
                           >
-                            <Eye className="w-3 h-3" />
+                            <Eye className="w-3.5 h-3.5 shrink-0" />
                             <span>{myTurn ? "Review" : "View"}</span>
                           </button>
                         </div>

@@ -7,6 +7,7 @@ export type UserRole =
   | "gm_equipment"
   | "so_equipment"
   | "executive_director"
+  | "managing_director"
   | "admin"
   | "vendor"
   | "consignee";
@@ -32,11 +33,33 @@ export interface AuthUser {
 
 const PERMISSIONS: Record<UserRole, string[]> = {
   deo: ["indent.create", "indent.view", "indent.draft"],
-  tgmsidc_user: ["indent.review", "indent.approve_step", "indent.view", "indent.edit", "equipment.manage", "consolidation.view"],
+  tgmsidc_user: [
+    "indent.review",
+    "indent.approve_step",
+    "indent.view",
+    "indent.edit",
+    "equipment.manage",
+    "rc.manage",
+    "rc.view",
+    "tender.manage",
+    "tender.view",
+    "po.view",
+    "po.create",
+    "budget.view",
+    "reports.view",
+    "grn.view",
+    "grn.create",
+    "delivery.receive",
+    "payment.view",
+    "payment.create",
+    "payment.approve",
+    "payment.update",
+  ],
   gm_equipment: ["indent.approve", "indent.approve_step", "indent.reject", "indent.view", "po.approve", "po.cancel", "po.view", "rc.manage", "tender.manage", "budget.view", "vendor.view", "reports.view"],
   so_equipment: ["indent.sanction", "indent.approve_step", "indent.view", "po.approve", "po.view", "rc.manage", "tender.manage", "budget.view", "vendor.view", "reports.view"],
-  executive_director: ["indent.sanction", "indent.approve", "indent.approve_step", "indent.reject", "indent.view", "po.approve", "po.view", "tender.view", "budget.view", "reports.view"],
-  admin: ["indent.view", "indent.create", "indent.approve", "po.view", "po.approve", "rc.manage", "tender.manage", "vendor.manage", "equipment.manage", "institution.manage", "budget.view", "reports.view", "users.manage"],
+  executive_director: ["indent.sanction", "indent.approve", "indent.approve_step", "indent.reject", "indent.view", "po.approve", "po.view", "tender.view", "budget.view", "reports.view", "payment.view", "payment.create", "payment.approve", "payment.update"],
+  managing_director: ["indent.view", "po.view", "tender.view", "budget.view", "reports.view", "rc.view", "vendor.view", "institution.view", "kpi.view", "audit.view", "payment.view"],
+  admin: ["indent.view", "indent.create", "indent.approve", "po.view", "po.approve", "rc.manage", "tender.manage", "vendor.manage", "equipment.manage", "institution.manage", "budget.view", "reports.view", "users.manage", "payment.view", "payment.create", "payment.approve", "payment.update"],
   vendor: ["po.acknowledge", "po.view", "delivery.dispatch", "delivery.cert_upload", "invoice.submit"],
   consignee: ["grn.create", "grn.view", "delivery.receive", "installation.confirm"],
 };

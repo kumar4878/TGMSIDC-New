@@ -1,9 +1,11 @@
+import { useEffect } from "react";
 import { Switch, Route, Router as WouterRouter, useLocation, Redirect } from "wouter";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Layout from "@/components/Layout";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
@@ -32,7 +34,6 @@ import ApprovalInbox from "@/pages/approval-inbox";
 import GRN from "@/pages/grn";
 import Invoices from "@/pages/invoices";
 import Payments from "@/pages/payments";
-import Consolidation from "@/pages/consolidation";
 import ApprovalHierarchy from "@/pages/approval-hierarchy";
 import RCCoverage from "@/pages/rc-coverage";
 import StockTransfers from "@/pages/stock-transfers";
@@ -47,6 +48,8 @@ import KPIDashboard from "@/pages/kpi-dashboard";
 import MasterData from "@/pages/master-data";
 import AuditTrail from "@/pages/audit-trail";
 import VendorPortal from "@/pages/vendor-portal";
+import UsersAndRolesPage from "@/pages/users";
+import AssetReport from "@/pages/asset-report";
 import NotFound from "@/pages/not-found";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -80,7 +83,6 @@ const ROLE_PERMITTED_ROUTES: Record<UserRole, string[]> = {
     "/vendor-portal",
     "/purchase-orders",
     "/deliveries",
-    "/invoices",
     "/reports",
   ],
   consignee: [
@@ -104,7 +106,6 @@ const ROLE_PERMITTED_ROUTES: Record<UserRole, string[]> = {
     "/",
     "/approval-inbox",
     "/indents",
-    "/consolidation",
     "/rc-coverage",
     "/rate-contracts",
     "/purchase-orders",
@@ -117,7 +118,6 @@ const ROLE_PERMITTED_ROUTES: Record<UserRole, string[]> = {
     "/",
     "/approval-inbox",
     "/indents",
-    "/consolidation",
     "/budget",
     "/rc-coverage",
     "/rate-contracts",
@@ -139,21 +139,43 @@ const ROLE_PERMITTED_ROUTES: Record<UserRole, string[]> = {
     "/budget",
     "/purchase-orders",
     "/tenders",
-    "/invoices",
     "/payments",
     "/audit-trail",
     "/kpi-dashboard",
     "/demand-forecast",
+    "/users",
+    "/reports",
+  ],
+  managing_director: [
+    "/",
+    "/indents",
+    "/budget",
+    "/rc-coverage",
+    "/rate-contracts",
+    "/purchase-orders",
+    "/tenders",
+    "/deliveries",
+    "/payments",
+    "/vendors",
+    "/institutions",
+    "/equipment",
+    "/users",
+    "/kpi-dashboard",
+    "/demand-forecast",
+    "/audit-trail",
     "/reports",
   ],
   tgmsidc_user: [
-    "/",
     "/approval-inbox",
     "/indents",
     "/budget",
+    "/rc-coverage",
+    "/rate-contracts",
     "/purchase-orders",
+    "/tenders",
+    "/tenders/workbench",
     "/deliveries",
-    "/invoices",
+    "/grn",
     "/payments",
     "/reports",
   ],
@@ -188,7 +210,7 @@ function ProtectedScreen({ path, component: Component, params }: { path: string;
   });
 
   if (!isAllowed) {
-    const home = user.role === "vendor" ? "/vendor-portal" : user.role === "deo" ? "/indents" : "/";
+    const home = user.role === "vendor" ? "/vendor-portal" : (user.role === "deo" || user.role === "tgmsidc_user") ? "/indents" : "/";
     return <Redirect to={home} />;
   }
 
@@ -203,6 +225,14 @@ function r(path: string, Component: React.ComponentType<any>) {
   );
 }
 
+function ScrollToTop() {
+  const [location] = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [location]);
+  return null;
+}
+
 function Router() {
   const [location] = useLocation();
   if (location === "/login") {
@@ -214,13 +244,14 @@ function Router() {
   }
   return (
     <AuthGuard>
+      <ScrollToTop />
       <Layout>
         <Switch>
           {r("/", Dashboard)}
           {r("/indents/new", IndentNew)}
           {r("/indents/:id", IndentDetail)}
           {r("/indents", Indents)}
-          {r("/consolidation", Consolidation)}
+
           {r("/rate-contracts/new", RateContractNew)}
           {r("/rate-contracts/:id", RateContractDetail)}
           {r("/rate-contracts", RateContracts)}
@@ -233,7 +264,7 @@ function Router() {
           {r("/deliveries/:id", DeliveryDetail)}
           {r("/deliveries", Deliveries)}
           {r("/grn", GRN)}
-          {r("/invoices", Invoices)}
+          <Route path="/invoices"><Redirect to="/purchase-orders" /></Route>
           {r("/payments", Payments)}
           {r("/budget", Budget)}
           {r("/approval-inbox", ApprovalInbox)}
@@ -244,7 +275,9 @@ function Router() {
           {r("/institutions", Institutions)}
           {r("/equipment", Equipment)}
           {r("/masters", MasterData)}
+          {r("/users", UsersAndRolesPage)}
           {r("/audit-trail", AuditTrail)}
+          {r("/reports/asset-report", AssetReport)}
           {r("/reports", Reports)}
           {r("/rc-coverage", RCCoverage)}
           {r("/approval-hierarchy", ApprovalHierarchy)}
@@ -269,9 +302,11 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <TooltipProvider>
-          <WouterRouter>
-            <Router />
-          </WouterRouter>
+          <ErrorBoundary fallbackTitle="Portal Workspace Error">
+            <WouterRouter>
+              <Router />
+            </WouterRouter>
+          </ErrorBoundary>
           <Toaster />
         </TooltipProvider>
       </AuthProvider>

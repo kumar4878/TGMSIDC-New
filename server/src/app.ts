@@ -20,8 +20,8 @@ app.use(
   })
 );
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Realistic processing simulation delay (2 to 3 seconds) for all data-saving operations (POST, PUT, PATCH, DELETE)
 app.use((req, _res, next) => {

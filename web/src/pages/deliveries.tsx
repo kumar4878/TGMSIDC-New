@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useToast } from "@/hooks/use-toast";
 import {
   Search, Eye, QrCode, Plus, Upload, FileText, X,
   CheckCircle2, Truck, Package, AlertTriangle, Building2, Stamp,
@@ -38,33 +39,39 @@ const DOC_TYPES = [
 
 export default function Deliveries() {
   const { user, can } = useAuth();
+  const { toast } = useToast();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [logOpen, setLogOpen] = useState(false);
   const [detailDelivery, setDetailDelivery] = useState<Delivery | null>(null);
 
-  const [form, setForm] = useState({
+  const initialForm = {
     purchaseOrderId: "",
+    quantity: "",
     deliveryNoteNo: "",
-    deliveryNoteDate: "",
+    deliveryNoteDate: new Date().toISOString().split("T")[0],
     buyersOrderNo: "",
     buyersOrderDate: "",
     dispatchDocNo: "",
     dispatchedThrough: "",
     destination: "",
-    termsOfDelivery: "",
+    termsOfDelivery: "FOR Destination (Hospital Premises)",
     vehicleNumber: "",
-    dispatchDate: "",
-    hsnSacCode: "",
+    dispatchDate: new Date().toISOString().split("T")[0],
+    hsnSacCode: "90189099",
     gstRate: "5",
+    taxAmount: "NIL",
     receivedInGoodCondition: true,
     dispatchNotes: "",
     serialBatchNos: "",
     vendorGstin: "",
     consigneeAddress: "",
     buyerBillToAddress: "The Managing Director, HPC, Hyderabad, 2nd Floor, DM&HS Compound, Sultanbazar, Koti, HYDERABAD - 500095, GSTIN/UIN: 36AADAT9639G1Z2",
-  });
+  };
+
+  const [form, setForm] = useState(initialForm);
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [docs, setDocs] = useState<DocAttachment[]>([]);
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -90,30 +97,145 @@ export default function Deliveries() {
     setDocs(prev => [...prev, ...newDocs]);
   }
 
+  function handlePOSelect(poId: string) {
+    const selectedPO = (purchaseOrders ?? []).find(
+      p => String(p.id) === poId || String((p as any)._id) === poId || p.poNumber === poId
+    );
+
+    setForm(prev => ({
+      ...prev,
+      purchaseOrderId: poId,
+      quantity: selectedPO?.quantity ? String(selectedPO.quantity) : (prev.quantity || "1"),
+      buyersOrderNo: selectedPO?.poNumber || prev.buyersOrderNo,
+      buyersOrderDate: selectedPO?.poDate ? String(selectedPO.poDate).split("T")[0] : (selectedPO?.createdAt ? String(selectedPO.createdAt).split("T")[0] : prev.buyersOrderDate),
+      destination: selectedPO?.deliveryAddress || selectedPO?.consignees?.[0]?.institutionName || selectedPO?.facilityName || prev.destination,
+      consigneeAddress: selectedPO?.deliveryAddress || selectedPO?.consignees?.[0]?.address || prev.consigneeAddress,
+      vendorGstin: selectedPO?.vendorGstin || prev.vendorGstin,
+      dispatchDate: prev.dispatchDate || new Date().toISOString().split("T")[0],
+      deliveryNoteDate: prev.deliveryNoteDate || new Date().toISOString().split("T")[0],
+    }));
+
+    setErrors(prev => {
+      const updated = { ...prev };
+      delete updated.purchaseOrderId;
+      if (selectedPO?.quantity) delete updated.quantity;
+      if (selectedPO?.deliveryAddress || selectedPO?.facilityName) delete updated.destination;
+      return updated;
+    });
+  }
+
+  function validateForm() {
+    const errs: Record<string, string> = {};
+
+    if (!form.purchaseOrderId) {
+      errs.purchaseOrderId = "Please select a Purchase Order";
+    }
+    if (!form.deliveryNoteNo.trim()) {
+      errs.deliveryNoteNo = "Delivery Note / Challan No. is required";
+    }
+    if (!form.deliveryNoteDate) {
+      errs.deliveryNoteDate = "Delivery Note Date is required";
+    }
+    if (!form.dispatchDate) {
+      errs.dispatchDate = "Dispatch Date is required";
+    }
+    if (!form.quantity || isNaN(Number(form.quantity)) || Number(form.quantity) <= 0) {
+      errs.quantity = "Valid dispatch quantity (> 0) is required";
+    }
+    if (!form.destination.trim()) {
+      errs.destination = "Destination / Consignee Hospital is required";
+    }
+    if (!form.dispatchedThrough.trim()) {
+      errs.dispatchedThrough = "Dispatched Through (carrier/transporter) is required";
+    }
+    if (!form.vehicleNumber.trim()) {
+      errs.vehicleNumber = "Vehicle or Tracking Number is required";
+    }
+
+    return errs;
+  }
+
   function handleCreate() {
-    if (!form.purchaseOrderId) return;
+    const formErrors = validateForm();
+    if (Object.keys(formErrors).length > 0) {
+      setErrors(formErrors);
+      toast({
+        title: "Mandatory Fields Missing",
+        description: "Please fill in all mandatory fields marked with an asterisk (*) to log delivery.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const selectedPO = (purchaseOrders ?? []).find(
+      (po) => String(po.id) === form.purchaseOrderId || String((po as any)._id) === form.purchaseOrderId || po.poNumber === form.purchaseOrderId
+    );
+
+    const payload = {
+      purchaseOrderId: form.purchaseOrderId,
+      poNumber: form.buyersOrderNo || selectedPO?.poNumber || "",
+      buyersOrderNo: form.buyersOrderNo || selectedPO?.poNumber || "",
+      buyersOrderDate: form.buyersOrderDate || undefined,
+      deliveryNoteNo: form.deliveryNoteNo.trim(),
+      challanNumber: form.deliveryNoteNo.trim(),
+      deliveryNoteDate: form.deliveryNoteDate || undefined,
+      dispatchDocNo: form.dispatchDocNo.trim(),
+      lrGrNumber: form.dispatchDocNo.trim(),
+      dispatchedThrough: form.dispatchedThrough.trim(),
+      transporterName: form.dispatchedThrough.trim(),
+      vehicleNumber: form.vehicleNumber.trim(),
+      transporterVehicle: form.vehicleNumber.trim(),
+      destination: form.destination.trim(),
+      facilityName: form.destination.trim() || selectedPO?.deliveryAddress || "Consignee Hospital",
+      termsOfDelivery: form.termsOfDelivery.trim(),
+      dispatchDate: form.dispatchDate ? new Date(form.dispatchDate) : new Date(),
+      quantity: Number(form.quantity),
+      orderedQty: selectedPO?.quantity ? Number(selectedPO.quantity) : Number(form.quantity),
+      hsnSacCode: form.hsnSacCode.trim(),
+      gstRate: form.gstRate,
+      receivedInGoodCondition: form.receivedInGoodCondition,
+      condition: form.receivedInGoodCondition ? "good" : "damaged",
+      dispatchNotes: form.dispatchNotes.trim(),
+      serialBatchNos: form.serialBatchNos.trim(),
+      serialNumbers: form.serialBatchNos ? form.serialBatchNos.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean) : [],
+      vendorGstin: form.vendorGstin.trim(),
+      consigneeAddress: form.consigneeAddress.trim(),
+      buyerBillToAddress: form.buyerBillToAddress.trim(),
+      documentsUploaded: docs.length > 0,
+      docs: docs,
+      status: "dispatched",
+    };
+
     createDelivery.mutate(
-      { data: { purchaseOrderId: form.purchaseOrderId, dispatchDate: form.dispatchDate || undefined } as Parameters<typeof createDelivery.mutate>[0]["data"] },
+      { data: payload },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListDeliveriesQueryKey({}) });
+          queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+          queryClient.invalidateQueries({ queryKey: ["/indents"] });
+          toast({
+            title: "Delivery Logged Successfully",
+            description: `Delivery Note #${form.deliveryNoteNo} logged. Shipment is marked as Dispatched.`,
+          });
           setLogOpen(false);
           resetForm();
           setDocs([]);
+          setErrors({});
+        },
+        onError: (err: any) => {
+          toast({
+            title: "Failed to Log Delivery",
+            description: err?.message || "An error occurred while logging delivery.",
+            variant: "destructive",
+          });
         },
       }
     );
   }
 
   function resetForm() {
-    setForm({
-      purchaseOrderId: "", deliveryNoteNo: "", deliveryNoteDate: "", buyersOrderNo: "",
-      buyersOrderDate: "", dispatchDocNo: "", dispatchedThrough: "", destination: "",
-      termsOfDelivery: "", vehicleNumber: "", dispatchDate: "", hsnSacCode: "",
-      gstRate: "5", receivedInGoodCondition: true, dispatchNotes: "", serialBatchNos: "",
-      vendorGstin: "", consigneeAddress: "",
-      buyerBillToAddress: "The Managing Director, HPC, Hyderabad, 2nd Floor, DM&HS Compound, Sultanbazar, Koti, HYDERABAD - 500095, GSTIN/UIN: 36AADAT9639G1Z2",
-    });
+    setForm(initialForm);
+    setErrors({});
   }
 
   function qaColor(score: number | null | undefined) {
@@ -135,20 +257,21 @@ export default function Deliveries() {
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#152340]">
               Deliveries & Quality Assurance
             </h1>
-            <span className="neo-chip blu">Consignment Verification</span>
+            <span className="neo-chip gry">Consignment Verification</span>
           </div>
           <p className="text-xs text-[#6b7a93] mt-0.5">
             Track consignments from dispatch through consignee receipt, batch testing, and acceptance certification
           </p>
         </div>
         {(user?.role === "vendor" || user?.role === "admin" || can("delivery.dispatch")) && (
-          <button
+          <Button
+            size="sm"
             onClick={() => setLogOpen(true)}
-            className="flex items-center gap-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white px-3.5 py-1.5 rounded-md text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+            className="gap-1.5 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Log Delivery Dispatch</span>
-          </button>
+          </Button>
         )}
       </div>
 
@@ -411,107 +534,246 @@ export default function Deliveries() {
       <Dialog open={logOpen} onOpenChange={v => { setLogOpen(v); if (!v) { setDocs([]); resetForm(); } }}>
         <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Truck className="h-5 w-5 text-primary" />Log Delivery — Delivery Note Details
+            <DialogTitle className="flex items-center gap-2 text-base font-bold text-slate-900">
+              <Truck className="h-5 w-5 text-primary" />Log Delivery &amp; Dispatch — Delivery Note Details
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-5 py-2">
+          <div className="space-y-4 py-2">
 
             {/* Section: PO & Delivery Note */}
-            <div className="border rounded-lg p-4 space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Purchase Order & Delivery Note</p>
+            <div className="border rounded-lg p-4 space-y-3 bg-white">
+              <div className="flex items-center justify-between border-b pb-2">
+                <p className="text-xs font-semibold text-slate-900 uppercase tracking-wide">1. Purchase Order &amp; Delivery Note</p>
+                <span className="text-[11px] text-muted-foreground"><span className="text-destructive">*</span> indicates mandatory field</span>
+              </div>
+
               <div className="space-y-1.5">
-                <Label>Purchase Order *</Label>
-                <Select value={form.purchaseOrderId} onValueChange={v => setForm({ ...form, purchaseOrderId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select a PO..." /></SelectTrigger>
+                <Label className={cn(errors.purchaseOrderId && "text-destructive font-semibold")}>
+                  Purchase Order <span className="text-destructive">*</span>
+                </Label>
+                <Select value={form.purchaseOrderId} onValueChange={handlePOSelect}>
+                  <SelectTrigger className={cn("bg-white", errors.purchaseOrderId && "border-destructive focus-visible:ring-destructive")}>
+                    <SelectValue placeholder="Select a Purchase Order..." />
+                  </SelectTrigger>
                   <SelectContent>
                     {(purchaseOrders ?? []).map(po => (
                       <SelectItem key={po.id} value={String(po.id)}>
-                        {po.poNumber} — {po.equipmentName}
+                        {po.poNumber} — {po.equipmentName} ({po.quantity} Nos.)
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {errors.purchaseOrderId && (
+                  <p className="text-[11px] text-destructive font-medium mt-1">{errors.purchaseOrderId}</p>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-3">
+
+              {/* Selected PO Preview Card */}
+              {(() => {
+                const selPO = (purchaseOrders ?? []).find(
+                  p => String(p.id) === form.purchaseOrderId || String((p as any)._id) === form.purchaseOrderId || p.poNumber === form.purchaseOrderId
+                );
+                if (!selPO) return null;
+                return (
+                  <div className="p-3 rounded-lg bg-sky-50/70 border border-sky-200/80 text-xs text-sky-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="space-y-0.5">
+                      <p className="font-bold text-slate-900">{selPO.equipmentName}</p>
+                      <p className="text-[11px] text-slate-600">
+                        PO #{selPO.poNumber} · Total Ordered: <strong className="text-slate-900">{selPO.quantity} Nos.</strong>
+                      </p>
+                    </div>
+                    <div className="text-left sm:text-right space-y-0.5">
+                      <Badge variant="outline" className="bg-white border-sky-300 text-sky-900 text-[10.5px]">
+                        Vendor: {selPO.vendorName || "Empanelled Vendor"}
+                      </Badge>
+                      {selPO.deliveryAddress && (
+                        <p className="text-[10.5px] text-slate-500 truncate max-w-[260px]" title={selPO.deliveryAddress}>
+                          Consignee: {selPO.deliveryAddress}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1.5">
-                  <Label>Delivery Note No. *</Label>
-                  <Input value={form.deliveryNoteNo} onChange={e => setForm({ ...form, deliveryNoteNo: e.target.value })} placeholder="e.g. SSA/0506/25-26" />
+                  <Label className={cn(errors.deliveryNoteNo && "text-destructive font-semibold")}>
+                    Delivery Note / Challan No. <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    value={form.deliveryNoteNo}
+                    onChange={e => {
+                      setForm({ ...form, deliveryNoteNo: e.target.value });
+                      if (errors.deliveryNoteNo) setErrors(prev => { const n = { ...prev }; delete n.deliveryNoteNo; return n; });
+                    }}
+                    placeholder="e.g. SSA/0506/25-26"
+                    className={cn(errors.deliveryNoteNo && "border-destructive focus-visible:ring-destructive")}
+                  />
+                  {errors.deliveryNoteNo && (
+                    <p className="text-[11px] text-destructive font-medium mt-1">{errors.deliveryNoteNo}</p>
+                  )}
                 </div>
+
                 <div className="space-y-1.5">
-                  <Label>Delivery Note Date</Label>
-                  <Input type="date" value={form.deliveryNoteDate} onChange={e => setForm({ ...form, deliveryNoteDate: e.target.value })} />
+                  <Label className={cn(errors.deliveryNoteDate && "text-destructive font-semibold")}>
+                    Delivery Note Date <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    type="date"
+                    value={form.deliveryNoteDate}
+                    onChange={e => {
+                      setForm({ ...form, deliveryNoteDate: e.target.value });
+                      if (errors.deliveryNoteDate) setErrors(prev => { const n = { ...prev }; delete n.deliveryNoteDate; return n; });
+                    }}
+                    className={cn(errors.deliveryNoteDate && "border-destructive focus-visible:ring-destructive")}
+                  />
+                  {errors.deliveryNoteDate && (
+                    <p className="text-[11px] text-destructive font-medium mt-1">{errors.deliveryNoteDate}</p>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className={cn(errors.quantity && "text-destructive font-semibold")}>
+                    Dispatch Quantity (Nos.) <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={form.quantity}
+                    onChange={e => {
+                      setForm({ ...form, quantity: e.target.value });
+                      if (errors.quantity) setErrors(prev => { const n = { ...prev }; delete n.quantity; return n; });
+                    }}
+                    placeholder="e.g. 5"
+                    className={cn(errors.quantity && "border-destructive focus-visible:ring-destructive")}
+                  />
+                  {errors.quantity && (
+                    <p className="text-[11px] text-destructive font-medium mt-1">{errors.quantity}</p>
+                  )}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1.5">
                   <Label>Buyer's Order No. (PO Ref.)</Label>
-                  <Input value={form.buyersOrderNo} onChange={e => setForm({ ...form, buyersOrderNo: e.target.value })} placeholder="441A/591/HPC/EQU/2025-26" />
+                  <Input value={form.buyersOrderNo} onChange={e => setForm({ ...form, buyersOrderNo: e.target.value })} placeholder="e.g. 441A/591/HPC/EQU/2025-26" />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Buyer's Order Date</Label>
                   <Input type="date" value={form.buyersOrderDate} onChange={e => setForm({ ...form, buyersOrderDate: e.target.value })} />
                 </div>
+                <div className="space-y-1.5">
+                  <Label className={cn(errors.dispatchDate && "text-destructive font-semibold")}>
+                    Dispatch Date <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    type="date"
+                    value={form.dispatchDate}
+                    onChange={e => {
+                      setForm({ ...form, dispatchDate: e.target.value });
+                      if (errors.dispatchDate) setErrors(prev => { const n = { ...prev }; delete n.dispatchDate; return n; });
+                    }}
+                    className={cn(errors.dispatchDate && "border-destructive focus-visible:ring-destructive")}
+                  />
+                  {errors.dispatchDate && (
+                    <p className="text-[11px] text-destructive font-medium mt-1">{errors.dispatchDate}</p>
+                  )}
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Dispatch Doc No.</Label>
-                  <Input value={form.dispatchDocNo} onChange={e => setForm({ ...form, dispatchDocNo: e.target.value })} placeholder="Dispatch document reference" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Dispatch Date</Label>
-                  <Input type="date" value={form.dispatchDate} onChange={e => setForm({ ...form, dispatchDate: e.target.value })} />
-                </div>
+
+              <div className="space-y-1.5">
+                <Label>Dispatch Document / Consignment (LR / GR) Ref.</Label>
+                <Input value={form.dispatchDocNo} onChange={e => setForm({ ...form, dispatchDocNo: e.target.value })} placeholder="e.g. LR-4920492 / Airway Bill No." />
               </div>
             </div>
 
             {/* Section: Consignee & Buyer */}
-            <div className="border rounded-lg p-4 space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Consignee & Buyer Details</p>
+            <div className="border rounded-lg p-4 space-y-3 bg-white">
+              <p className="text-xs font-semibold text-slate-900 uppercase tracking-wide border-b pb-2">2. Consignee &amp; Buyer Details</p>
               <div className="space-y-1.5">
-                <Label>Consignee Address (Ship to)</Label>
+                <Label className={cn(errors.destination && "text-destructive font-semibold")}>
+                  Destination / Hospital Institution <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  value={form.destination}
+                  onChange={e => {
+                    setForm({ ...form, destination: e.target.value });
+                    if (errors.destination) setErrors(prev => { const n = { ...prev }; delete n.destination; return n; });
+                  }}
+                  placeholder="e.g. Gandhi Hospital, Musheerabad / RIMS Adilabad"
+                  className={cn(errors.destination && "border-destructive focus-visible:ring-destructive")}
+                />
+                {errors.destination && (
+                  <p className="text-[11px] text-destructive font-medium mt-1">{errors.destination}</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Consignee Physical Address (Ship to)</Label>
                 <Textarea value={form.consigneeAddress} onChange={e => setForm({ ...form, consigneeAddress: e.target.value })} rows={2}
                   placeholder="The Medical Superintendent, GGH, Sangareddy, Sangareddy - 502001, Medak Dist." />
               </div>
-              <div className="space-y-1.5">
-                <Label>Buyer (Bill to) — HPC</Label>
-                <Textarea value={form.buyerBillToAddress} onChange={e => setForm({ ...form, buyerBillToAddress: e.target.value })} rows={2} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Vendor GSTIN</Label>
-                <Input value={form.vendorGstin} onChange={e => setForm({ ...form, vendorGstin: e.target.value })} placeholder="e.g. 36ACWFS9933Q1ZO" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Buyer (Bill to) — HPC</Label>
+                  <Textarea value={form.buyerBillToAddress} onChange={e => setForm({ ...form, buyerBillToAddress: e.target.value })} rows={2} className="text-xs" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Vendor GSTIN</Label>
+                  <Input value={form.vendorGstin} onChange={e => setForm({ ...form, vendorGstin: e.target.value })} placeholder="e.g. 36ACWFS9933Q1ZO" />
+                </div>
               </div>
             </div>
 
             {/* Section: Transport */}
-            <div className="border rounded-lg p-4 space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Dispatch / Transport Details</p>
-              <div className="grid grid-cols-2 gap-3">
+            <div className="border rounded-lg p-4 space-y-3 bg-white">
+              <p className="text-xs font-semibold text-slate-900 uppercase tracking-wide border-b pb-2">3. Dispatch &amp; Logistics Details</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label>Dispatched Through</Label>
-                  <Input value={form.dispatchedThrough} onChange={e => setForm({ ...form, dispatchedThrough: e.target.value })} placeholder="e.g. Company Vehicle / Blue Dart" />
+                  <Label className={cn(errors.dispatchedThrough && "text-destructive font-semibold")}>
+                    Dispatched Through (Carrier / Mode) <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    value={form.dispatchedThrough}
+                    onChange={e => {
+                      setForm({ ...form, dispatchedThrough: e.target.value });
+                      if (errors.dispatchedThrough) setErrors(prev => { const n = { ...prev }; delete n.dispatchedThrough; return n; });
+                    }}
+                    placeholder="e.g. Dedicated Logistics / VRL Logistics / Blue Dart"
+                    className={cn(errors.dispatchedThrough && "border-destructive focus-visible:ring-destructive")}
+                  />
+                  {errors.dispatchedThrough && (
+                    <p className="text-[11px] text-destructive font-medium mt-1">{errors.dispatchedThrough}</p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Vehicle / Transport No.</Label>
-                  <Input value={form.vehicleNumber} onChange={e => setForm({ ...form, vehicleNumber: e.target.value })} placeholder="e.g. TS-09-AB-1234" />
+                  <Label className={cn(errors.vehicleNumber && "text-destructive font-semibold")}>
+                    Vehicle / Tracking No. <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    value={form.vehicleNumber}
+                    onChange={e => {
+                      setForm({ ...form, vehicleNumber: e.target.value });
+                      if (errors.vehicleNumber) setErrors(prev => { const n = { ...prev }; delete n.vehicleNumber; return n; });
+                    }}
+                    placeholder="e.g. TS-09-UB-4819 / TRK-983214"
+                    className={cn(errors.vehicleNumber && "border-destructive focus-visible:ring-destructive")}
+                  />
+                  {errors.vehicleNumber && (
+                    <p className="text-[11px] text-destructive font-medium mt-1">{errors.vehicleNumber}</p>
+                  )}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Destination</Label>
-                  <Input value={form.destination} onChange={e => setForm({ ...form, destination: e.target.value })} placeholder="Hospital name / address" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Terms of Delivery</Label>
-                  <Input value={form.termsOfDelivery} onChange={e => setForm({ ...form, termsOfDelivery: e.target.value })} placeholder="e.g. FOR Destination / Ex-works" />
-                </div>
+              <div className="space-y-1.5">
+                <Label>Terms of Delivery</Label>
+                <Input value={form.termsOfDelivery} onChange={e => setForm({ ...form, termsOfDelivery: e.target.value })} placeholder="e.g. FOR Destination (Hospital Premises)" />
               </div>
             </div>
 
             {/* Section: Item Details */}
-            <div className="border rounded-lg p-4 space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Item / Equipment Details</p>
-              <div className="grid grid-cols-3 gap-3">
+            <div className="border rounded-lg p-4 space-y-3 bg-white">
+              <p className="text-xs font-semibold text-slate-900 uppercase tracking-wide border-b pb-2">4. Item &amp; Serial Number Specifications</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1.5">
                   <Label>HSN / SAC Code</Label>
                   <Input value={form.hsnSacCode} onChange={e => setForm({ ...form, hsnSacCode: e.target.value })} placeholder="e.g. 90189099" />
@@ -530,17 +792,21 @@ export default function Deliveries() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>Tax Amount</Label>
-                  <Input placeholder="NIL (if exempt)" defaultValue="NIL" />
+                  <Input value={form.taxAmount} onChange={e => setForm({ ...form, taxAmount: e.target.value })} placeholder="NIL (if exempt)" />
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label>Serial / Batch Numbers</Label>
-                <Textarea value={form.serialBatchNos} onChange={e => setForm({ ...form, serialBatchNos: e.target.value })} rows={2}
-                  placeholder="e.g. Batch: SP426A04AL (1 No), SP426A05L (1 No), SP426A05Q (1 No)" />
+                <Label>Serial / Batch Numbers (comma or newline separated)</Label>
+                <Textarea
+                  value={form.serialBatchNos}
+                  onChange={e => setForm({ ...form, serialBatchNos: e.target.value })}
+                  rows={2}
+                  placeholder="e.g. SN-ECG-2026-001, SN-ECG-2026-002, SN-ECG-2026-003"
+                />
               </div>
               <div className="space-y-1.5">
-                <Label>Dispatch Notes</Label>
-                <Textarea value={form.dispatchNotes} onChange={e => setForm({ ...form, dispatchNotes: e.target.value })} rows={2} placeholder="Any notes about this dispatch..." />
+                <Label>Dispatch Notes / Special Handling Instructions</Label>
+                <Textarea value={form.dispatchNotes} onChange={e => setForm({ ...form, dispatchNotes: e.target.value })} rows={2} placeholder="Fragile medical apparatus, store at temperature controlled environment..." />
               </div>
             </div>
 
@@ -551,16 +817,18 @@ export default function Deliveries() {
                 id="good_cond"
                 checked={form.receivedInGoodCondition}
                 onChange={e => setForm({ ...form, receivedInGoodCondition: e.target.checked })}
-                className="h-4 w-4 accent-emerald-600"
+                className="h-4 w-4 accent-emerald-600 cursor-pointer"
               />
-              <label htmlFor="good_cond" className="text-sm font-medium text-emerald-800">
-                Recd. in Good Condition (facility store stamp confirmation)
+              <label htmlFor="good_cond" className="text-xs font-semibold text-emerald-900 cursor-pointer">
+                Consignment dispatched in undamaged condition with tamper-evident seals intact
               </label>
             </div>
 
             {/* Document uploads */}
-            <div className="border rounded-lg p-4 space-y-3">
-              <p className="text-sm font-semibold flex items-center gap-2"><Upload className="h-4 w-4" />Upload Dispatch Documents</p>
+            <div className="border rounded-lg p-4 space-y-3 bg-white">
+              <p className="text-xs font-semibold text-slate-900 uppercase tracking-wide border-b pb-2 flex items-center gap-2">
+                <Upload className="h-4 w-4 text-slate-700" />5. Upload Dispatch Documents &amp; Challan Copies
+              </p>
               <div className="grid grid-cols-1 gap-2">
                 {DOC_TYPES.map(dt => {
                   const uploaded = docs.filter(d => d.docType === dt.key);
@@ -573,7 +841,7 @@ export default function Deliveries() {
                         <div className="flex-1">
                           <p className="text-xs font-medium">{dt.label}</p>
                           <p className="text-[10px] text-muted-foreground">{dt.hint}</p>
-                          {uploaded.length > 0 && <p className="text-[10px] text-emerald-700">{uploaded.map(d => d.name).join(", ")}</p>}
+                          {uploaded.length > 0 && <p className="text-[10px] text-emerald-700 font-semibold">{uploaded.map(d => d.name).join(", ")}</p>}
                         </div>
                         <span className="text-xs text-primary border border-primary/30 rounded px-2 py-0.5">
                           {uploaded.length > 0 ? "Change" : "Browse"}
@@ -606,10 +874,14 @@ export default function Deliveries() {
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-0 pt-2 border-t">
             <Button variant="outline" onClick={() => { setLogOpen(false); setDocs([]); resetForm(); }}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={!form.purchaseOrderId || createDelivery.isPending}>
-              {createDelivery.isPending ? "Logging..." : "Log Delivery"}
+            <Button
+              onClick={handleCreate}
+              disabled={createDelivery.isPending}
+              className="font-semibold text-xs shadow-xs"
+            >
+              {createDelivery.isPending ? "Logging Delivery..." : "Log Delivery Dispatch"}
             </Button>
           </DialogFooter>
         </DialogContent>

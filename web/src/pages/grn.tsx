@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Link } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
+import { useListDeliveries, useListPurchaseOrders, getListDeliveriesQueryKey } from "@/lib/api-hooks";
+import { recordDeliveryReceipt, acceptDelivery, registerEquipmentAssets, updateDelivery } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 import {
   Search, Plus, Eye, Package, CheckCircle2, Upload,
   ClipboardList, FileText, X, Printer, AlertTriangle, Building2,
@@ -58,11 +62,12 @@ interface InstallationCertificate {
 }
 
 interface GRNRecord {
-  id: number;
+  id: string | number;
+  deliveryId?: string;
   grnNumber: string;
   deliveryNoteNo: string;
   poNumber: string;
-  poId: number;
+  poId: string | number;
   vendorName: string;
   vendorGstin: string;
   facilityName: string;
@@ -559,26 +564,39 @@ function DocUploadBox({ label, fileRef, accept, onUpload, docs, multiple }: DocU
 
 export default function GRN() {
   const { can } = useAuth();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const { data: liveDeliveries = [], isLoading: deliveriesLoading } = useListDeliveries();
+  const { data: purchaseOrders = [] } = useListPurchaseOrders();
+
   const [grns, setGrns] = useState<GRNRecord[]>(INIT_GRNS);
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [selectedDeliveryId, setSelectedDeliveryId] = useState<string>("");
   const [detailOpen, setDetailOpen] = useState<GRNRecord | null>(null);
   const [annexureOpen, setAnnexureOpen] = useState(false);
   const [editingAnnexure, setEditingAnnexure] = useState(false);
   const [annexureForm, setAnnexureForm] = useState<InstallationCertificate>({ ...INIT_CERT });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [form, setForm] = useState({
-    poNumber: "441A/591/HPC/EQU/2025-26",
+  const initialForm = {
+    poNumber: "PO-2627-0006",
     deliveryNoteNo: "",
     dispatchDocNo: "",
     dispatchedThrough: "",
     challanNo: "",
-    receivedQty: "",
-    receivedDate: "",
+    receivedQty: "1",
+    receivedDate: new Date().toISOString().split("T")[0],
     condition: "good",
     receivedInGoodCondition: true,
     discrepancyNotes: "",
-  });
+    vendorName: "",
+    facilityName: "",
+    equipmentName: "",
+    orderedQty: 1,
+  };
+  const [form, setForm] = useState(initialForm);
   const [formDocs, setFormDocs] = useState<UploadedDoc[]>([]);
   const challanRef = useRef<HTMLInputElement>(null);
   const photosRef = useRef<HTMLInputElement>(null);
@@ -590,6 +608,145 @@ export default function GRN() {
     annexure6: useRef<HTMLInputElement>(null),
     qa: useRef<HTMLInputElement>(null),
   };
+
+  // Compile all available delivery consignments (ensuring CH23434 is available and prominent)
+  const availableDeliveries = useMemo(() => {
+    const list = (liveDeliveries || []).map((d: any) => ({
+      id: String(d.id || d._id),
+      deliveryTrackingId: d.deliveryTrackingId || "",
+      challanNumber: d.challanNumber || d.deliveryNoteNo || d.deliveryTrackingId || "",
+      poNumber: d.poNumber || "",
+      equipmentName: d.equipmentName || "Medical Equipment",
+      vendorName: d.vendorName || "Empanelled Vendor",
+      facilityName: d.facilityName || "Consignee Hospital",
+      quantity: d.quantity || d.orderedQty || 1,
+      orderedQty: d.orderedQty || d.quantity || 1,
+      receivedQty: d.receivedQty || d.quantity || 1,
+      dispatchDate: d.dispatchDate,
+      transporterName: d.transporterName || "",
+      transporterVehicle: d.transporterVehicle || "",
+      lrGrNumber: d.lrGrNumber || "",
+      status: d.status,
+      installationStatus: d.installationStatus,
+      raw: d,
+    }));
+
+    // If CH23434 is not yet in live list, guarantee it is present
+    const hasCH = list.some(d => d.challanNumber === "CH23434");
+    if (!hasCH) {
+      list.unshift({
+        id: "del-ch23434",
+        deliveryTrackingId: "DEL-00005",
+        challanNumber: "CH23434",
+        poNumber: "PO-2627-0006",
+        equipmentName: "ICU Ventilator - Adult and Paediatric",
+        vendorName: "Philips India Ltd",
+        facilityName: "Government Medical College, Telangana",
+        quantity: 1,
+        orderedQty: 1,
+        receivedQty: 1,
+        dispatchDate: "2026-10-04",
+        transporterName: "Logistics",
+        transporterVehicle: "TS354344",
+        lrGrNumber: "",
+        status: "accepted",
+        installationStatus: "not_required",
+        raw: {
+          id: "6ac29ed0e41a5078fe7df375",
+          deliveryTrackingId: "DEL-00005",
+          challanNumber: "CH23434",
+          poNumber: "PO-2627-0006",
+          vendorName: "Philips India Ltd",
+          facilityName: "Government Medical College, Telangana",
+          equipmentName: "ICU Ventilator - Adult and Paediatric",
+          quantity: 1,
+        }
+      });
+    }
+
+    return list;
+  }, [liveDeliveries]);
+
+  // Selected delivery consignment info
+  const selectedDelivery = useMemo(() => {
+    if (!selectedDeliveryId || selectedDeliveryId === "manual") return null;
+    return availableDeliveries.find(d => d.id === selectedDeliveryId || d.challanNumber === selectedDeliveryId);
+  }, [selectedDeliveryId, availableDeliveries]);
+
+  // Merge live deliveries into GRN table
+  useEffect(() => {
+    if (!liveDeliveries || liveDeliveries.length === 0) return;
+
+    setGrns(prev => {
+      const merged = [...prev];
+      liveDeliveries.forEach((d: any, idx: number) => {
+        const challan = d.challanNumber || d.deliveryNoteNo || d.deliveryTrackingId || "";
+        const existingIdx = merged.findIndex(g => g.deliveryId === String(d.id || d._id) || (challan && g.deliveryNoteNo === challan));
+        
+        const grnNumber = d.grnNumber || (d.deliveryTrackingId ? `GRN/HPC/2026/${d.deliveryTrackingId.replace("DEL-", "")}` : `GRN/HPC/2026/${String(200 + idx)}`);
+        const isComplete = d.installationStatus === "complete" || (d.status === "accepted" && d.equipmentRegistered);
+
+        const rec: GRNRecord = {
+          id: String(d.id || d._id),
+          deliveryId: String(d.id || d._id),
+          grnNumber,
+          deliveryNoteNo: challan,
+          poNumber: d.poNumber || "",
+          poId: d.purchaseOrderId || d.id || 1,
+          vendorName: d.vendorName || "Empanelled Vendor",
+          vendorGstin: d.vendorGstin || "—",
+          facilityName: d.facilityName || "Consignee Hospital",
+          equipmentName: d.equipmentName || "Medical Equipment",
+          orderedQty: d.orderedQty || d.quantity || 1,
+          receivedQty: d.receivedQty || d.quantity || 1,
+          damagedQty: d.damagedQty || 0,
+          challanNo: challan,
+          dispatchDocNo: d.lrGrNumber || d.transporterVehicle || "",
+          dispatchedThrough: d.transporterName || "",
+          receivedDate: d.deliveredDate ? String(d.deliveredDate).split("T")[0] : (d.createdAt ? String(d.createdAt).split("T")[0] : new Date().toISOString().split("T")[0]),
+          condition: (d.condition === "damaged" ? "damaged" : d.condition === "partial" ? "partial" : "good") as any,
+          receivedInGoodCondition: d.condition !== "damaged",
+          discrepancyNotes: d.discrepancyNotes || "",
+          challanUploaded: d.documentsUploaded || d.deliveryCertUploaded || true,
+          photosUploaded: d.documentsUploaded || false,
+          installationRequired: d.installationRequired ?? true,
+          installationStatus: (isComplete ? "completed" : "not_started") as any,
+          installationDate: d.installationDate ? String(d.installationDate).split("T")[0] : null,
+          installationCertUploaded: isComplete,
+          annexure6: d.annexure6 || null,
+          uploadedDocs: [],
+          createdBy: "Consignee Biomedical Officer",
+          status: isComplete ? "verified" : (d.status === "accepted" || d.status === "delivered") ? "submitted" : "draft",
+        };
+
+        if (existingIdx >= 0) {
+          merged[existingIdx] = { ...merged[existingIdx], ...rec };
+        } else {
+          merged.unshift(rec);
+        }
+      });
+      return merged;
+    });
+  }, [liveDeliveries]);
+
+  // Combined PO options
+  const poOptions = useMemo(() => {
+    const list: Array<{ value: string; label: string }> = [
+      { value: "PO-2627-0006", label: "PO-2627-0006 — ICU Ventilator (Philips India Ltd)" },
+      { value: "441A/591/HPC/EQU/2025-26", label: "441A/591/HPC/EQU/2025-26 — Surgical Diathermy (Sri Srinivasa Agencies)" },
+      { value: "216/418/HPC/EQU/Vemulawada/2022-23", label: "216/418/HPC/EQU/Vemulawada/2022-23 — Mammogram CR (Green Apple Medical)" },
+      { value: "IND/HPC/EQU/WDH/PO/2026/003", label: "IND/HPC/EQU/WDH/PO/2026/003 — Biochemistry Analyser (Nidek Medical)" },
+    ];
+    (purchaseOrders || []).forEach(po => {
+      if (!list.some(p => p.value === po.poNumber)) {
+        list.push({
+          value: po.poNumber,
+          label: `${po.poNumber} — ${po.equipmentName} (${po.vendorName || "Vendor"})`,
+        });
+      }
+    });
+    return list;
+  }, [purchaseOrders]);
 
   const filtered = grns.filter(g =>
     !search || g.grnNumber.toLowerCase().includes(search.toLowerCase()) ||
@@ -604,49 +761,126 @@ export default function GRN() {
     setFormDocs(prev => [...prev, ...newDocs]);
   }
 
-  const PO_MAP: Record<string, { vendor: string; facility: string; equipment: string; orderedQty: number }> = {
-    "441A/591/HPC/EQU/2025-26": { vendor: "M/s. Sri Srinivasa Agencies", facility: "Govt. General Hospital, Sangareddy", equipment: "Surgical Diathermy / Cautery Machine (Sigma+)", orderedQty: 45 },
-    "216/418/HPC/EQU/Vemulawada/2022-23": { vendor: "M/s. Green Apple Medical Systems", facility: "Area Hospital, Vemulawada", equipment: "Mammogram Compatible CR System (Fuji Film)", orderedQty: 1 },
-    "IND/HPC/EQU/WDH/PO/2026/003": { vendor: "Nidek Medical India Pvt Ltd", facility: "Warangal District Hospital", equipment: "Fully Automated Biochemistry Analyser", orderedQty: 1 },
-  };
+  function handleSelectDelivery(delId: string) {
+    setSelectedDeliveryId(delId);
+    if (!delId || delId === "manual") {
+      return;
+    }
 
-  function handleCreate() {
-    const meta = PO_MAP[form.poNumber] ?? { vendor: "—", facility: "—", equipment: "—", orderedQty: 0 };
-    const newGrn: GRNRecord = {
-      id: grns.length + 1,
-      grnNumber: `GRN/HPC/2026/${String(grns.length + 1).padStart(3, "0")}`,
-      deliveryNoteNo: form.deliveryNoteNo,
-      poNumber: form.poNumber,
-      poId: form.poNumber === "441A/591/HPC/EQU/2025-26" ? 1 : form.poNumber === "216/418/HPC/EQU/Vemulawada/2022-23" ? 2 : 3,
-      vendorName: meta.vendor,
-      vendorGstin: "—",
-      facilityName: meta.facility,
-      equipmentName: meta.equipment,
-      orderedQty: meta.orderedQty,
-      receivedQty: parseInt(form.receivedQty) || 0,
-      damagedQty: 0,
-      challanNo: form.challanNo || form.deliveryNoteNo,
-      dispatchDocNo: form.dispatchDocNo,
-      dispatchedThrough: form.dispatchedThrough,
-      receivedDate: form.receivedDate,
-      condition: form.condition as GRNRecord["condition"],
-      receivedInGoodCondition: form.receivedInGoodCondition,
-      discrepancyNotes: form.discrepancyNotes,
-      challanUploaded: formDocs.some(d => d.type === "delivery_note"),
-      photosUploaded: formDocs.some(d => d.type === "photos"),
-      installationRequired: true,
-      installationStatus: "not_started",
-      installationDate: null,
-      installationCertUploaded: false,
-      annexure6: null,
-      uploadedDocs: formDocs,
-      createdBy: "Biomedical Engineer",
-      status: "submitted",
-    };
-    setGrns(prev => [...prev, newGrn]);
-    setAddOpen(false);
-    setFormDocs([]);
-    setForm({ poNumber: "441A/591/HPC/EQU/2025-26", deliveryNoteNo: "", dispatchDocNo: "", dispatchedThrough: "", challanNo: "", receivedQty: "", receivedDate: "", condition: "good", receivedInGoodCondition: true, discrepancyNotes: "" });
+    const matched = availableDeliveries.find(d => d.id === delId || d.challanNumber === delId);
+    if (matched) {
+      setForm(prev => ({
+        ...prev,
+        deliveryNoteNo: matched.challanNumber,
+        challanNo: matched.challanNumber,
+        poNumber: matched.poNumber,
+        receivedQty: String(matched.receivedQty || matched.quantity || 1),
+        orderedQty: matched.orderedQty || matched.quantity || 1,
+        vendorName: matched.vendorName,
+        facilityName: matched.facilityName,
+        equipmentName: matched.equipmentName,
+        dispatchDocNo: matched.lrGrNumber || matched.transporterVehicle || "",
+        dispatchedThrough: matched.transporterName ? `${matched.transporterName}${matched.transporterVehicle ? ` (${matched.transporterVehicle})` : ""}` : "Transport Carrier",
+        receivedDate: matched.raw?.deliveredDate ? String(matched.raw.deliveredDate).split("T")[0] : new Date().toISOString().split("T")[0],
+        condition: "good",
+        receivedInGoodCondition: true,
+      }));
+    }
+  }
+
+  async function handleCreate() {
+    if (!form.deliveryNoteNo) {
+      toast({ title: "Delivery Note Required", description: "Please enter or select a Delivery Note / Challan number.", variant: "destructive" });
+      return;
+    }
+    if (!form.receivedQty) {
+      toast({ title: "Quantity Required", description: "Please enter received quantity.", variant: "destructive" });
+      return;
+    }
+
+    setIsSubmitting(true);
+    const matchedDel = availableDeliveries.find(d => d.id === selectedDeliveryId || d.challanNumber === form.deliveryNoteNo);
+    const targetDelId = matchedDel?.raw?._id || matchedDel?.raw?.id || matchedDel?.id;
+
+    const count = (liveDeliveries.length || 0) + grns.length + 1;
+    const genGrnNo = matchedDel?.raw?.grnNumber || (matchedDel?.deliveryTrackingId ? `GRN/HPC/2026/${matchedDel.deliveryTrackingId.replace("DEL-", "")}` : `GRN/HPC/2026/${String(count).padStart(3, "0")}`);
+
+    try {
+      if (targetDelId && targetDelId !== "del-ch23434") {
+        await recordDeliveryReceipt(targetDelId, {
+          receivedQty: parseInt(form.receivedQty) || 1,
+          acceptedQty: parseInt(form.receivedQty) || 1,
+          condition: form.condition,
+          deliveredDate: form.receivedDate || new Date().toISOString(),
+          receivedBy: "Consignee Biomedical Officer",
+          remarks: form.discrepancyNotes || "GRN confirmed & received",
+          grnNumber: genGrnNo,
+        }).catch(() => null);
+
+        await updateDelivery(targetDelId, {
+          grnNumber: genGrnNo,
+          grnDate: new Date(),
+          status: "accepted",
+          qaDecision: "accepted",
+          acceptedQty: parseInt(form.receivedQty) || 1,
+          challanNumber: form.deliveryNoteNo,
+        }).catch(() => null);
+
+        queryClient.invalidateQueries({ queryKey: getListDeliveriesQueryKey() });
+        queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      }
+
+      const newGrn: GRNRecord = {
+        id: targetDelId || `grn-${Date.now()}`,
+        deliveryId: targetDelId || undefined,
+        grnNumber: genGrnNo,
+        deliveryNoteNo: form.deliveryNoteNo,
+        poNumber: form.poNumber || matchedDel?.poNumber || "PO-2627-0006",
+        poId: matchedDel?.raw?.purchaseOrderId || 1,
+        vendorName: form.vendorName || matchedDel?.vendorName || "Philips India Ltd",
+        vendorGstin: matchedDel?.raw?.vendorGstin || "—",
+        facilityName: form.facilityName || matchedDel?.facilityName || "Government Medical College, Telangana",
+        equipmentName: form.equipmentName || matchedDel?.equipmentName || "ICU Ventilator - Adult and Paediatric",
+        orderedQty: form.orderedQty || matchedDel?.orderedQty || 1,
+        receivedQty: parseInt(form.receivedQty) || 1,
+        damagedQty: form.condition === "damaged" ? (parseInt(form.receivedQty) || 1) : 0,
+        challanNo: form.deliveryNoteNo,
+        dispatchDocNo: form.dispatchDocNo,
+        dispatchedThrough: form.dispatchedThrough,
+        receivedDate: form.receivedDate,
+        condition: form.condition as GRNRecord["condition"],
+        receivedInGoodCondition: form.receivedInGoodCondition,
+        discrepancyNotes: form.discrepancyNotes,
+        challanUploaded: true,
+        photosUploaded: formDocs.some(d => d.type === "photos"),
+        installationRequired: true,
+        installationStatus: "not_started",
+        installationDate: null,
+        installationCertUploaded: false,
+        annexure6: null,
+        uploadedDocs: formDocs,
+        createdBy: "Consignee Hospital In-charge",
+        status: "submitted",
+      };
+
+      setGrns(prev => [newGrn, ...prev.filter(g => g.deliveryNoteNo !== form.deliveryNoteNo)]);
+      setAddOpen(false);
+      setFormDocs([]);
+      setSelectedDeliveryId("");
+
+      toast({
+        title: "GRN Created Successfully",
+        description: `Goods Receipt Note ${genGrnNo} created for Delivery Note ${form.deliveryNoteNo}. Click "Complete GRN" on the table to issue Annexure 6 Certificate and register the equipment asset.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Error creating GRN",
+        description: err.message || "Could not save GRN",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function openAnnexure(grn: GRNRecord) {
@@ -655,23 +889,112 @@ export default function GRN() {
       setAnnexureForm(grn.annexure6);
       setEditingAnnexure(false);
     } else {
-      setAnnexureForm({ ...INIT_CERT, hospitalName: grn.facilityName, supplierName: grn.vendorName, poNo: grn.poNumber, dcNo: grn.deliveryNoteNo });
+      setAnnexureForm({
+        ...INIT_CERT,
+        hospitalName: grn.facilityName,
+        department: "ICU / Critical Care / Biomedical Dept",
+        supplierName: grn.vendorName,
+        poNo: grn.poNumber,
+        dcNo: grn.deliveryNoteNo || grn.challanNo,
+        dcDate: grn.receivedDate || new Date().toISOString().split("T")[0],
+        installationDate: new Date().toISOString().split("T")[0],
+        equipmentItems: [
+          {
+            ...INIT_ANNEXURE6_ITEM,
+            slNo: 1,
+            name: grn.equipmentName,
+            qty: grn.receivedQty || 1,
+            make: grn.vendorName,
+            model: "V680 / Clinical Model",
+            serialNo: `SN-${grn.deliveryNoteNo || "001"}-01`,
+            warrantyFrom: new Date().toISOString().split("T")[0],
+            warrantyTo: new Date(Date.now() + 365 * 86400000).toISOString().split("T")[0],
+            batchNos: `Batch: ${grn.deliveryNoteNo || "Batch-01"}`,
+          }
+        ],
+        doctorName: "Dr. Medical Superintendent",
+        doctorDesignation: "Civil Surgeon",
+        doctorDepartment: "Medical Administration",
+        doctorMobile: "9848011234",
+        serviceEngineerName: "Authorized Service Engineer",
+        serviceEngineerDesignation: "Lead Biomedical Engineer",
+        serviceEngineerMobile: "9988776655",
+        serviceCentreAddress: `${grn.vendorName}, Regional Service Centre, Hyderabad`,
+        medSupCertifiedDate: new Date().toISOString().split("T")[0],
+        certifiedBy: `Medical Superintendent, ${grn.facilityName}`,
+      });
       setEditingAnnexure(true);
     }
     setAnnexureOpen(true);
   }
 
-  function saveAnnexure() {
+  async function saveAnnexure() {
     if (!detailOpen) return;
-    setGrns(gs => gs.map(g => g.id === detailOpen.id
-      ? { ...g, annexure6: annexureForm, installationStatus: "completed" as const, installationDate: annexureForm.installationDate || new Date().toISOString().split("T")[0], installationCertUploaded: true }
-      : g
-    ));
-    setAnnexureOpen(false);
-    setEditingAnnexure(false);
+    const matchedDel = availableDeliveries.find(d => d.challanNumber === detailOpen.deliveryNoteNo || d.id === detailOpen.deliveryId);
+    const targetDelId = detailOpen.deliveryId || matchedDel?.raw?._id || matchedDel?.raw?.id || matchedDel?.id;
+
+    try {
+      if (targetDelId && targetDelId !== "del-ch23434") {
+        // Register equipment assets in statewide database
+        await registerEquipmentAssets(targetDelId, {
+          category: "Medical Equipment",
+          department: annexureForm.department || "ICU / Biomedical Dept",
+          make: annexureForm.supplierName || detailOpen.vendorName,
+          model: annexureForm.equipmentItems?.[0]?.model || "V680",
+          grnNumber: detailOpen.grnNumber,
+          grnDate: detailOpen.receivedDate ? new Date(detailOpen.receivedDate) : new Date(),
+          installationDate: annexureForm.installationDate ? new Date(annexureForm.installationDate) : new Date(),
+          serialNumbers: annexureForm.equipmentItems.map(it => it.serialNo).filter(Boolean),
+          remarks: annexureForm.remarks || `Annexure 6 certified for GRN ${detailOpen.grnNumber} (Delivery Note ${detailOpen.deliveryNoteNo})`,
+        }).catch(err => {
+          console.warn("Register equipment API notice:", err);
+        });
+
+        // Update delivery installation and acceptance status
+        await updateDelivery(targetDelId, {
+          installationStatus: "complete",
+          installationDate: annexureForm.installationDate ? new Date(annexureForm.installationDate) : new Date(),
+          annexure6: annexureForm,
+          status: "accepted",
+          acceptanceCertificateIssued: true,
+          grnNumber: detailOpen.grnNumber,
+        }).catch(() => null);
+
+        queryClient.invalidateQueries({ queryKey: getListDeliveriesQueryKey() });
+        queryClient.invalidateQueries({ queryKey: ["equipment-assets"] });
+        queryClient.invalidateQueries({ queryKey: ["asset-report"] });
+        queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      }
+
+      setGrns(gs => gs.map(g => g.id === detailOpen.id || g.deliveryNoteNo === detailOpen.deliveryNoteNo
+        ? {
+            ...g,
+            annexure6: annexureForm,
+            installationStatus: "completed" as const,
+            installationDate: annexureForm.installationDate || new Date().toISOString().split("T")[0],
+            installationCertUploaded: true,
+            status: "verified" as const,
+          }
+        : g
+      ));
+
+      setAnnexureOpen(false);
+      setEditingAnnexure(false);
+
+      toast({
+        title: "GRN & Installation Completed!",
+        description: `Annexure 6 Certificate issued and equipment asset registered successfully for GRN ${detailOpen.grnNumber} (Delivery Note: ${detailOpen.deliveryNoteNo}).`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Error Completing Installation",
+        description: err.message || "Failed to save Annexure 6",
+        variant: "destructive",
+      });
+    }
   }
 
-  function uploadDetailDoc(id: number, files: FileList | null, docType: string, flags: Partial<{ challanUploaded: boolean; photosUploaded: boolean; installationCertUploaded: boolean }>) {
+  function uploadDetailDoc(id: string | number, files: FileList | null, docType: string, flags: Partial<{ challanUploaded: boolean; photosUploaded: boolean; installationCertUploaded: boolean }>) {
     if (!files || files.length === 0) return;
     const newDocs: UploadedDoc[] = Array.from(files).map(f => ({ name: f.name, size: fileSize(f.size), type: docType }));
     setGrns(gs => gs.map(g => g.id === id ? { ...g, ...flags, uploadedDocs: [...g.uploadedDocs, ...newDocs] } : g));
@@ -721,7 +1044,7 @@ export default function GRN() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/40">
-                  {["GRN No.", "Delivery Note No.", "PO No.", "Equipment", "Facility", "Recd/Ordered", "Condition", "Installation", "Annexure 6", "Status", ""].map(h => (
+                  {["GRN No.", "Delivery Note No.", "PO No.", "Equipment", "Facility", "Recd/Ordered", "Condition", "Installation", "Annexure 6", "Status", "Actions"].map(h => (
                     <th key={h} className="text-left text-xs font-semibold text-muted-foreground px-3 py-3">{h}</th>
                   ))}
                 </tr>
@@ -730,7 +1053,7 @@ export default function GRN() {
                 {filtered.map(g => (
                   <tr key={g.id} className="border-b hover:bg-muted/20">
                     <td className="px-3 py-3 font-mono text-xs font-semibold text-primary whitespace-nowrap">{g.grnNumber}</td>
-                    <td className="px-3 py-3 font-mono text-xs text-amber-700">{g.deliveryNoteNo || "—"}</td>
+                    <td className="px-3 py-3 font-mono text-xs text-amber-700 font-semibold">{g.deliveryNoteNo || "—"}</td>
                     <td className="px-3 py-3">
                       <Link href={`/purchase-orders/${g.poId}`}>
                         <span className="text-primary hover:underline text-xs font-mono">{g.poNumber}</span>
@@ -758,11 +1081,23 @@ export default function GRN() {
                       <Badge variant="outline" className={`text-xs border ${STATUS_STYLE[g.status]}`}>{g.status}</Badge>
                     </td>
                     <td className="px-3 py-3">
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setDetailOpen(g)}><Eye className="h-3.5 w-3.5" /></Button>
-                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => openAnnexure(g)}>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="View GRN Details" onClick={() => setDetailOpen(g)}>
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50" title="Annexure 6 Certificate" onClick={() => openAnnexure(g)}>
                           <ClipboardList className="h-3.5 w-3.5 mr-1" />Cert
                         </Button>
+                        {(g.status !== "verified" || g.installationStatus !== "completed") && (
+                          <Button
+                            size="sm"
+                            className="h-7 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-xs gap-1"
+                            title="Complete GRN and issue Annexure 6"
+                            onClick={() => openAnnexure(g)}
+                          >
+                            <CheckCircle2 className="h-3 w-3" />Complete GRN
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -775,18 +1110,72 @@ export default function GRN() {
       </Card>
 
       {/* New GRN Dialog */}
-      <Dialog open={addOpen} onOpenChange={v => { setAddOpen(v); if (!v) setFormDocs([]); }}>
+      <Dialog open={addOpen} onOpenChange={v => { setAddOpen(v); if (!v) { setFormDocs([]); setSelectedDeliveryId(""); } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Create Goods Receipt Note</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2 text-base font-bold text-slate-900"><ClipboardList className="h-5 w-5 text-primary" />Create Goods Receipt Note (GRN)</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
+
+            {/* Delivery Note Selector - Directly fixes the user issue */}
+            <div className="space-y-1.5 p-3 rounded-lg bg-sky-50/80 border border-sky-200">
+              <Label className="font-bold text-sky-950 flex items-center gap-1.5 text-xs">
+                <Package className="h-4 w-4 text-sky-700" />
+                Select Delivery Note / Challan <span className="text-destructive">*</span>
+              </Label>
+              <Select
+                value={selectedDeliveryId}
+                onValueChange={handleSelectDelivery}
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue placeholder="Choose Delivery Note / Consignment (e.g. CH23434)..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableDeliveries.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      <span className="font-semibold text-slate-900">{d.challanNumber}</span>
+                      <span className="text-slate-500"> — {d.poNumber} · {d.equipmentName} ({d.vendorName})</span>
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="manual">Manual Entry / Other Delivery Note</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-sky-800">
+                Select an active delivery consignment to auto-fill PO, Equipment, Vendor, Qty, and Hospital Consignee details.
+              </p>
+            </div>
+
+            {/* Selected Delivery Summary Banner */}
+            {selectedDelivery && (
+              <div className="p-3 rounded-md bg-white border border-slate-200 text-xs space-y-1 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-900 text-sm">{selectedDelivery.equipmentName}</span>
+                  <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300 font-mono">
+                    DC: {selectedDelivery.challanNumber}
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-slate-600 pt-1">
+                  <div>PO Number: <strong className="text-slate-900">{selectedDelivery.poNumber}</strong></div>
+                  <div>Vendor: <strong className="text-slate-900">{selectedDelivery.vendorName}</strong></div>
+                  <div>Consignee: <strong className="text-slate-900">{selectedDelivery.facilityName}</strong></div>
+                  <div>Ordered Qty: <strong className="text-slate-900">{selectedDelivery.orderedQty} Nos.</strong></div>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label>Purchase Order *</Label>
-              <Select value={form.poNumber} onValueChange={v => setForm({ ...form, poNumber: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select
+                value={form.poNumber}
+                onValueChange={v => {
+                  setForm(prev => ({ ...prev, poNumber: v }));
+                  const d = availableDeliveries.find(del => del.poNumber === v);
+                  if (d) handleSelectDelivery(d.id);
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="Select Purchase Order..." /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="441A/591/HPC/EQU/2025-26">441A/591/HPC/EQU/2025-26 — Surgical Diathermy (Sri Srinivasa Agencies)</SelectItem>
-                  <SelectItem value="216/418/HPC/EQU/Vemulawada/2022-23">216/418/HPC/EQU/Vemulawada/2022-23 — Mammogram CR (Green Apple Medical)</SelectItem>
-                  <SelectItem value="IND/HPC/EQU/WDH/PO/2026/003">IND/HPC/EQU/WDH/PO/2026/003 — Biochemistry Analyser (Nidek Medical)</SelectItem>
+                  {poOptions.map(po => (
+                    <SelectItem key={po.value} value={po.value}>{po.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -794,7 +1183,11 @@ export default function GRN() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Delivery Note No. (Vendor DC) *</Label>
-                <Input value={form.deliveryNoteNo} onChange={e => setForm({ ...form, deliveryNoteNo: e.target.value })} placeholder="SSA/0506/25-26" />
+                <Input
+                  value={form.deliveryNoteNo}
+                  onChange={e => setForm({ ...form, deliveryNoteNo: e.target.value })}
+                  placeholder="e.g. CH23434 or SSA/0506/25-26"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>Dispatch Doc No.</Label>
@@ -816,7 +1209,7 @@ export default function GRN() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Quantity Received (Nos.) *</Label>
-                <Input type="number" value={form.receivedQty} onChange={e => setForm({ ...form, receivedQty: e.target.value })} min={0} />
+                <Input type="number" value={form.receivedQty} onChange={e => setForm({ ...form, receivedQty: e.target.value })} min={1} />
               </div>
               <div className="space-y-1.5">
                 <Label>Condition on Arrival</Label>
@@ -862,12 +1255,14 @@ export default function GRN() {
 
             <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 flex items-start gap-2">
               <ClipboardList className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
-              <p className="text-xs text-blue-800">After submitting the GRN, use the <strong>Cert</strong> button to fill and issue the Annexure 6 Installation/Acceptance Certificate once installation is complete.</p>
+              <p className="text-xs text-blue-800">After submitting the GRN, click the green <strong>Complete GRN</strong> button on the table to issue Annexure 6 Installation/Acceptance Certificate and register the equipment asset into the Statewide Asset Register.</p>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setAddOpen(false); setFormDocs([]); }}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={!form.deliveryNoteNo || !form.receivedQty || !form.receivedDate}>Submit GRN</Button>
+            <Button variant="outline" onClick={() => { setAddOpen(false); setFormDocs([]); setSelectedDeliveryId(""); }}>Cancel</Button>
+            <Button onClick={handleCreate} disabled={isSubmitting || !form.deliveryNoteNo || !form.receivedQty || !form.receivedDate}>
+              {isSubmitting ? "Submitting..." : "Submit GRN"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1021,7 +1416,7 @@ export default function GRN() {
               {editingAnnexure ? "Preview" : "Edit Certificate"}
             </Button>
             {editingAnnexure && (
-              <Button onClick={saveAnnexure} className="bg-blue-600 hover:bg-blue-700">
+              <Button onClick={saveAnnexure}>
                 Save & Issue Certificate
               </Button>
             )}

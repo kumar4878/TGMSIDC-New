@@ -6,6 +6,7 @@ export type UserRole =
   | "gm_equipment"
   | "so_equipment"
   | "executive_director"
+  | "managing_director"
   | "admin"
   | "vendor"
   | "consignee";
@@ -46,6 +47,7 @@ const UserSchema = new Schema<IUser>(
         "gm_equipment",
         "so_equipment",
         "executive_director",
+        "managing_director",
         "admin",
         "vendor",
         "consignee",

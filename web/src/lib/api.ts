@@ -73,10 +73,14 @@ export function del<T>(path: string): Promise<T> {
 // Health
 export const healthCheck = () => get<{ status: string }>("/health");
 
-// Auth
+// Auth & Users
 export const loginUser = (body: { username: string; password: string }) => post<any>("/auth/login", body);
 export const getMe = () => get<any>("/auth/me");
-export const getUsers = () => get<any[]>("/auth/users");
+export const getUsers = (params?: Record<string, any>) => get<any[]>("/auth/users", params);
+export const getRoles = () => get<any[]>("/auth/roles");
+export const createUser = (body: any) => post<any>("/auth/users", body);
+export const updateUser = (id: string, body: any) => patch<any>(`/auth/users/${id}`, body);
+export const deleteUser = (id: string) => del<any>(`/auth/users/${id}`);
 
 // Institutions
 export const getInstitutions = () => get<any[]>("/institutions");
@@ -115,6 +119,20 @@ export const updateIndent = (id: string, body: any) => patch<any>(`/indents/${id
 export const approveIndent = (id: string, body: any) => post<any>(`/indents/${id}/approve`, body);
 export const rejectIndent = (id: string, body: any) => post<any>(`/indents/${id}/reject`, body);
 export const returnIndent = (id: string, body: any) => post<any>(`/indents/${id}/return`, body);
+export const verifyIndent = (id: string, body?: { remarks?: string; verifiedBy?: string }) =>
+  post<any>(`/indents/${id}/verify`, body || {});
+export const returnIndentToDEO = (id: string, body: { remarks: string; returnedBy?: string }) =>
+  post<any>(`/indents/${id}/return-to-deo`, body);
+export const resubmitIndent = (id: string, body?: any) =>
+  post<any>(`/indents/${id}/resubmit`, body || {});
+export const selectLineRC = (id: string, lineIndex: number, body: { rateContractId: string; selectedBy?: string }) =>
+  post<any>(`/indents/${id}/lines/${lineIndex}/select-rc`, body);
+export const raiseLinePO = (id: string, lineIndex: number, body?: { rateContractId?: string; poRemarks?: string; createdBy?: string }) =>
+  post<any>(`/indents/${id}/lines/${lineIndex}/raise-po`, body || {});
+export const initiateLineTender = (id: string, lineIndex: number, body?: { tenderCategory?: string; createdBy?: string }) =>
+  post<any>(`/indents/${id}/lines/${lineIndex}/initiate-tender`, body || {});
+export const reprioritizeIndent = (id: string, body: any) => post<any>(`/indents/${id}/reprioritize`, body);
+export const revalidateIndent = (id: string, body?: any) => post<any>(`/indents/${id}/revalidate`, body || {});
 export const initiateIndentTender = (id: string, body?: any) => post<any>(`/indents/${id}/initiate-tender`, body || {});
 
 // Tenders
@@ -132,35 +150,65 @@ export const getPurchaseOrder = (id: string) => get<any>(`/purchase-orders/${id}
 export const createPurchaseOrder = (body: any) => post<any>("/purchase-orders", body);
 export const updatePurchaseOrder = (id: string, body: any) => patch<any>(`/purchase-orders/${id}`, body);
 export const approvePurchaseOrder = (id: string, body?: any) => post<any>(`/purchase-orders/${id}/approve`, body);
-export const cancelPurchaseOrder = (id: string, body: any) => post<any>(`/purchase-orders/${id}/cancel`, body); // keep old signature just in case
-export const updatePOPaymentStatus = (id: string, body: any) => post<any>(`/purchase-orders/${id}/payment-status`, body);
+export const cancelPurchaseOrder = (id: string, body: any) => post<any>(`/purchase-orders/${id}/cancel`, body);
+export const updatePOPaymentStatus = (id: string, body: { paymentStatus?: "paid" | "not_paid" | "partial" | string; paymentReference?: string; paymentDate?: string; paymentAmount?: number; paidBy?: string; remarks?: string; paymentRemarks?: string; tranche?: string; paymentMode?: string; bankDetails?: string; invoiceRef?: string }) =>
+  post<any>(`/purchase-orders/${id}/payment-status`, body);
 export const amendPurchaseOrder = (id: string, body: any) => post<any>(`/purchase-orders/${id}/amend`, body);
 export const acknowledgePurchaseOrder = (id: string, body: any) => post<any>(`/purchase-orders/${id}/acknowledge`, body);
 
-export const submitPOForApproval = (id: string, data: any) => patch<any>(`/purchase-orders/${id}/submit-for-approval`, data);
-export const gmReviewPO = (id: string, data: any) => patch<any>(`/purchase-orders/${id}/gm-review`, data);
-export const soDecisionPO = (id: string, data: any) => patch<any>(`/purchase-orders/${id}/so-decision`, data);
+export const submitPOForApproval = (id: string, data?: any) => patch<any>(`/purchase-orders/${id}/submit-for-approval`, data || {});
+export const gmReviewPO = (id: string, data: { action: "approve" | "return" | "reject"; reviewNotes?: string; returnRemarks?: string; rejectionReason?: string; officerName?: string; comments?: string; reviewedBy?: string }) =>
+  patch<any>(`/purchase-orders/${id}/gm-review`, data);
+export const soDecisionPO = (id: string, data: { action: "approve" | "return" | "reject"; decisionNotes?: string; returnRemarks?: string; rejectionReason?: string; officerName?: string; comments?: string; approvedBy?: string }) =>
+  patch<any>(`/purchase-orders/${id}/so-decision`, data);
+export const mdDecisionPO = (id: string, data: { action: "approve" | "return" | "reject"; sanctionNotes?: string; returnRemarks?: string; rejectionReason?: string; officerName?: string; comments?: string; approvedBy?: string }) =>
+  patch<any>(`/purchase-orders/${id}/md-decision`, data);
+export const issuePO = (id: string, data?: { issuedBy?: string; remarks?: string }) =>
+  patch<any>(`/purchase-orders/${id}/issue`, data || {});
+export const checkPOClosureEligibility = (id: string) =>
+  get<any>(`/purchase-orders/${id}/closure-eligibility`);
+export const closePO = (id: string, data: { officerName?: string; remarks?: string; force?: boolean }) =>
+  post<any>(`/purchase-orders/${id}/close`, data);
 export const cancelPO = (id: string, data: any) => patch<any>(`/purchase-orders/${id}/cancel`, data);
-
 
 // Indents additional workflows
 export const resolveWriteInEquipment = (id: string, body: any) => post<any>(`/indents/${id}/resolve-write-in`, body);
 export const recordIndentEditAudit = (id: string, body: any) => post<any>(`/indents/${id}/edit-audit`, body);
 
-export const releasePOPayment = (id: string, body: { tranche: "tranche1_90" | "tranche2_10"; paymentReference?: string; paymentDate?: string; paidBy?: string; remarks?: string }) =>
+export const releasePOPayment = (id: string, body: { tranche?: "tranche1_90" | "tranche2_10" | "full" | string; paymentReference?: string; paymentDate?: string; paymentAmount?: number; paidBy?: string; remarks?: string; paymentMode?: string; bankDetails?: string; invoiceRef?: string; paymentStatus?: string }) =>
   post<any>(`/purchase-orders/${id}/release-payment`, body);
 
-// Deliveries
+// Deliveries & Equipment Assets
 export const getDeliveries = (params?: { status?: string; poId?: string }) =>
   get<any[]>("/deliveries", params);
 export const getDelivery = (id: string) => get<any>(`/deliveries/${id}`);
 export const createDelivery = (body: any) => post<any>("/deliveries", body);
 export const updateDelivery = (id: string, body: any) => patch<any>(`/deliveries/${id}`, body);
-export const acceptDelivery = (id: string) => post<any>(`/deliveries/${id}/accept`);
+export const acceptDelivery = (id: string, body?: any) => post<any>(`/deliveries/${id}/accept`, body);
+export const recordDeliveryReceipt = (id: string, body: any) => post<any>(`/deliveries/${id}/record-receipt`, body);
 export const uploadDCC = (id: string, body: any) => post<any>(`/deliveries/${id}/upload-dcc`, body);
+export const verifyDCC = (id: string, body?: { officerName?: string; remarks?: string }) =>
+  post<any>(`/deliveries/${id}/verify-dcc`, body || {});
 export const uploadDeliveryDocs = (id: string, body: any) => post<any>(`/deliveries/${id}/upload-docs`, body);
 export const logDeliveryDiscrepancy = (id: string, body: any) => post<any>(`/deliveries/${id}/log-discrepancy`, body);
+export const resolveDeliveryDiscrepancy = (id: string, body: any) => post<any>(`/deliveries/${id}/resolve-discrepancy`, body);
 export const recordQAInspection = (id: string, body: any) => post<any>(`/deliveries/${id}/qa-inspection`, body);
+export const recordQAReinspection = (id: string, body: any) => post<any>(`/deliveries/${id}/qa-reinspection`, body);
+export const registerEquipmentAssets = (id: string, body?: any) => post<any>(`/deliveries/${id}/register-equipment`, body || {});
+export const getEquipmentAssets = (params?: { facilityId?: string; purchaseOrderId?: string; deliveryId?: string; status?: string }) =>
+  get<any[]>("/equipment-assets", params);
+export const getEquipmentAsset = (id: string) => get<any>(`/equipment-assets/${id}`);
+export const updateEquipmentAssetStatus = (id: string, body: { status: string; remarks?: string; user?: string; role?: string }) =>
+  patch<any>(`/equipment-assets/${id}/status`, body);
+
+// Statewide Item-wise Asset Report (FR-RPT-ASSET-001)
+export const getAssetReport = (params?: Record<string, any>) => get<any>("/reports/asset-report", params);
+export const getAssetReportKPIs = (params?: Record<string, any>) => get<any>("/reports/asset-report/summary-kpis", params);
+export const getAssetReportDrilldown = (params?: Record<string, any>) => get<any>("/reports/asset-report/drilldown", params);
+export const exportAssetReportCsvUrl = (params?: Record<string, any>) => {
+  const qs = params ? "?" + new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== "").map(([k, v]) => [k, String(v)]))).toString() : "";
+  return `${BASE_URL}/reports/asset-report/export${qs}`;
+};
 
 // Dashboard
 export const getDashboardSummary = () => get<any>("/dashboard/summary");

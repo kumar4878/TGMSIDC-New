@@ -957,9 +957,6 @@ export function useAuditLog(params?: any) {
   });
 }
 
-export function useUsers() {
-  return useQuery<any[]>({ queryKey: ["/users"], queryFn: api.getUsers });
-}
 
 // ── Reports Hooks ───────────────────────────────────────────────────────────
 
@@ -986,3 +983,88 @@ export function useBudgetUtilizationReport() {
 export function useVendorPerformanceReport() {
   return useQuery<any[]>({ queryKey: ["/reports/vendor-performance"], queryFn: api.getVendorPerformanceReport });
 }
+
+// ── Users & Roles Hooks ─────────────────────────────────────────────────────
+
+export function useUsers(params?: Record<string, any>) {
+  return useQuery<any[]>({
+    queryKey: ["/auth/users", params],
+    queryFn: () => api.getUsers(params),
+  });
+}
+
+export function useRoles() {
+  return useQuery<any[]>({
+    queryKey: ["/auth/roles"],
+    queryFn: api.getRoles,
+  });
+}
+
+export function useCreateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: any) => api.createUser(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/auth/users"] });
+      qc.invalidateQueries({ queryKey: ["/auth/roles"] });
+    },
+  });
+}
+
+export function useUpdateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; [key: string]: any }) => api.updateUser(id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/auth/users"] });
+      qc.invalidateQueries({ queryKey: ["/auth/roles"] });
+    },
+  });
+}
+
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteUser(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/auth/users"] });
+      qc.invalidateQueries({ queryKey: ["/auth/roles"] });
+    },
+  });
+}
+
+// ── Statewide Item-wise Asset Report Hooks (FR-RPT-ASSET-001) ───────────────
+
+export function useAssetReport(params?: Record<string, any>) {
+  return useQuery<{ assets: any[]; total: number; page: number; limit: number; totalPages: number; kpis: any }>({
+    queryKey: ["/reports/asset-report", params],
+    queryFn: () => api.getAssetReport(params),
+  });
+}
+
+export function useAssetReportKPIs(params?: Record<string, any>) {
+  return useQuery<any>({
+    queryKey: ["/reports/asset-report/summary-kpis", params],
+    queryFn: () => api.getAssetReportKPIs(params),
+  });
+}
+
+export function useAssetReportDrilldown(params?: Record<string, any>) {
+  return useQuery<{ state: string; totalAssets: number; districts: any[] }>({
+    queryKey: ["/reports/asset-report/drilldown", params],
+    queryFn: () => api.getAssetReportDrilldown(params),
+  });
+}
+
+export function useUpdateAssetStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; status: string; remarks?: string; user?: string; role?: string }) =>
+      api.updateEquipmentAssetStatus(id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/reports/asset-report"] });
+      qc.invalidateQueries({ queryKey: ["/equipment-assets"] });
+    },
+  });
+}
+
