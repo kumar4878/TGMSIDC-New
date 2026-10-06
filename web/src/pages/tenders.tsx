@@ -4,7 +4,7 @@ import { useListTenders, getListTendersQueryKey } from "@/lib/api-hooks";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   Search, Eye, Gavel, Layers, Calendar, CheckCircle2,
-  Clock, ArrowRight, Building2, Filter, AlertCircle,
+  Clock, ArrowRight, Building2, Filter, AlertCircle, ExternalLink,
 } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ const MILESTONE_KEYS = [
 const STATUS_IDX: Record<string, number> = {
   planning: 0, doc_prep: 1, doc_preparation: 1, approval: 2,
   invited: 3, pre_bid: 4, bids_received: 5, bid_query: 6,
-  technical_eval: 7, technical_evaluation: 7,
+  technical_eval: 7, technical_evaluation: 7, evaluation: 7,
   commercial_eval: 8, l1_identified: 9, awarded: 9,
   contract_final: 10, rc_created: 11,
 };
@@ -44,7 +44,7 @@ export default function Tenders() {
   const stats = useMemo(() => {
     return {
       total: tenders.length,
-      evaluating: tenders.filter((t) => ["bids_received", "technical_eval", "commercial_eval"].includes(t.status)).length,
+      evaluating: tenders.filter((t) => ["bids_received", "technical_eval", "commercial_eval", "evaluation"].includes(t.status)).length,
       l1Awarded: tenders.filter((t) => ["l1_identified", "contract_final", "rc_created", "awarded"].includes(t.status)).length,
       invited: tenders.filter((t) => ["invited", "pre_bid"].includes(t.status)).length,
     };
@@ -57,16 +57,27 @@ export default function Tenders() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#152340]">
-              Tenders & Competitive Bidding
+              Tenders &amp; Competitive Bidding
             </h1>
-            <span className="neo-chip vio">GeM / e-Procurement</span>
+            <span className="neo-chip vio">Competitive Tendering &amp; Documentation</span>
           </div>
           <p className="text-xs text-[#6b7a93] mt-0.5">
-            Transparent milestone tracking across the 12 statutory stages of healthcare equipment tenders
+            Initiate tender documentation and manually track progress across statutory procurement milestones
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <a
+            href="https://tender.telangana.gov.in"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:text-blue-700 hover:border-blue-300 transition-colors cursor-pointer shadow-xs"
+            title="Opens Telangana State eProcurement Portal in a new tab (External Reference Only — No Application Integration)"
+          >
+            <ExternalLink className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            <span>Telangana eProcurement Portal</span>
+            <span className="text-[10px] text-slate-500 font-normal hidden sm:inline">(External Ref)</span>
+          </a>
           <Link href="/tenders/workbench">
             <Button size="sm" className="gap-1.5 cursor-pointer">
               <Layers className="w-3.5 h-3.5" />

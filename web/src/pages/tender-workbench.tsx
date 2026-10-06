@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,322 +8,840 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { ExternalLink, RefreshCw, CheckCircle2, Clock, AlertTriangle, Info, Activity, Search, Eye, Gavel } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useListTenders, useUpdateTender, getListTendersQueryKey } from "@/lib/api-hooks";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  Gavel,
+  FileText,
+  CheckCircle2,
+  Clock,
+  Search,
+  Eye,
+  Edit3,
+  Info,
+  Calendar,
+  Layers,
+  IndianRupee,
+  ShieldCheck,
+  Check,
+  ExternalLink,
+} from "lucide-react";
 import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 
-interface EProcTender {
-  id: number;
+export interface WorkbenchTender {
+  id: string;
   tgmsidcRef: string;
-  eprocTenderId: string | null;
-  tenderNoticeNo: string | null;
+  tenderNoticeNo: string;
   equipmentName: string;
-  internalStatus: string;
-  eprocStatus: string | null;
+  category: string;
+  currentStage: string;
+  stageKey: string;
   tenderInvitedDate: string;
-  bidOpenDate: string | null;
-  bidCloseDate: string | null;
-  techBidOpenDate: string | null;
-  priceBidOpenDate: string | null;
+  bidCloseDate: string;
+  participationCount: number | null;
+  estimatedValue: number;
   awardedVendor: string | null;
   awardedAmount: number | null;
-  portalUrl: string | null;
-  lastSynced: string | null;
-  syncStatus: "synced" | "pending" | "error" | "not_linked";
-  participationCount: number | null;
-  corrigendumCount: number;
+  documentationCount: number;
   notes: string;
+  lastUpdated: string;
 }
 
-const INIT_TENDERS: EProcTender[] = [
+const STATUTORY_STAGES = [
+  { key: "doc_prep", label: "Document Preparation (NIT / TID)" },
+  { key: "approval", label: "Approval for Tender" },
+  { key: "invited", label: "Notice Inviting Tender (NIT)" },
+  { key: "pre_bid", label: "Bid Submission Open" },
+  { key: "bids_received", label: "Bid Receipt & Opening" },
+  { key: "technical_eval", label: "Technical Evaluation In Progress" },
+  { key: "commercial_eval", label: "Commercial Evaluation / Financial Bid Opened" },
+  { key: "l1_identified", label: "L1 Identified / Award Approved" },
+  { key: "contract_final", label: "Contract Finalisation / LOI Issued" },
+  { key: "rc_created", label: "Rate Contract (RC) Created" },
+];
+
+const SEED_WORKBENCH_TENDERS: WorkbenchTender[] = [
   {
-    id: 1,
-    tgmsidcRef: "TND-2025-0001",
-    eprocTenderId: "TG/HPC/2025-26/ET/0142",
-    tenderNoticeNo: "NIT/HPC/2025/0142",
-    equipmentName: "Ultrasound Machine (B-Mode) — 3 Units",
-    internalStatus: "Bids Received",
-    eprocStatus: "Bid Submission Closed",
-    tenderInvitedDate: "2025-10-01",
-    bidOpenDate: "2025-10-05",
-    bidCloseDate: "2025-11-10",
-    techBidOpenDate: "2025-11-12",
-    priceBidOpenDate: null,
+    id: "6ac27dbd53b11c09b63a2d34",
+    tgmsidcRef: "TND-2026-0001",
+    tenderNoticeNo: "NIT/TGMSIDC/2026/0142",
+    equipmentName: "Ultrasound Machine (B-Mode Color Doppler) — 15 Units",
+    category: "Diagnostic Imaging",
+    currentStage: "Technical Evaluation In Progress",
+    stageKey: "technical_eval",
+    tenderInvitedDate: "2026-01-03",
+    bidCloseDate: "2026-01-20",
+    participationCount: 4,
+    estimatedValue: 18000000,
     awardedVendor: null,
     awardedAmount: null,
-    portalUrl: "https://tender.telangana.gov.in/nicgep/app",
-    lastSynced: "2026-04-08T04:30:00Z",
-    syncStatus: "synced",
-    participationCount: 4,
-    corrigendumCount: 1,
-    notes: "Technical evaluation in progress. Financial bid NOT yet opened — confidentiality maintained.",
+    documentationCount: 4,
+    notes: "Technical bid opening concluded. Equipment demonstration and clinical verification scheduled at Osmania General Hospital.",
+    lastUpdated: "2026-01-22T14:30:00Z",
+  },
+  {
+    id: "6ac27dbd53b11c09b63a2d3f",
+    tgmsidcRef: "TND-2026-0002",
+    tenderNoticeNo: "NIT/TGMSIDC/2026/0158",
+    equipmentName: "Laparoscopy HD Camera Tower & System — 8 Units",
+    category: "Surgical Equipment",
+    currentStage: "Commercial Evaluation / Financial Bid Opened",
+    stageKey: "commercial_eval",
+    tenderInvitedDate: "2026-01-15",
+    bidCloseDate: "2026-02-01",
+    participationCount: 3,
+    estimatedValue: 16000000,
+    awardedVendor: "Stryker India Pvt Ltd",
+    awardedAmount: 14500000,
+    documentationCount: 5,
+    notes: "Technical qualification approved by procurement committee. Financial bid comparative statement prepared.",
+    lastUpdated: "2026-02-05T12:00:00Z",
+  },
+  {
+    id: "6ac27dbd53b11c09b63a2d4a",
+    tgmsidcRef: "TND-2026-0003",
+    tenderNoticeNo: "NIT/TGMSIDC/2026/0175",
+    equipmentName: "Fully Automated Biochemistry Analyser — 20 Units",
+    category: "Laboratory Diagnostics",
+    currentStage: "L1 Identified / Award Approved",
+    stageKey: "l1_identified",
+    tenderInvitedDate: "2026-01-28",
+    bidCloseDate: "2026-02-12",
+    participationCount: 5,
+    estimatedValue: 11000000,
+    awardedVendor: "Transasia Bio-Medicals Ltd",
+    awardedAmount: 9800000,
+    documentationCount: 6,
+    notes: "L1 rates approved by ED (Procurement). Letter of Intent (LOI) under processing.",
+    lastUpdated: "2026-02-18T16:00:00Z",
+  },
+  {
+    id: "TND-2026-0004",
+    tgmsidcRef: "TND-2026-0004",
+    tenderNoticeNo: "1A.67/HPC/EQU/2025-26",
+    equipmentName: "DEXA Bone Densitometer Scanner — 4 Units",
+    category: "Diagnostic Imaging",
+    currentStage: "Bid Submission Open",
+    stageKey: "pre_bid",
+    tenderInvitedDate: "2026-02-10",
+    bidCloseDate: "2026-02-25",
+    participationCount: 2,
+    estimatedValue: 12500000,
+    awardedVendor: null,
+    awardedAmount: null,
+    documentationCount: 3,
+    notes: "Pre-bid queries clarified via Corrigendum-1. Bid submissions in progress.",
+    lastUpdated: "2026-02-15T11:00:00Z",
+  },
+  {
+    id: "TND-2026-0005",
+    tgmsidcRef: "TND-2026-0005",
+    tenderNoticeNo: "NIT/TGMSIDC/2026/0210",
+    equipmentName: "Advanced ICU Ventilator (Adult/Paediatric) — 35 Units",
+    category: "Critical Care",
+    currentStage: "Document Preparation (NIT / TID)",
+    stageKey: "doc_prep",
+    tenderInvitedDate: "2026-02-22",
+    bidCloseDate: "2026-03-15",
+    participationCount: null,
+    estimatedValue: 32000000,
+    awardedVendor: null,
+    awardedAmount: null,
+    documentationCount: 2,
+    notes: "Technical specifications finalised by Technical Committee. Schedule of requirements drafted.",
+    lastUpdated: "2026-02-24T09:30:00Z",
   },
 ];
 
-const EPOC_STATUS_FLOW = [
-  "Draft (Internal)",
-  "Approved for Publishing",
-  "Published on eProc",
-  "Bid Submission Open",
-  "Bid Submission Closed",
-  "Technical Bid Opened",
-  "Technical Evaluation In Progress",
-  "Technical Evaluation Completed",
-  "Financial Bid Opened",
-  "L1 Identified / Award Under Approval",
-  "Award Published",
-];
-
-const SYNC_STYLE: Record<string, string> = {
-  synced: "bg-emerald-100 text-emerald-700 border-emerald-200",
-  pending: "bg-amber-100 text-amber-700 border-amber-200",
-  error: "bg-red-100 text-red-700 border-red-200",
-  not_linked: "bg-gray-100 text-gray-600 border-gray-200",
-};
-
-function fmt(n: number) { return `₹${n.toLocaleString("en-IN")}`; }
+function fmt(n: number) {
+  return `₹${n.toLocaleString("en-IN")}`;
+}
 
 export default function TenderWorkbench() {
-  const [tenders, setTenders] = useState<EProcTender[]>(INIT_TENDERS);
+  const queryClient = useQueryClient();
+  const { data: serverTenders = [] } = useListTenders({
+    query: { queryKey: getListTendersQueryKey() },
+  });
+  const updateTender = useUpdateTender();
+
+  const [tenders, setTenders] = useState<WorkbenchTender[]>(SEED_WORKBENCH_TENDERS);
   const [search, setSearch] = useState("");
-  const [detail, setDetail] = useState<EProcTender | null>(null);
-  const [syncLoading, setSyncLoading] = useState<number | null>(null);
-  const [linkDialog, setLinkDialog] = useState<EProcTender | null>(null);
-  const [linkForm, setLinkForm] = useState({ eprocId: "", noticeNo: "", portalUrl: "" });
+  const [stageFilter, setStageFilter] = useState("all");
+  const [detailModal, setDetailModal] = useState<WorkbenchTender | null>(null);
 
-  const filtered = tenders.filter(t =>
-    !search ||
-    t.tgmsidcRef.toLowerCase().includes(search.toLowerCase()) ||
-    t.equipmentName.toLowerCase().includes(search.toLowerCase()) ||
-    (t.eprocTenderId?.toLowerCase().includes(search.toLowerCase()) ?? false)
-  );
+  // Manual Update Modal state
+  const [editModal, setEditModal] = useState<WorkbenchTender | null>(null);
+  const [editForm, setEditForm] = useState({
+    stageKey: "doc_prep",
+    currentStage: "Document Preparation (NIT / TID)",
+    participationCount: "",
+    awardedVendor: "",
+    awardedAmount: "",
+    bidCloseDate: "",
+    notes: "",
+  });
 
-  function simulateSync(id: number) {
-    setSyncLoading(id);
-    setTimeout(() => {
-      setTenders(ts => ts.map(t => t.id === id ? {
-        ...t,
-        lastSynced: new Date().toISOString(),
-        syncStatus: "synced",
-        eprocStatus: "Technical Evaluation In Progress",
-        internalStatus: "Technical Evaluation In Progress",
-      } : t));
-      setSyncLoading(null);
-    }, 1500);
+  // Keep server tenders synchronized if available
+  useMemo(() => {
+    if (serverTenders.length > 0) {
+      setTenders((current) => {
+        const merged = [...current];
+        serverTenders.forEach((st) => {
+          const idx = merged.findIndex(
+            (m) => m.tgmsidcRef === st.tenderNumber || m.id === st.id
+          );
+          const stageObj = STATUTORY_STAGES.find((s) => s.key === st.status || (st.status === "evaluation" && s.key === "technical_eval"));
+          const stageLabel = stageObj?.label ?? (st.status === "evaluation" ? "Technical Evaluation In Progress" : st.status.replace(/_/g, " ").toUpperCase());
+          if (idx !== -1) {
+            merged[idx] = {
+              ...merged[idx],
+              id: st.id,
+              tgmsidcRef: st.tenderNumber,
+              equipmentName: st.equipmentName || merged[idx].equipmentName,
+              stageKey: st.status === "evaluation" ? "technical_eval" : st.status,
+              currentStage: stageLabel,
+              awardedVendor: st.l1BidderName ?? merged[idx].awardedVendor,
+              awardedAmount: st.l1BidderAmount ?? merged[idx].awardedAmount,
+              notes: st.notes || merged[idx].notes,
+            };
+          }
+        });
+        return merged;
+      });
+    }
+  }, [serverTenders]);
+
+  const filtered = useMemo(() => {
+    return tenders.filter((t) => {
+      const matchesSearch =
+        !search ||
+        t.tgmsidcRef.toLowerCase().includes(search.toLowerCase()) ||
+        t.equipmentName.toLowerCase().includes(search.toLowerCase()) ||
+        t.tenderNoticeNo.toLowerCase().includes(search.toLowerCase()) ||
+        (t.awardedVendor?.toLowerCase().includes(search.toLowerCase()) ?? false);
+
+      const matchesStage =
+        stageFilter === "all" ||
+        (stageFilter === "eval" &&
+          ["technical_eval", "commercial_eval", "bids_received", "evaluation"].includes(t.stageKey)) ||
+        (stageFilter === "awarded" &&
+          ["l1_identified", "contract_final", "rc_created"].includes(t.stageKey)) ||
+        (stageFilter === "open" && ["invited", "pre_bid"].includes(t.stageKey)) ||
+        (stageFilter === "prep" && ["doc_prep", "approval"].includes(t.stageKey));
+
+      return matchesSearch && matchesStage;
+    });
+  }, [tenders, search, stageFilter]);
+
+  const stats = useMemo(() => {
+    return {
+      total: tenders.length,
+      evaluating: tenders.filter((t) =>
+        ["technical_eval", "commercial_eval", "bids_received", "evaluation"].includes(t.stageKey)
+      ).length,
+      awarded: tenders.filter((t) =>
+        ["l1_identified", "contract_final", "rc_created"].includes(t.stageKey)
+      ).length,
+      open: tenders.filter((t) => ["invited", "pre_bid"].includes(t.stageKey)).length,
+    };
+  }, [tenders]);
+
+  function openEditModal(t: WorkbenchTender) {
+    setEditModal(t);
+    setEditForm({
+      stageKey: t.stageKey,
+      currentStage: t.currentStage,
+      participationCount: t.participationCount != null ? String(t.participationCount) : "",
+      awardedVendor: t.awardedVendor || "",
+      awardedAmount: t.awardedAmount != null ? String(t.awardedAmount) : "",
+      bidCloseDate: t.bidCloseDate || "",
+      notes: t.notes || "",
+    });
   }
 
-  function handleLink() {
-    setTenders(ts => ts.map(t => t.id === linkDialog!.id ? {
-      ...t,
-      eprocTenderId: linkForm.eprocId,
-      tenderNoticeNo: linkForm.noticeNo,
-      portalUrl: linkForm.portalUrl,
-      syncStatus: "pending",
-      lastSynced: null,
-    } : t));
-    setLinkDialog(null);
-    setLinkForm({ eprocId: "", noticeNo: "", portalUrl: "" });
+  function handleSaveStatus() {
+    if (!editModal) return;
+
+    const updatedStageObj = STATUTORY_STAGES.find((s) => s.key === editForm.stageKey);
+    const updatedStageName = updatedStageObj ? updatedStageObj.label : editForm.currentStage;
+
+    const updatedParticipation = editForm.participationCount
+      ? parseInt(editForm.participationCount, 10)
+      : null;
+    const updatedAmount = editForm.awardedAmount ? parseFloat(editForm.awardedAmount) : null;
+
+    setTenders((ts) =>
+      ts.map((t) =>
+        t.id === editModal.id || t.tgmsidcRef === editModal.tgmsidcRef
+          ? {
+              ...t,
+              stageKey: editForm.stageKey,
+              currentStage: updatedStageName,
+              participationCount: updatedParticipation,
+              awardedVendor: editForm.awardedVendor.trim() || null,
+              awardedAmount: updatedAmount,
+              bidCloseDate: editForm.bidCloseDate || t.bidCloseDate,
+              notes: editForm.notes || t.notes,
+              lastUpdated: new Date().toISOString(),
+            }
+          : t
+      )
+    );
+
+    // Call backend API if tender is in DB
+    if (editModal.id && editModal.id.length === 24) {
+      updateTender.mutate(
+        {
+          id: editModal.id,
+          data: {
+            status: editForm.stageKey,
+            ...(editForm.awardedVendor ? { l1BidderName: editForm.awardedVendor } : {}),
+            ...(updatedAmount ? { l1BidderAmount: updatedAmount } : {}),
+            notes: editForm.notes,
+          },
+        },
+        {
+          onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: getListTendersQueryKey() });
+          },
+        }
+      );
+    }
+
+    setEditModal(null);
+  }
+
+  function getStageBadgeColor(stageKey: string) {
+    if (["l1_identified", "contract_final", "rc_created"].includes(stageKey)) {
+      return "bg-emerald-50 text-emerald-700 border-emerald-200";
+    }
+    if (["technical_eval", "commercial_eval", "evaluation"].includes(stageKey)) {
+      return "bg-amber-50 text-amber-700 border-amber-200";
+    }
+    if (["invited", "pre_bid", "bids_received"].includes(stageKey)) {
+      return "bg-blue-50 text-blue-700 border-blue-200";
+    }
+    return "bg-slate-100 text-slate-700 border-slate-200";
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold">Tender Workbench</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">eProcurement integration — State eProcurement Portal sync</p>
+    <div className="space-y-4 max-w-7xl mx-auto">
+      {/* ── Page Header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#e4eaf2] pb-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#152340]">
+              Tender Workbench
+            </h1>
+            <Badge variant="outline" className="border-slate-300 bg-white text-slate-700 font-semibold text-xs">
+              Manual Milestone & Documentation Tracking
+            </Badge>
+          </div>
+          <p className="text-xs text-[#6b7a93] mt-0.5">
+            Manage tender documentation, record statutory milestones, and manually track procurement progression
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <a
+            href="https://tender.telangana.gov.in"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:text-blue-700 hover:border-blue-300 transition-colors cursor-pointer shadow-xs"
+            title="Opens Telangana State eProcurement Portal in a new tab (External Reference Only — No Application Integration)"
+          >
+            <ExternalLink className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            <span>Telangana eProcurement Portal</span>
+            <span className="text-[10px] text-slate-500 font-normal hidden sm:inline">(External Ref)</span>
+          </a>
+          <Link href="/tenders">
+            <Button size="sm" variant="outline" className="gap-1.5 cursor-pointer">
+              <Layers className="w-3.5 h-3.5" />
+              <span>All Tenders View</span>
+            </Button>
+          </Link>
+        </div>
       </div>
 
-      {/* Integration Banner */}
-      <Card className="border-blue-200 bg-blue-50/40">
-        <CardContent className="p-4">
+      {/* ── Notice Banner (Documentation & Manual Scope) ── */}
+      <Card className="border-slate-200 bg-slate-50/70 shadow-xs">
+        <CardContent className="p-3.5">
           <div className="flex items-start gap-3">
-            <Info className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+            <Info className="h-5 w-5 text-slate-600 shrink-0 mt-0.5" />
             <div className="flex-1">
-              <p className="text-sm font-semibold text-blue-800">eProcurement Integration</p>
-              <p className="text-xs text-blue-700 mt-0.5">Tendering is executed on the Government eProcurement portal. This workbench syncs tender IDs, dates, bid counts and status milestones. Financial bid data is withheld until technical evaluation is complete per portal confidentiality rules.</p>
-              <div className="flex gap-3 mt-2">
-                <a href="https://tender.telangana.gov.in" target="_blank" rel="noreferrer">
-                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1 border-blue-300 text-blue-700 hover:bg-blue-100">
-                    <ExternalLink className="h-3 w-3" />Open eProcurement Portal
-                  </Button>
-                </a>
-                <Badge variant="outline" className="text-xs border-emerald-300 bg-emerald-50 text-emerald-700 self-center">
-                  <Activity className="h-3 w-3 mr-1" />API: Dummy Integration Active
-                </Badge>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                  Tender Documentation & Manual Status Management
+                </p>
+                <span className="text-[11px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-medium">
+                  Internal Workflow
+                </span>
               </div>
+              <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                This workbench serves as the central documentation registry for competitive equipment tenders. Procurement officers initiate and archive notice documents (NIT/TID, Annexure-1 Schedule of Requirements, Technical Specs), and manually update evaluation progress and bid milestone statuses as committees conclude evaluations.
+              </p>
+              <p className="text-[11px] text-slate-500 mt-1.5 border-t border-slate-200/80 pt-1.5 flex items-center gap-1.5">
+                <span className="font-semibold text-slate-700">e-Procurement Reference:</span>
+                <span>Tenders are formally published on the <a href="https://tender.telangana.gov.in" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-medium underline inline-flex items-center gap-0.5">Telangana eProcurement Portal (tender.telangana.gov.in)<ExternalLink className="w-2.5 h-2.5 inline" /></a>. Please note that there is <strong>no direct system integration</strong>; all documentation and stage transitions in TGMSIDC are handled manually.</span>
+              </p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-4 gap-4">
-        <Card><CardContent className="p-4 flex items-center gap-3"><Gavel className="h-5 w-5 text-primary" /><div><p className="text-2xl font-bold">{tenders.length}</p><p className="text-xs text-muted-foreground">Total Tenders</p></div></CardContent></Card>
-        <Card className="border-emerald-200 bg-emerald-50/40"><CardContent className="p-4 flex items-center gap-3"><CheckCircle2 className="h-5 w-5 text-emerald-600" /><div><p className="text-2xl font-bold text-emerald-700">{tenders.filter(t => t.syncStatus === "synced").length}</p><p className="text-xs text-muted-foreground">Synced</p></div></CardContent></Card>
-        <Card className="border-amber-200 bg-amber-50/40"><CardContent className="p-4 flex items-center gap-3"><Clock className="h-5 w-5 text-amber-600" /><div><p className="text-2xl font-bold text-amber-700">{tenders.filter(t => t.syncStatus === "pending").length}</p><p className="text-xs text-muted-foreground">Sync Pending</p></div></CardContent></Card>
-        <Card className="border-red-200 bg-red-50/40"><CardContent className="p-4 flex items-center gap-3"><AlertTriangle className="h-5 w-5 text-red-600" /><div><p className="text-2xl font-bold text-red-700">{tenders.filter(t => t.syncStatus === "error").length}</p><p className="text-xs text-muted-foreground">Sync Error</p></div></CardContent></Card>
+      {/* ── KPI Ribbon ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#6b7a93] uppercase tracking-wider block">
+            Total Tenders
+          </span>
+          <span className="text-2xl font-bold text-[#152340] tabular-nums mt-1 block">
+            {stats.total}
+          </span>
+          <span className="text-[10.5px] text-[#6b7a93] mt-1 block">Under procurement wing</span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#e08a0b] uppercase tracking-wider block">
+            In Evaluation
+          </span>
+          <span className="text-2xl font-bold text-[#e08a0b] tabular-nums mt-1 block">
+            {stats.evaluating}
+          </span>
+          <span className="text-[10.5px] text-[#e08a0b] font-semibold mt-1 block">
+            Technical / Commercial review
+          </span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#2563eb] uppercase tracking-wider block">
+            Bids Invited / Open
+          </span>
+          <span className="text-2xl font-bold text-[#2563eb] tabular-nums mt-1 block">
+            {stats.open}
+          </span>
+          <span className="text-[10.5px] text-[#2563eb] font-semibold mt-1 block">
+            Receiving submissions
+          </span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#159557] uppercase tracking-wider block">
+            L1 Awarded / Finalized
+          </span>
+          <span className="text-2xl font-bold text-[#159557] tabular-nums mt-1 block">
+            {stats.awarded}
+          </span>
+          <span className="text-[10.5px] text-[#159557] font-semibold mt-1 block">
+            Successful award
+          </span>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="relative max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search tender, equipment, eProc ID..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+      {/* ── Table Card ── */}
+      <div className="bg-white border border-[#e4eaf2] rounded-xl shadow-xs overflow-hidden">
+        {/* Filter Bar */}
+        <div className="p-3 border-b border-[#e4eaf2] bg-[#f8fafc] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 flex-1 max-w-md">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-[#93a2b8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search tender ref, notice no, equipment, vendor..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full h-[32px] bg-white border border-[#e4eaf2] rounded-md text-xs text-[#152340] placeholder:text-[#93a2b8] pl-9 pr-3 focus:outline-none focus:border-[#2563eb]"
+              />
+            </div>
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40">
-                  {["HPC Ref", "eProc Tender ID", "Equipment", "Status (eProc)", "Bids", "Last Sync", "Sync Status", "Actions"].map(h => (
-                    <th key={h} className="text-left text-xs font-semibold text-muted-foreground px-4 py-3">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(t => (
-                  <tr key={t.id} className="border-b hover:bg-muted/20">
-                    <td className="px-4 py-3">
-                      <Link href={`/tenders/${t.id}`}><span className="font-mono text-xs font-semibold text-primary hover:underline">{t.tgmsidcRef}</span></Link>
-                    </td>
-                    <td className="px-4 py-3">
-                      {t.eprocTenderId
-                        ? <div><span className="font-mono text-xs">{t.eprocTenderId}</span><br /><span className="text-xs text-muted-foreground">{t.tenderNoticeNo}</span></div>
-                        : <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => setLinkDialog(t)}>Link eProc ID</Button>}
-                    </td>
-                    <td className="px-4 py-3 max-w-[180px] truncate">{t.equipmentName}</td>
-                    <td className="px-4 py-3">
-                      <div>
-                        <span className="text-xs font-medium">{t.eprocStatus ?? "Not linked"}</span>
-                        {t.eprocStatus?.includes("Financial") === false && t.eprocStatus !== null && (
-                          <Badge variant="outline" className="ml-2 text-[9px] border-blue-200 bg-blue-50 text-blue-700 px-1">Bid confidential</Badge>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">{t.participationCount != null ? t.participationCount : "—"}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
-                      {t.lastSynced ? format(new Date(t.lastSynced), "dd MMM HH:mm") : "Never"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant="outline" className={`text-xs border ${SYNC_STYLE[t.syncStatus]}`}>{t.syncStatus.replace("_", " ")}</Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setDetail(t)}><Eye className="h-3.5 w-3.5" /></Button>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => simulateSync(t.id)} disabled={syncLoading === t.id || !t.eprocTenderId}>
-                          <RefreshCw className={`h-3.5 w-3.5 ${syncLoading === t.id ? "animate-spin" : ""}`} />
-                        </Button>
-                        {t.portalUrl && (
-                          <a href={t.portalUrl} target="_blank" rel="noreferrer">
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><ExternalLink className="h-3.5 w-3.5" /></Button>
-                          </a>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {filtered.length === 0 && <div className="text-center py-12 text-muted-foreground">No tenders found</div>}
-          </div>
-        </CardContent>
-      </Card>
 
-      {/* Detail Dialog */}
-      <Dialog open={!!detail} onOpenChange={() => setDetail(null)}>
-        <DialogContent className="max-w-2xl">
-          {detail && (
-            <>
-              <DialogHeader><DialogTitle>Tender Detail — {detail.tgmsidcRef}</DialogTitle></DialogHeader>
-              <Tabs defaultValue="status">
-                <TabsList><TabsTrigger value="status">Status Timeline</TabsTrigger><TabsTrigger value="dates">Key Dates</TabsTrigger><TabsTrigger value="audit">Sync Log</TabsTrigger></TabsList>
-                <TabsContent value="status" className="space-y-3 pt-3">
-                  {EPOC_STATUS_FLOW.map((s, i) => {
-                    const currentIdx = EPOC_STATUS_FLOW.indexOf(detail.eprocStatus ?? "");
-                    const done = i <= currentIdx;
-                    const isCurrent = i === currentIdx;
-                    return (
-                      <div key={s} className={`flex items-center gap-3 p-2.5 rounded-lg ${isCurrent ? "bg-primary/5 border border-primary/20" : ""}`}>
-                        <div className={`h-6 w-6 rounded-full flex items-center justify-center text-xs shrink-0 ${done ? "bg-primary text-white" : "bg-muted text-muted-foreground"}`}>
-                          {done ? "✓" : i + 1}
-                        </div>
-                        <span className={`text-sm ${done ? "font-medium" : "text-muted-foreground"}`}>{s}</span>
-                        {s.includes("Financial") && (
-                          <Badge variant="outline" className="text-[9px] ml-auto border-red-200 bg-red-50 text-red-700">Confidential until unlocked</Badge>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-[#6b7a93] font-medium">Stage:</span>
+              <Select value={stageFilter} onValueChange={setStageFilter}>
+                <SelectTrigger className="h-[32px] text-xs bg-white border-[#e4eaf2] w-48">
+                  <SelectValue placeholder="All Stages" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">All Stages</SelectItem>
+                  <SelectItem value="prep" className="text-xs">Document Preparation</SelectItem>
+                  <SelectItem value="open" className="text-xs">Bids Invited / Open</SelectItem>
+                  <SelectItem value="eval" className="text-xs">In Evaluation</SelectItem>
+                  <SelectItem value="awarded" className="text-xs">L1 Awarded</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <span className="text-xs font-medium text-[#6b7a93]">
+              Showing <span className="font-bold text-[#152340]">{filtered.length}</span> of {tenders.length}
+            </span>
+          </div>
+        </div>
+
+        {/* Table Body */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-[#e4eaf2] bg-[#f8fafc] text-[#6b7a93] font-bold uppercase tracking-wider text-[10.5px]">
+                <th className="py-2.5 px-3">Tender Ref</th>
+                <th className="py-2.5 px-3">Notice No.</th>
+                <th className="py-2.5 px-3">Equipment / Item Description</th>
+                <th className="py-2.5 px-3">Category</th>
+                <th className="py-2.5 px-3">Current Stage</th>
+                <th className="py-2.5 px-3 text-center">Bids Recd</th>
+                <th className="py-2.5 px-3">Closing Date</th>
+                <th className="py-2.5 px-3">Awarded L1 Bidder / Value</th>
+                <th className="py-2.5 px-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#eff3f8]">
+              {filtered.map((t) => (
+                <tr
+                  key={t.tgmsidcRef}
+                  className="hover:bg-[#eff5ff] transition-colors group"
+                >
+                  {/* Tender Ref */}
+                  <td className="py-2.5 px-3">
+                    <Link href={`/tenders/${t.id}`}>
+                      <span className="font-mono font-bold text-[#2563eb] text-[11.5px] hover:underline cursor-pointer">
+                        {t.tgmsidcRef}
+                      </span>
+                    </Link>
+                  </td>
+
+                  {/* Notice No */}
+                  <td className="py-2.5 px-3">
+                    <span className="font-mono text-[11px] text-[#3c4a63]">
+                      {t.tenderNoticeNo}
+                    </span>
+                  </td>
+
+                  {/* Equipment */}
+                  <td className="py-2.5 px-3">
+                    <span className="font-medium text-[#152340] truncate max-w-[210px] block" title={t.equipmentName}>
+                      {t.equipmentName}
+                    </span>
+                  </td>
+
+                  {/* Category */}
+                  <td className="py-2.5 px-3 text-[#6b7a93] text-[11px] whitespace-nowrap">
+                    {t.category}
+                  </td>
+
+                  {/* Current Stage */}
+                  <td className="py-2.5 px-3">
+                    <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full border", getStageBadgeColor(t.stageKey))}>
+                      {t.currentStage}
+                    </span>
+                  </td>
+
+                  {/* Bids Count */}
+                  <td className="py-2.5 px-3 text-center">
+                    {t.participationCount != null ? (
+                      <span className="font-semibold text-[#152340] tabular-nums">
+                        {t.participationCount} Bidders
+                      </span>
+                    ) : (
+                      <span className="text-[#93a2b8]">—</span>
+                    )}
+                  </td>
+
+                  {/* Closing Date */}
+                  <td className="py-2.5 px-3 text-[#6b7a93] text-[11px] whitespace-nowrap">
+                    {t.bidCloseDate ? format(new Date(t.bidCloseDate), "dd MMM yyyy") : "—"}
+                  </td>
+
+                  {/* Awarded L1 */}
+                  <td className="py-2.5 px-3">
+                    {t.awardedVendor ? (
+                      <div>
+                        <span className="font-semibold text-[#152340] truncate max-w-[150px] block text-[11px]">
+                          {t.awardedVendor}
+                        </span>
+                        {t.awardedAmount != null && (
+                          <span className="text-[10.5px] text-[#159557] font-semibold tabular-nums">
+                            {fmt(t.awardedAmount)}
+                          </span>
                         )}
                       </div>
-                    );
-                  })}
+                    ) : (
+                      <span className="text-[#93a2b8] text-[11px] italic">Evaluation pending</span>
+                    )}
+                  </td>
+
+                  {/* Actions */}
+                  <td className="py-2.5 px-3 text-right">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <Link href={`/tenders/${t.id}`}>
+                        <button
+                          title="Open Tender Full Detail"
+                          className="px-2 py-1 bg-white border border-[#e4eaf2] text-[#3c4a63] hover:border-[#2563eb] hover:text-[#2563eb] rounded text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <Eye className="w-3 h-3" />
+                          <span>View</span>
+                        </button>
+                      </Link>
+
+                      <button
+                        onClick={() => openEditModal(t)}
+                        title="Manually Update Status & Notes"
+                        className="px-2 py-1 bg-[#f0f7ff] border border-[#bae0ff] text-[#0066cc] hover:bg-[#e6f4ff] rounded text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        <span>Update</span>
+                      </button>
+
+                      <button
+                        onClick={() => setDetailModal(t)}
+                        title="Milestone Timeline Summary"
+                        className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+                      >
+                        <Clock className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {filtered.length === 0 && (
+            <div className="text-center py-12 text-[#6b7a93]">
+              <Gavel className="w-8 h-8 text-[#93a2b8] mx-auto mb-2" />
+              <p className="text-xs font-semibold text-[#152340]">No tenders found</p>
+              <p className="text-[11px] text-[#6b7a93] mt-0.5">Try refining your search terms or filter.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Manual Status Update Dialog ── */}
+      <Dialog open={!!editModal} onOpenChange={() => setEditModal(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <Edit3 className="w-4 h-4 text-primary" />
+              Update Tender Stage & Status — {editModal?.tgmsidcRef}
+            </DialogTitle>
+          </DialogHeader>
+
+          {editModal && (
+            <div className="space-y-3.5 py-1 text-sm">
+              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700">
+                <span className="font-semibold text-slate-900">{editModal.equipmentName}</span>
+                <p className="text-[11px] text-slate-500 mt-0.5">Notice No: {editModal.tenderNoticeNo}</p>
+              </div>
+
+              {/* Stage Dropdown */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Current Procurement Stage</Label>
+                <Select
+                  value={editForm.stageKey}
+                  onValueChange={(val) => {
+                    const st = STATUTORY_STAGES.find((s) => s.key === val);
+                    setEditForm({
+                      ...editForm,
+                      stageKey: val,
+                      currentStage: st?.label ?? val,
+                    });
+                  }}
+                >
+                  <SelectTrigger className="text-xs h-9">
+                    <SelectValue placeholder="Select procurement stage" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUTORY_STAGES.map((s, idx) => (
+                      <SelectItem key={s.key} value={s.key} className="text-xs">
+                        {idx + 1}. {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Bids Count & Closing Date */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold">Bids Received Count</Label>
+                  <Input
+                    type="number"
+                    value={editForm.participationCount}
+                    onChange={(e) => setEditForm({ ...editForm, participationCount: e.target.value })}
+                    placeholder="e.g. 4"
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold">Bid Closing / Key Date</Label>
+                  <Input
+                    type="date"
+                    value={editForm.bidCloseDate}
+                    onChange={(e) => setEditForm({ ...editForm, bidCloseDate: e.target.value })}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* L1 Vendor & Amount */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold">L1 Awarded Vendor (if finalized)</Label>
+                  <Input
+                    value={editForm.awardedVendor}
+                    onChange={(e) => setEditForm({ ...editForm, awardedVendor: e.target.value })}
+                    placeholder="Vendor / Agency Name"
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold">L1 Bid Amount (₹)</Label>
+                  <Input
+                    type="number"
+                    value={editForm.awardedAmount}
+                    onChange={(e) => setEditForm({ ...editForm, awardedAmount: e.target.value })}
+                    placeholder="Amount in Rupees"
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Remarks / Officer Notes */}
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">Status Remarks / Meeting Notes</Label>
+                <Textarea
+                  rows={3}
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  placeholder="Record evaluation outcome, committee decisions, or corrigendum details..."
+                  className="text-xs resize-none"
+                />
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="mt-2">
+            <Button variant="outline" size="sm" onClick={() => setEditModal(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSaveStatus} className="gap-1.5">
+              <Check className="w-3.5 h-3.5" />
+              <span>Save Status Update</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Detail / Milestone Summary Dialog ── */}
+      <Dialog open={!!detailModal} onOpenChange={() => setDetailModal(null)}>
+        <DialogContent className="max-w-2xl">
+          {detailModal && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center justify-between text-base">
+                  <span>Tender Detail — {detailModal.tgmsidcRef}</span>
+                  <Badge variant="outline" className={cn("text-xs", getStageBadgeColor(detailModal.stageKey))}>
+                    {detailModal.currentStage}
+                  </Badge>
+                </DialogTitle>
+              </DialogHeader>
+
+              <Tabs defaultValue="milestones" className="mt-2">
+                <TabsList className="grid grid-cols-2">
+                  <TabsTrigger value="milestones">Statutory Milestone Progress</TabsTrigger>
+                  <TabsTrigger value="details">Tender Key Info</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="milestones" className="space-y-2 pt-3">
+                  <div className="space-y-1.5">
+                    {STATUTORY_STAGES.map((st, i) => {
+                      const currentIdx = STATUTORY_STAGES.findIndex((s) => s.key === detailModal.stageKey);
+                      const isDone = i < currentIdx;
+                      const isCurrent = i === currentIdx;
+
+                      return (
+                        <div
+                          key={st.key}
+                          className={cn(
+                            "flex items-center gap-3 p-2 rounded-lg text-xs",
+                            isCurrent
+                              ? "bg-primary/10 border border-primary/20 font-bold text-primary"
+                              : isDone
+                              ? "bg-slate-50 text-slate-700"
+                              : "text-slate-400 opacity-70"
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "h-5 w-5 rounded-full flex items-center justify-center text-[10px] shrink-0 font-bold",
+                              isDone
+                                ? "bg-emerald-600 text-white"
+                                : isCurrent
+                                ? "bg-primary text-white"
+                                : "bg-slate-200 text-slate-500"
+                            )}
+                          >
+                            {isDone ? "✓" : i + 1}
+                          </div>
+                          <span className="flex-1">{st.label}</span>
+                          {isCurrent && (
+                            <span className="text-[10px] uppercase tracking-wider font-bold bg-primary text-white px-1.5 py-0.5 rounded">
+                              Active Stage
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </TabsContent>
-                <TabsContent value="dates" className="pt-3">
-                  <div className="grid grid-cols-2 gap-3 text-sm">
+
+                <TabsContent value="details" className="pt-3">
+                  <div className="grid grid-cols-2 gap-3 text-xs">
                     {[
-                      ["Notice No.", detail.tenderNoticeNo ?? "—"],
-                      ["eProc ID", detail.eprocTenderId ?? "—"],
-                      ["Invited Date", detail.tenderInvitedDate],
-                      ["Bid Open", detail.bidOpenDate ?? "—"],
-                      ["Bid Close", detail.bidCloseDate ?? "—"],
-                      ["Tech Bid Open", detail.techBidOpenDate ?? "—"],
-                      ["Price Bid Open", detail.priceBidOpenDate ?? "Pending"],
-                      ["Participation", detail.participationCount != null ? `${detail.participationCount} bidders` : "—"],
-                      ["Corrigenda", String(detail.corrigendumCount)],
-                    ].map(([l, v]) => (
-                      <div key={l}><p className="text-xs text-muted-foreground">{l}</p><p className="font-medium">{v}</p></div>
+                      ["Notice No.", detailModal.tenderNoticeNo],
+                      ["Equipment", detailModal.equipmentName],
+                      ["Category", detailModal.category],
+                      ["Estimated Value", fmt(detailModal.estimatedValue)],
+                      ["Invited Date", detailModal.tenderInvitedDate ? format(new Date(detailModal.tenderInvitedDate), "dd MMM yyyy") : "—"],
+                      ["Closing Date", detailModal.bidCloseDate ? format(new Date(detailModal.bidCloseDate), "dd MMM yyyy") : "—"],
+                      ["Bids Received", detailModal.participationCount != null ? `${detailModal.participationCount} Bidders` : "Pending"],
+                      ["Awarded Vendor", detailModal.awardedVendor ?? "Under Evaluation"],
+                      ["Awarded Amount", detailModal.awardedAmount != null ? fmt(detailModal.awardedAmount) : "—"],
+                      ["Archived Documents", `${detailModal.documentationCount} Files`],
+                    ].map(([label, val]) => (
+                      <div key={label} className="p-2 rounded bg-slate-50 border border-slate-100">
+                        <span className="text-[10px] text-slate-500 block uppercase font-medium">{label}</span>
+                        <span className="font-semibold text-slate-800 text-xs mt-0.5 block">{val}</span>
+                      </div>
                     ))}
                   </div>
-                  {detail.notes && (
-                    <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-                      <p className="font-semibold mb-1">Notes</p>
-                      <p>{detail.notes}</p>
+
+                  {detailModal.notes && (
+                    <div className="mt-3 p-3 bg-amber-50/70 border border-amber-200 rounded-lg text-xs text-amber-900">
+                      <p className="font-bold text-[11px] mb-1">Recorded Notes / Committee Observations</p>
+                      <p className="leading-relaxed">{detailModal.notes}</p>
                     </div>
                   )}
-                </TabsContent>
-                <TabsContent value="audit" className="pt-3">
-                  <div className="space-y-2">
-                    {[
-                      { time: "08 Apr 2026 04:30", event: "Sync completed successfully", status: "success" },
-                      { time: "07 Apr 2026 04:30", event: "Status updated: Bid Submission Closed → Technical Evaluation In Progress", status: "success" },
-                      { time: "10 Nov 2025 11:15", event: "Status updated: Bid Submission Open → Bid Submission Closed", status: "success" },
-                      { time: "05 Oct 2025 09:00", event: "Tender linked to eProc ID TG/HPC/2025-26/ET/0142", status: "info" },
-                      { time: "01 Oct 2025 08:30", event: "Tender published on eProcurement portal", status: "success" },
-                    ].map((log, i) => (
-                      <div key={i} className="flex gap-3 text-xs">
-                        <span className="text-muted-foreground shrink-0 w-36">{log.time}</span>
-                        <span className={log.status === "success" ? "text-emerald-700" : "text-blue-700"}>{log.event}</span>
-                      </div>
-                    ))}
+
+                  <div className="mt-4 flex justify-end">
+                    <Link href={`/tenders/${detailModal.id}`}>
+                      <Button size="sm" className="gap-1.5">
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>Open Complete Tender Documentation Page</span>
+                      </Button>
+                    </Link>
                   </div>
                 </TabsContent>
               </Tabs>
             </>
           )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Link eProc ID Dialog */}
-      <Dialog open={!!linkDialog} onOpenChange={() => setLinkDialog(null)}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Link to eProcurement Tender</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2 text-sm">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
-              Enter the Tender ID and Notice Number assigned by the eProcurement portal. The system will begin syncing status and milestone updates.
-            </div>
-            <div className="space-y-1.5">
-              <Label>eProcurement Tender ID</Label>
-              <Input value={linkForm.eprocId} onChange={e => setLinkForm({ ...linkForm, eprocId: e.target.value })} placeholder="TG/HPC/2025-26/ET/..." />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Tender Notice No.</Label>
-              <Input value={linkForm.noticeNo} onChange={e => setLinkForm({ ...linkForm, noticeNo: e.target.value })} placeholder="NIT/HPC/2025/..." />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Portal URL</Label>
-              <Input value={linkForm.portalUrl} onChange={e => setLinkForm({ ...linkForm, portalUrl: e.target.value })} placeholder="https://tender.telangana.gov.in/..." />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setLinkDialog(null)}>Cancel</Button>
-            <Button onClick={handleLink} disabled={!linkForm.eprocId}>Link & Start Sync</Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

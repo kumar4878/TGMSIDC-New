@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { differenceInDays, format, addYears, addDays } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -13,7 +13,8 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import {
   AlertTriangle, CheckCircle2, Clock, XCircle, Gavel,
-  Search, ShieldAlert, Eye, Plus, RefreshCw, Loader2, Filter, Wrench
+  Search, ShieldAlert, Eye, Plus, RefreshCw, Loader2, Filter, Wrench,
+  Building2, ChevronLeft, ChevronRight, ArrowRight, FileCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -22,7 +23,7 @@ import {
   getListRateContractsQueryKey, getListTendersQueryKey,
   type RateContract,
 } from "@/lib/api-hooks";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 type CoverageStatus = "active_rc" | "expiring_soon" | "expired" | "tender_in_progress" | "no_coverage";
 
@@ -40,26 +41,9 @@ interface ItemCoverage {
   vendorId?: string | number;
   tenderNumber?: string;
   tenderStatus?: string;
+  unitPrice?: number;
+  gstRate?: number;
 }
-
-const STATUS_META: Record<CoverageStatus, {
-  label: string; color: string; bg: string; border: string; icon: React.ElementType;
-}> = {
-  active_rc:          { label: "Active RC",           color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200", icon: CheckCircle2 },
-  expiring_soon:      { label: "RC Expiring Soon",    color: "text-amber-700",   bg: "bg-amber-50",   border: "border-amber-200",   icon: Clock },
-  expired:            { label: "RC Expired",          color: "text-red-700",     bg: "bg-red-50",     border: "border-red-200",     icon: XCircle },
-  tender_in_progress: { label: "Tender in Progress",  color: "text-blue-700",    bg: "bg-blue-50",    border: "border-blue-200",    icon: Gavel },
-  no_coverage:        { label: "RC Not Available",    color: "text-slate-600",   bg: "bg-slate-50",   border: "border-slate-200",   icon: ShieldAlert },
-};
-
-const KPI_FILTERS: Array<{ key: string; label: string; color: string }> = [
-  { key: "all",               label: "Total Items",        color: "#6366f1" },
-  { key: "active_rc",         label: "Active RC",          color: "#10b981" },
-  { key: "expiring_soon",     label: "RC Expiring Soon",   color: "#f59e0b" },
-  { key: "expired",           label: "RC Expired",         color: "#ef4444" },
-  { key: "tender_in_progress",label: "Tender in Progress", color: "#3b82f6" },
-  { key: "no_coverage",       label: "No Coverage",        color: "#94a3b8" },
-];
 
 function computeCoverage(
   equipmentList: any[],
@@ -86,52 +70,79 @@ function computeCoverage(
     if (activeRC) {
       const daysRemaining = differenceInDays(new Date(activeRC.endDate), today);
       return {
-        equipmentId: eq.id, equipmentCode: eq.equipmentCode,
-        equipmentName: eq.name, category: eq.category,
+        equipmentId: eq.id,
+        equipmentCode: eq.equipmentCode,
+        equipmentName: eq.name,
+        category: eq.category,
         status: daysRemaining <= 180 ? "expiring_soon" : "active_rc",
-        rcId: activeRC.id, rcNumber: activeRC.contractNumber,
-        rcExpiry: activeRC.endDate, daysRemaining,
-        vendorName: activeRC.vendorName, vendorId: activeRC.vendorId,
+        rcId: activeRC.id,
+        rcNumber: activeRC.contractNumber,
+        rcExpiry: activeRC.endDate,
+        daysRemaining,
+        vendorName: activeRC.vendorName,
+        vendorId: activeRC.vendorId,
+        unitPrice: activeRC.unitPrice,
+        gstRate: activeRC.taxPercent ?? activeRC.gstRate,
       };
     }
     if (activeTender) {
       return {
-        equipmentId: eq.id, equipmentCode: eq.equipmentCode,
-        equipmentName: eq.name, category: eq.category,
+        equipmentId: eq.id,
+        equipmentCode: eq.equipmentCode,
+        equipmentName: eq.name,
+        category: eq.category,
         status: "tender_in_progress",
-        tenderNumber: activeTender.tenderNumber, tenderStatus: activeTender.status,
+        tenderNumber: activeTender.tenderNumber,
+        tenderStatus: activeTender.status,
+        unitPrice: eq.estimatedUnitCost,
+        gstRate: eq.gstRate,
       };
     }
     if (latestExpiredRC) {
       return {
-        equipmentId: eq.id, equipmentCode: eq.equipmentCode,
-        equipmentName: eq.name, category: eq.category,
+        equipmentId: eq.id,
+        equipmentCode: eq.equipmentCode,
+        equipmentName: eq.name,
+        category: eq.category,
         status: "expired",
-        rcId: latestExpiredRC.id, rcNumber: latestExpiredRC.contractNumber,
+        rcId: latestExpiredRC.id,
+        rcNumber: latestExpiredRC.contractNumber,
         rcExpiry: latestExpiredRC.endDate,
         daysRemaining: differenceInDays(new Date(latestExpiredRC.endDate), today),
-        vendorName: latestExpiredRC.vendorName, vendorId: latestExpiredRC.vendorId,
+        vendorName: latestExpiredRC.vendorName,
+        vendorId: latestExpiredRC.vendorId,
+        unitPrice: latestExpiredRC.unitPrice,
+        gstRate: latestExpiredRC.taxPercent ?? latestExpiredRC.gstRate,
       };
     }
     return {
-      equipmentId: eq.id, equipmentCode: eq.equipmentCode,
-      equipmentName: eq.name, category: eq.category,
+      equipmentId: eq.id,
+      equipmentCode: eq.equipmentCode,
+      equipmentName: eq.name,
+      category: eq.category,
       status: "no_coverage",
+      unitPrice: eq.estimatedUnitCost,
+      gstRate: eq.gstRate,
     };
   });
 }
 
 type DrawerState =
-  | { type: "renewRC";        coverage: ItemCoverage; sourceRC: RateContract }
-  | { type: "newRC";          coverage: ItemCoverage }
+  | { type: "renewRC"; coverage: ItemCoverage; sourceRC: RateContract }
+  | { type: "newRC"; coverage: ItemCoverage }
   | { type: "initiateTender"; coverage: ItemCoverage }
   | null;
 
 const EMPTY_RC_FORM = {
-  equipmentId: "", vendorId: "", unitPrice: "",
-  gstRate: "12", warrantyYears: "1",
-  cmcCharges: "0", cmcStartYear: "2",
-  startDate: "", endDate: "",
+  equipmentId: "",
+  vendorId: "",
+  unitPrice: "",
+  gstRate: "12",
+  warrantyYears: "1",
+  cmcCharges: "0",
+  cmcStartYear: "2",
+  startDate: "",
+  endDate: "",
   camcApplicable: false,
   camcPeriodYears: "1",
   camcRatePerYear: "0",
@@ -150,7 +161,10 @@ function RCForm({
   equipment: { id: string | number; name: string }[];
   lockedEquipmentId?: string;
 }) {
-  function f(k: keyof typeof EMPTY_RC_FORM, v: any) { setForm({ ...form, [k]: v }); }
+  function f(k: keyof typeof EMPTY_RC_FORM, v: any) {
+    setForm({ ...form, [k]: v });
+  }
+
   return (
     <div className="grid grid-cols-2 gap-4 py-2">
       <div className="col-span-2">
@@ -249,6 +263,11 @@ function RCForm({
 export default function RCCoverage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [equipmentFilter, setEquipmentFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [, navigate] = useLocation();
+
   const [drawer, setDrawer] = useState<DrawerState>(null);
   const [rcForm, setRcForm] = useState(EMPTY_RC_FORM);
   const [tenderForm, setTenderForm] = useState({ tenderInvitedDate: "", notes: "" });
@@ -270,29 +289,99 @@ export default function RCCoverage() {
     [equipmentData, rcData, tenderData],
   );
 
+  const equipmentOptions = useMemo(() => {
+    return [...equipmentData]
+      .filter((eq: any) => eq.name)
+      .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+  }, [equipmentData]);
+
   const counts = useMemo(() => ({
-    all:               coverage.length,
-    active_rc:         coverage.filter((c) => c.status === "active_rc").length,
-    expiring_soon:     coverage.filter((c) => c.status === "expiring_soon").length,
-    expired:           coverage.filter((c) => c.status === "expired").length,
-    tender_in_progress:coverage.filter((c) => c.status === "tender_in_progress").length,
-    no_coverage:       coverage.filter((c) => c.status === "no_coverage").length,
+    all:                coverage.length,
+    active_rc:          coverage.filter((c) => c.status === "active_rc").length,
+    expiring_soon:      coverage.filter((c) => c.status === "expiring_soon").length,
+    expired:            coverage.filter((c) => c.status === "expired").length,
+    tender_in_progress: coverage.filter((c) => c.status === "tender_in_progress").length,
+    no_coverage:        coverage.filter((c) => c.status === "no_coverage").length,
   }), [coverage]);
 
-  const filtered = coverage.filter((c) => {
+  const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    const matchSearch = !q ||
-      c.equipmentName.toLowerCase().includes(q) ||
-      c.equipmentCode.toLowerCase().includes(q) ||
-      (c.rcNumber ?? "").toLowerCase().includes(q) ||
-      (c.vendorName ?? "").toLowerCase().includes(q);
-    const matchStatus = statusFilter === "all" || c.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
+    return coverage.filter((c) => {
+      const matchSearch =
+        !q ||
+        c.equipmentName.toLowerCase().includes(q) ||
+        c.equipmentCode.toLowerCase().includes(q) ||
+        (c.rcNumber ?? "").toLowerCase().includes(q) ||
+        (c.vendorName ?? "").toLowerCase().includes(q) ||
+        (c.tenderNumber ?? "").toLowerCase().includes(q);
+      const matchStatus = statusFilter === "all" || c.status === statusFilter;
+      const matchEquipment = equipmentFilter === "all" || String(c.equipmentId) === equipmentFilter;
+      return matchSearch && matchStatus && matchEquipment;
+    });
+  }, [coverage, search, statusFilter, equipmentFilter]);
 
-  const expiredCount    = counts.expired;
-  const expiringCount   = counts.expiring_soon;
-  const noCoverageCount = counts.no_coverage;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+
+  // Reset page when search or any filter changes
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, equipmentFilter, pageSize]);
+
+  const paginatedItems = useMemo(() => {
+    const startIndex = (page - 1) * pageSize;
+    return filtered.slice(startIndex, startIndex + pageSize);
+  }, [filtered, page, pageSize]);
+
+  function getExpiryBadge(daysRemaining?: number) {
+    if (daysRemaining === undefined || daysRemaining === null) {
+      return <span className="text-[#93a2b8] font-mono text-[11px]">—</span>;
+    }
+    if (daysRemaining < 0) return <span className="neo-chip red">{Math.abs(daysRemaining)}d overdue</span>;
+    if (daysRemaining <= 30) return <span className="neo-chip red">{daysRemaining}d left</span>;
+    if (daysRemaining <= 90) return <span className="neo-chip amb">{daysRemaining}d left</span>;
+    if (daysRemaining <= 180) return <span className="neo-chip amb">{daysRemaining}d left</span>;
+    return <span className="neo-chip grn">{daysRemaining}d left</span>;
+  }
+
+  function getCoverageBadge(status: CoverageStatus) {
+    switch (status) {
+      case "active_rc":
+        return (
+          <span className="neo-chip grn inline-flex items-center gap-1">
+            <CheckCircle2 className="w-3 h-3" />
+            <span>Active RC</span>
+          </span>
+        );
+      case "expiring_soon":
+        return (
+          <span className="neo-chip amb inline-flex items-center gap-1">
+            <Clock className="w-3 h-3" />
+            <span>Expiring Soon</span>
+          </span>
+        );
+      case "expired":
+        return (
+          <span className="neo-chip red inline-flex items-center gap-1">
+            <XCircle className="w-3 h-3" />
+            <span>Expired</span>
+          </span>
+        );
+      case "tender_in_progress":
+        return (
+          <span className="neo-chip blu inline-flex items-center gap-1">
+            <Gavel className="w-3 h-3" />
+            <span>Tender Active</span>
+          </span>
+        );
+      case "no_coverage":
+        return (
+          <span className="neo-chip gry inline-flex items-center gap-1">
+            <ShieldAlert className="w-3 h-3" />
+            <span>No Coverage</span>
+          </span>
+        );
+    }
+  }
 
   function openRenewRC(c: ItemCoverage) {
     const sourceRC = rcData.find((r) => r.contractNumber === c.rcNumber);
@@ -324,7 +413,9 @@ export default function RCCoverage() {
     setDrawer({ type: "initiateTender", coverage: c });
   }
 
-  function closeDrawer() { setDrawer(null); }
+  function closeDrawer() {
+    setDrawer(null);
+  }
 
   function invalidateCoverage() {
     queryClient.invalidateQueries({ queryKey: getListRateContractsQueryKey() });
@@ -376,91 +467,175 @@ export default function RCCoverage() {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Header — matches rate-contracts.tsx style */}
-      <div className="flex items-start justify-between gap-4">
+    <div className="space-y-4">
+      {/* ── Page Header (neoInt Style aligned with Rate Contracts) ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#e4eaf2] pb-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#152340]">RC Coverage Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Item-wise Rate Contract coverage status across all tracked products
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#152340]">
+              Rate Contract Coverage
+            </h1>
+            <span className="neo-chip gry">Statutory Coverage Ledger</span>
+          </div>
+          <p className="text-xs text-[#6b7a93] mt-0.5">
+            Item-wise Rate Contract mapping, validity tracking, and statutory price protections across medical equipment catalog
           </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Link href="/rate-contracts">
+            <Button size="sm" variant="outline" className="gap-1.5 cursor-pointer text-xs">
+              <FileCheck className="w-3.5 h-3.5 text-[#2563eb]" />
+              <span>Rate Contracts</span>
+            </Button>
+          </Link>
+          <Link href="/rate-contracts/new">
+            <Button size="sm" className="gap-1.5 cursor-pointer text-xs">
+              <Plus className="w-3.5 h-3.5" />
+              <span>New Contract</span>
+            </Button>
+          </Link>
         </div>
       </div>
 
-      {/* KPI Summary Ribbon — neo-kpi-card style matching rate-contracts.tsx */}
+      {/* ── Summary Ribbon (neo-kpi-card aligned with Rate Contracts) ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {KPI_FILTERS.map((kpi) => {
-          const count = counts[kpi.key as keyof typeof counts];
-          const active = statusFilter === kpi.key;
-          return (
-            <div
-              key={kpi.key}
-              onClick={() => setStatusFilter(active ? "all" : kpi.key)}
-              className={cn(
-                "neo-kpi-card cursor-pointer transition-all",
-                active ? "ring-2 shadow-md" : "hover:shadow-md"
-              )}
-              style={active ? { outline: `2px solid ${kpi.color}`, outlineOffset: '2px' } : {}}
-            >
-              <span className="text-[10px] font-bold uppercase tracking-wider block" style={{ color: active ? kpi.color : "#6b7a93" }}>
-                {kpi.label}
-              </span>
-              <span className="text-2xl font-bold tabular-nums mt-1 block" style={{ color: kpi.color }}>
-                {count}
-              </span>
-              <span className="text-[10.5px] text-[#6b7a93] mt-1 block">
-                {active ? "Click to clear" : "Click to filter"}
-              </span>
-            </div>
-          );
-        })}
+        <div
+          onClick={() => { setStatusFilter("all"); setPage(1); }}
+          className={cn(
+            "neo-kpi-card cursor-pointer transition-all",
+            statusFilter === "all" ? "ring-2 ring-[#2563eb] shadow-xs" : "hover:shadow-xs"
+          )}
+        >
+          <span className="text-[10px] font-bold text-[#6b7a93] uppercase tracking-wider block">
+            Total Equipment
+          </span>
+          <span className="text-2xl font-bold text-[#152340] tabular-nums mt-1 block">
+            {counts.all}
+          </span>
+          <span className="text-[10.5px] text-[#6b7a93] mt-1 block">Tracked catalog items</span>
+        </div>
+
+        <div
+          onClick={() => { setStatusFilter(statusFilter === "active_rc" ? "all" : "active_rc"); setPage(1); }}
+          className={cn(
+            "neo-kpi-card cursor-pointer transition-all",
+            statusFilter === "active_rc" ? "ring-2 ring-[#159557] shadow-xs" : "hover:shadow-xs"
+          )}
+        >
+          <span className="text-[10px] font-bold text-[#159557] uppercase tracking-wider block">
+            Active RC Covered
+          </span>
+          <span className="text-2xl font-bold text-[#159557] tabular-nums mt-1 block">
+            {counts.active_rc}
+          </span>
+          <span className="text-[10.5px] text-[#159557] font-semibold mt-1 block">
+            {counts.all > 0 ? Math.round((counts.active_rc / counts.all) * 100) : 0}% coverage
+          </span>
+        </div>
+
+        <div
+          onClick={() => { setStatusFilter(statusFilter === "expiring_soon" ? "all" : "expiring_soon"); setPage(1); }}
+          className={cn(
+            "neo-kpi-card cursor-pointer transition-all",
+            statusFilter === "expiring_soon" ? "ring-2 ring-[#e08a0b] shadow-xs" : "hover:shadow-xs"
+          )}
+        >
+          <span className="text-[10px] font-bold text-[#e08a0b] uppercase tracking-wider block">
+            Expiring in 180d
+          </span>
+          <span className="text-2xl font-bold text-[#e08a0b] tabular-nums mt-1 block">
+            {counts.expiring_soon}
+          </span>
+          <span className="text-[10.5px] text-[#e08a0b] font-semibold mt-1 block">BR-09 advance alert</span>
+        </div>
+
+        <div
+          onClick={() => { setStatusFilter(statusFilter === "expired" ? "all" : "expired"); setPage(1); }}
+          className={cn(
+            "neo-kpi-card cursor-pointer transition-all",
+            statusFilter === "expired" ? "ring-2 ring-[#dc2f3c] shadow-xs" : "hover:shadow-xs"
+          )}
+        >
+          <span className="text-[10px] font-bold text-[#dc2f3c] uppercase tracking-wider block">
+            Expired RCs
+          </span>
+          <span className="text-2xl font-bold text-[#dc2f3c] tabular-nums mt-1 block">
+            {counts.expired}
+          </span>
+          <span className="text-[10.5px] text-[#dc2f3c] font-semibold mt-1 block">Requires re-tendering</span>
+        </div>
+
+        <div
+          onClick={() => { setStatusFilter(statusFilter === "tender_in_progress" ? "all" : "tender_in_progress"); setPage(1); }}
+          className={cn(
+            "neo-kpi-card cursor-pointer transition-all",
+            statusFilter === "tender_in_progress" ? "ring-2 ring-[#2563eb] shadow-xs" : "hover:shadow-xs"
+          )}
+        >
+          <span className="text-[10px] font-bold text-[#2563eb] uppercase tracking-wider block">
+            Tender Active
+          </span>
+          <span className="text-2xl font-bold text-[#2563eb] tabular-nums mt-1 block">
+            {counts.tender_in_progress}
+          </span>
+          <span className="text-[10.5px] text-[#2563eb] mt-1 block">Procurement underway</span>
+        </div>
+
+        <div
+          onClick={() => { setStatusFilter(statusFilter === "no_coverage" ? "all" : "no_coverage"); setPage(1); }}
+          className={cn(
+            "neo-kpi-card cursor-pointer transition-all",
+            statusFilter === "no_coverage" ? "ring-2 ring-[#64748b] shadow-xs" : "hover:shadow-xs"
+          )}
+        >
+          <span className="text-[10px] font-bold text-[#64748b] uppercase tracking-wider block">
+            RC Not Available
+          </span>
+          <span className="text-2xl font-bold text-[#64748b] tabular-nums mt-1 block">
+            {counts.no_coverage}
+          </span>
+          <span className="text-[10.5px] text-[#6b7a93] mt-1 block">Open tender route</span>
+        </div>
       </div>
 
-      {/* Alert banners */}
-      {expiredCount > 0 && (
-        <div className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-          <XCircle className="h-4 w-4 text-red-600 shrink-0" />
-          <p className="text-sm text-red-800 font-medium">
-            {expiredCount} item{expiredCount > 1 ? "s" : ""} with <strong>expired</strong> RCs — immediate renewal or tendering action required
-          </p>
-          <Button size="sm" variant="outline" className="ml-auto h-7 text-xs border-red-300 text-red-700" onClick={() => setStatusFilter("expired")}>
-            View
-          </Button>
-        </div>
-      )}
-      {expiringCount > 0 && (
-        <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-          <p className="text-sm text-amber-800 font-medium">
-            {expiringCount} RC{expiringCount > 1 ? "s" : ""} expiring within <strong>180 days</strong> — initiate renewal or new tender now
-          </p>
-          <Button size="sm" variant="outline" className="ml-auto h-7 text-xs border-amber-300 text-amber-700" onClick={() => setStatusFilter("expiring_soon")}>
-            Review
-          </Button>
-        </div>
-      )}
-      {noCoverageCount > 0 && (
-        <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
-          <ShieldAlert className="h-4 w-4 text-slate-500 shrink-0" />
-          <p className="text-sm text-slate-700 font-medium">
-            {noCoverageCount} item{noCoverageCount > 1 ? "s" : ""} with no RC and no active tender
-          </p>
-          <Button size="sm" variant="outline" className="ml-auto h-7 text-xs" onClick={() => setStatusFilter("no_coverage")}>
-            View
-          </Button>
+      {/* ── Expiring / Expired RC Attention Callouts (neo-att-c style) ── */}
+      {(counts.expiring_soon > 0 || counts.expired > 0) && (
+        <div className="neo-att-c amb">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-white shadow-xs flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-4 h-4 text-[#e08a0b]" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-[#152340]">
+                  {counts.expiring_soon + counts.expired} Equipment line{counts.expiring_soon + counts.expired > 1 ? "s" : ""} require contract renewal or fresh tender publication (BR-09)
+                </p>
+                <p className="text-[11px] text-[#3c4a63]">
+                  {counts.expired > 0 ? `${counts.expired} RCs have expired and ` : ""}{counts.expiring_soon} RCs expire within statutory 180-day window. Initiate tender actions to maintain uninterrupted hospital supply.
+                </p>
+              </div>
+            </div>
+            <Link href="/tenders/workbench">
+              <button className="px-3 py-1.5 bg-[#0f2b5b] hover:bg-[#0a2149] text-white text-xs font-semibold rounded-md flex items-center gap-1.5 transition-colors cursor-pointer shrink-0">
+                <span>Open Tender Workbench</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </Link>
+          </div>
         </div>
       )}
 
-      {/* Table Card — styled identically to rate-contracts.tsx */}
+      {/* ── Table Card ── */}
       <div className="bg-white border border-[#e4eaf2] rounded-xl shadow-xs overflow-hidden">
-        {/* Filter Bar */}
+        {/* Filter Bar with Search, Status Filter & Equipment Filter */}
         <div className="p-3 border-b border-[#e4eaf2] bg-[#f8fafc] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
           <div className="flex items-center gap-2 flex-1 max-w-md">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-[#93a2b8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Search by name, code, RC no., or vendor…"
+                placeholder="Search by equipment, code, RC no., vendor..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full h-[32px] bg-white border border-[#e4eaf2] rounded-md text-xs text-[#152340] placeholder:text-[#93a2b8] pl-9 pr-3 focus:outline-none focus:border-[#2563eb]"
@@ -468,126 +643,273 @@ export default function RCCoverage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Filter className="w-3.5 h-3.5 text-[#6b7a93]" />
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-56 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Filter className="w-3.5 h-3.5 text-[#6b7a93] shrink-0" />
+            
+            {/* Status Filter */}
+            <Select value={statusFilter} onValueChange={(val) => { setStatusFilter(val); setPage(1); }}>
+              <SelectTrigger className="w-36 sm:w-44 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all" className="text-xs">All Statuses</SelectItem>
                 <SelectItem value="active_rc" className="text-xs">Active RC</SelectItem>
-                <SelectItem value="expiring_soon" className="text-xs">RC Expiring Soon (≤ 180 days)</SelectItem>
+                <SelectItem value="expiring_soon" className="text-xs">RC Expiring Soon (≤ 180d)</SelectItem>
                 <SelectItem value="expired" className="text-xs">RC Expired</SelectItem>
                 <SelectItem value="tender_in_progress" className="text-xs">Tender in Progress</SelectItem>
                 <SelectItem value="no_coverage" className="text-xs">No Coverage</SelectItem>
               </SelectContent>
             </Select>
 
-            <span className="text-xs font-medium text-[#6b7a93] ml-2">
-              Showing <span className="font-bold text-[#152340]">{filtered.length}</span> of {coverage.length} items
+            {/* Equipment Filter */}
+            <Select value={equipmentFilter} onValueChange={(val) => { setEquipmentFilter(val); setPage(1); }}>
+              <SelectTrigger className="w-44 sm:w-56 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md text-[#152340]">
+                <SelectValue placeholder="All Equipment" />
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                <SelectItem value="all" className="text-xs">All Equipment</SelectItem>
+                {equipmentOptions.map((eq: any) => (
+                  <SelectItem key={eq.id} value={String(eq.id)} className="text-xs">
+                    {eq.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <span className="text-xs font-medium text-[#6b7a93] ml-1 whitespace-nowrap">
+              Showing <span className="font-bold text-[#152340]">{filtered.length}</span> of {coverage.length}
             </span>
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-[#e4eaf2] bg-[#f8fafc] text-[#6b7a93] font-bold uppercase tracking-wider text-[10.5px]">
-                <th className="py-2.5 px-3">Item Code</th>
-                <th className="py-2.5 px-3">Item / Product Name</th>
-                <th className="py-2.5 px-3">RC Status</th>
-                <th className="py-2.5 px-3">RC / Tender No.</th>
-                <th className="py-2.5 px-3">Expiry Date</th>
-                <th className="py-2.5 px-3">Days Remaining</th>
-                <th className="py-2.5 px-3">Vendor / Tender Status</th>
-                <th className="py-2.5 px-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#eff3f8]">
-                {isLoading ? (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-16 text-center text-muted-foreground">
-                      <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
-                      Loading coverage data…
-                    </td>
-                  </tr>
-                ) : filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-16 text-center text-muted-foreground">
-                      No items match the current filter.
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((c) => {
-                    const meta = STATUS_META[c.status];
-                    const Icon = meta.icon;
-                    return (
-                      <tr key={c.equipmentId} className="hover:bg-[#eff5ff] border-b border-[#eff3f8] transition-colors">
-                        <td className="py-2.5 px-3 font-mono text-xs font-bold text-[#2563eb]">{c.equipmentCode}</td>
-                        <td className="py-2.5 px-3">
-                          <p className="font-semibold text-[#152340]">{c.equipmentName}</p>
-                          <p className="text-[11px] text-[#6b7a93] capitalize mt-0.5">
-                            {c.category.replace(/_/g, " ")}
-                          </p>
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <span className={cn(
-                            "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold border",
-                            meta.bg, meta.color, meta.border
-                          )}>
-                            <Icon className="h-3 w-3" />
-                            {meta.label}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 font-mono text-xs font-medium text-[#152340]">
-                          {c.rcNumber ?? c.tenderNumber ?? (
-                            <span className="text-[#93a2b8]">—</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 text-xs text-[#3c4a63]">
-                          {c.rcExpiry
-                            ? format(new Date(c.rcExpiry), "dd MMM yyyy")
-                            : <span className="text-[#93a2b8]">—</span>}
-                        </td>
-                        <td className="py-2.5 px-3">
-                          {c.daysRemaining != null ? (
-                            <span className={cn(
-                              "font-semibold tabular-nums text-xs",
-                              c.daysRemaining < 0 ? "text-[#dc2f3c] font-bold" :
-                              c.daysRemaining <= 90 ? "text-[#e08a0b] font-bold" :
-                              c.daysRemaining <= 180 ? "text-amber-500" : "text-[#159557]"
-                            )}>
-                              {c.daysRemaining < 0
-                                ? `${Math.abs(c.daysRemaining)}d overdue`
-                                : `${c.daysRemaining}d`}
+        {/* Table Body */}
+        {isLoading ? (
+          <div className="py-16 text-center">
+            <div className="w-6 h-6 border-2 border-[#2563eb] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+            <p className="text-xs text-[#6b7a93]">Loading rate contract coverage…</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="py-16 text-center">
+            <FileCheck className="w-8 h-8 text-[#93a2b8] mx-auto mb-2" />
+            <p className="text-xs font-semibold text-[#152340]">No equipment coverage matches your filter criteria</p>
+            <p className="text-[11px] text-[#6b7a93] mt-0.5">Try clearing the search or changing status/equipment filter.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-[#e4eaf2] bg-[#f8fafc] text-[#6b7a93] font-bold uppercase tracking-wider text-[10.5px]">
+                  <th className="py-2.5 px-3">Item Code</th>
+                  <th className="py-2.5 px-3">Equipment / Supply</th>
+                  <th className="py-2.5 px-3">Active RC / Tender</th>
+                  <th className="py-2.5 px-3">Empanelled Vendor</th>
+                  <th className="py-2.5 px-3">Base Unit Price</th>
+                  <th className="py-2.5 px-3">Validity End</th>
+                  <th className="py-2.5 px-3">Days Remaining</th>
+                  <th className="py-2.5 px-3">Coverage Status</th>
+                  <th className="py-2.5 px-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#eff3f8]">
+                {paginatedItems.map((c) => {
+                  return (
+                    <tr
+                      key={c.equipmentId}
+                      className="hover:bg-[#eff5ff] cursor-pointer transition-colors group"
+                      onClick={() => {
+                        if (c.rcId) {
+                          navigate(`/rate-contracts/${c.rcId}`);
+                        }
+                      }}
+                    >
+                      {/* Item Code */}
+                      <td className="py-2.5 px-3 align-middle">
+                        <span className="font-mono font-bold text-[#2563eb] text-[11.5px] group-hover:underline">
+                          {c.equipmentCode}
+                        </span>
+                      </td>
+
+                      {/* Equipment / Supply */}
+                      <td className="py-2.5 px-3 align-middle">
+                        <span className="font-medium text-[#152340] truncate max-w-[210px] block" title={c.equipmentName}>
+                          {c.equipmentName}
+                        </span>
+                        <span className="text-[10px] text-[#6b7a93] capitalize block truncate max-w-[210px]">
+                          {c.category?.replace(/_/g, " ")}
+                        </span>
+                      </td>
+
+                      {/* Active RC / Tender */}
+                      <td className="py-2.5 px-3 align-middle" onClick={(e) => e.stopPropagation()}>
+                        {c.rcNumber ? (
+                          <Link href={c.rcId ? `/rate-contracts/${c.rcId}` : `/rate-contracts`}>
+                            <span className="font-mono font-bold text-[#2563eb] text-[11px] hover:underline cursor-pointer block truncate max-w-[150px]">
+                              {c.rcNumber}
                             </span>
-                          ) : <span className="text-[#93a2b8]">—</span>}
-                        </td>
-                        <td className="py-2.5 px-3 text-xs text-[#3c4a63] max-w-[200px] truncate">
-                          {c.vendorName
-                            ?? (c.tenderStatus ? c.tenderStatus.replace(/_/g, " ") : "—")}
-                        </td>
-                        <td className="py-2.5 px-3 text-right">
-                          <ActionCell coverage={c} onRenewRC={openRenewRC} onNewRC={openNewRC} onInitiateTender={openInitiateTender} />
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
+                          </Link>
+                        ) : c.tenderNumber ? (
+                          <Link href="/tenders">
+                            <span className="font-mono text-[#0284c7] text-[11px] font-semibold hover:underline cursor-pointer block truncate max-w-[150px]">
+                              {c.tenderNumber}
+                            </span>
+                          </Link>
+                        ) : (
+                          <span className="text-[#93a2b8] font-mono text-[11px]">—</span>
+                        )}
+                      </td>
+
+                      {/* Empanelled Vendor */}
+                      <td className="py-2.5 px-3 align-middle">
+                        {c.vendorName ? (
+                          <div className="flex items-center gap-1.5" title={c.vendorName}>
+                            <Building2 className="w-3.5 h-3.5 text-[#6b7a93] shrink-0" />
+                            <span className="font-medium text-[#3c4a63] truncate max-w-[180px]">
+                              {c.vendorName}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-[#93a2b8]">—</span>
+                        )}
+                      </td>
+
+                      {/* Base Unit Price */}
+                      <td className="py-2.5 px-3 tabular-nums font-bold text-[#152340] align-middle whitespace-nowrap">
+                        {c.unitPrice ? `₹${c.unitPrice.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"}
+                      </td>
+
+                      {/* Validity End */}
+                      <td className="py-2.5 px-3 text-[#6b7a93] text-[11px] whitespace-nowrap align-middle">
+                        {c.rcExpiry ? format(new Date(c.rcExpiry), "dd MMM yyyy") : "—"}
+                      </td>
+
+                      {/* Days Remaining */}
+                      <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                        {getExpiryBadge(c.daysRemaining)}
+                      </td>
+
+                      {/* Coverage Status */}
+                      <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                        {getCoverageBadge(c.status)}
+                      </td>
+
+                      {/* Actions */}
+                      <td className="py-2.5 px-3 text-right align-middle" onClick={(e) => e.stopPropagation()}>
+                        <ActionCell
+                          coverage={c}
+                          onRenewRC={openRenewRC}
+                          onNewRC={openNewRC}
+                          onInitiateTender={openInitiateTender}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        </div>
+        )}
 
-        {/* Business Rules legend */}
-      <div className="p-4 bg-slate-50 border rounded-lg text-xs text-slate-600 space-y-1">
-        <p className="font-semibold text-slate-700 mb-2">Coverage Classification Rules</p>
-        <p><span className="text-emerald-600 font-medium">Active RC</span> — Valid RC exists with endDate &gt; today and endDate &gt; 180 days away</p>
-        <p><span className="text-amber-600 font-medium">RC Expiring Soon</span> — Active RC but expiry within <strong>180 days</strong> (BR-09: minimum 6-month advance alert)</p>
-        <p><span className="text-red-600 font-medium">RC Expired</span> — All RCs for this item have passed their end date</p>
-        <p><span className="text-blue-600 font-medium">Tender in Progress</span> — No active RC but a tender is underway for this item</p>
-        <p><span className="text-slate-500 font-medium">RC Not Available</span> — No RC and no tender exists for this item</p>
+        {/* ── Bottom-Right Pagination Bar ── */}
+        {filtered.length > 0 && (
+          <div className="p-3 border-t border-[#e4eaf2] bg-[#f8fafc] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="text-xs text-[#6b7a93]">
+              Showing <span className="font-semibold text-[#152340]">{(page - 1) * pageSize + 1}</span> to{" "}
+              <span className="font-semibold text-[#152340]">
+                {Math.min(page * pageSize, filtered.length)}
+              </span>{" "}
+              of <span className="font-semibold text-[#152340]">{filtered.length}</span> items
+            </div>
+
+            <div className="flex items-center gap-3 sm:ml-auto">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[#6b7a93] whitespace-nowrap">Rows per page</span>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(val) => {
+                    setPageSize(Number(val));
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-[66px] h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md font-medium text-[#152340] px-2.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10" className="text-xs">10</SelectItem>
+                    <SelectItem value="20" className="text-xs">20</SelectItem>
+                    <SelectItem value="50" className="text-xs">50</SelectItem>
+                    <SelectItem value="100" className="text-xs">100</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center transition-colors border border-transparent",
+                    page <= 1
+                      ? "bg-[#f1f5f9] text-[#94a3b8] cursor-not-allowed opacity-40"
+                      : "bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0] cursor-pointer"
+                  )}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <span className="text-xs text-[#6b7a93] whitespace-nowrap px-1">
+                  Page {page} of {totalPages}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center transition-colors border border-transparent",
+                    page >= totalPages
+                      ? "bg-[#f1f5f9] text-[#94a3b8] cursor-not-allowed opacity-40"
+                      : "bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0] cursor-pointer"
+                  )}
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Business Rules Classification Legend (neoInt style) ── */}
+      <div className="bg-white border border-[#e4eaf2] rounded-xl p-4 shadow-xs">
+        <p className="text-xs font-bold text-[#152340] uppercase tracking-wider mb-2.5 flex items-center gap-2">
+          <ShieldAlert className="w-3.5 h-3.5 text-[#2563eb]" />
+          Statutory RC Coverage Governance Rules (BR-09)
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs text-[#6b7a93]">
+          <div className="flex items-start gap-2">
+            <span className="neo-chip grn text-[10px] shrink-0 mt-0.5">Active RC</span>
+            <span>Valid master agreement in force with &gt; 180 days validity remaining.</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="neo-chip amb text-[10px] shrink-0 mt-0.5">Expiring Soon</span>
+            <span>Active RC expiring within <strong>180 days</strong>. Advance renewal triggered.</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="neo-chip red text-[10px] shrink-0 mt-0.5">Expired</span>
+            <span>Contract period elapsed. Indents for this equipment require open tendering.</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="neo-chip blu text-[10px] shrink-0 mt-0.5">Tender Active</span>
+            <span>Procurement tender currently active in bidding or technical evaluation.</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="neo-chip gry text-[10px] shrink-0 mt-0.5">No Coverage</span>
+            <span>No valid RC or tender registered. Multi-facility indent aggregation recommended.</span>
+          </div>
+        </div>
       </div>
 
       {/* ── Renew RC / New RC Drawer ── */}
@@ -742,62 +1064,68 @@ function ActionCell({
 }) {
   if (c.status === "active_rc") {
     return (
-      <Link href="/rate-contracts">
-        <Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
-          <Eye className="h-3 w-3" />View RC
-        </Button>
-      </Link>
+      <div className="flex items-center justify-end gap-1.5">
+        <Link href={c.rcId ? `/rate-contracts/${c.rcId}` : `/rate-contracts`}>
+          <button className="px-2 py-1 bg-white border border-[#e4eaf2] text-[#3c4a63] hover:border-[#2563eb] hover:text-[#2563eb] rounded text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer">
+            <Eye className="w-3 h-3" />
+            <span>View RC</span>
+          </button>
+        </Link>
+      </div>
     );
   }
 
   if (c.status === "expiring_soon" || c.status === "expired") {
     return (
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs gap-1 border-amber-300 text-amber-700 hover:bg-amber-50"
+      <div className="flex items-center justify-end gap-1.5 flex-wrap">
+        <button
           onClick={() => onRenewRC(c)}
+          className="px-2 py-1 bg-[#eff5ff] border border-[#bfdbfe] text-[#1e40af] hover:bg-[#dbeafe] rounded text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
         >
-          <RefreshCw className="h-3 w-3" />Renew RC
-        </Button>
-        <Link href="/rate-contracts">
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
-            <Eye className="h-3 w-3" />View
-          </Button>
-        </Link>
+          <RefreshCw className="w-3 h-3" />
+          <span>Renew RC</span>
+        </button>
+        {c.rcId && (
+          <Link href={`/rate-contracts/${c.rcId}`}>
+            <button className="px-2 py-1 bg-white border border-[#e4eaf2] text-[#3c4a63] hover:border-[#2563eb] hover:text-[#2563eb] rounded text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer">
+              <Eye className="w-3 h-3" />
+              <span>View</span>
+            </button>
+          </Link>
+        )}
       </div>
     );
   }
 
   if (c.status === "tender_in_progress") {
     return (
-      <Link href="/tenders">
-        <Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
-          <Eye className="h-3 w-3" />View Tender
-        </Button>
-      </Link>
+      <div className="flex items-center justify-end gap-1.5">
+        <Link href="/tenders">
+          <button className="px-2 py-1 bg-white border border-[#e4eaf2] text-[#3c4a63] hover:border-[#2563eb] hover:text-[#2563eb] rounded text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer">
+            <Eye className="w-3 h-3" />
+            <span>View Tender</span>
+          </button>
+        </Link>
+      </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 text-xs gap-1 text-primary border-primary/30"
+    <div className="flex items-center justify-end gap-1.5 flex-wrap">
+      <button
         onClick={() => onNewRC(c)}
+        className="px-2 py-1 bg-[#eff5ff] border border-[#bfdbfe] text-[#1e40af] hover:bg-[#dbeafe] rounded text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
       >
-        <Plus className="h-3 w-3" />New RC
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 text-xs gap-1 text-blue-700 border-blue-300 hover:bg-blue-50"
+        <Plus className="w-3 h-3" />
+        <span>New RC</span>
+      </button>
+      <button
         onClick={() => onInitiateTender(c)}
+        className="px-2 py-1 bg-white border border-[#e4eaf2] text-[#3c4a63] hover:border-[#2563eb] hover:text-[#2563eb] rounded text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
       >
-        <Gavel className="h-3 w-3" />Initiate Tender
-      </Button>
+        <Gavel className="w-3 h-3" />
+        <span>Tender</span>
+      </button>
     </div>
   );
 }

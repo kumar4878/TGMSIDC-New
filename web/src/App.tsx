@@ -229,6 +229,11 @@ function ScrollToTop() {
   const [location] = useLocation();
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    const mainEl = document.getElementById("main-scroll-container") || document.querySelector("main");
+    if (mainEl) {
+      mainEl.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      mainEl.scrollTop = 0;
+    }
   }, [location]);
   return null;
 }

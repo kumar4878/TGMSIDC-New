@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -25,6 +25,7 @@ import {
   TrendingUp, TrendingDown, Minus, Download, Printer, RefreshCw,
   BarChart3, IndianRupee, Truck, ShieldCheck, AlertTriangle, CheckCircle2,
   FileText, Clock, Users, Activity, Gavel, XCircle, ShieldAlert,
+  Search, ChevronLeft, ChevronRight, FileSpreadsheet, Eye, Filter, X,
 } from "lucide-react";
 import { differenceInDays, format } from "date-fns";
 import { mockEquipment, mockRateContracts, mockTenders, mockDistributionData, mockIndents, mockBudgetByProgramme, mockVendorPerformance } from "@/mocks/data";
@@ -41,21 +42,21 @@ const QUARTERS = [
   { id: "Q4",  label: "Q4 (Jan – Mar)", months: ["January", "February", "March"] },
 ];
 
-/* ── Tabs (Process Book §13 Statutory Suite) ─────────────────── */
+/* ── Tabs (Process Book Suite) ─────────────────── */
 const TABS = [
-  { id: "asset_report",  label: "Asset Report (FR-RPT-001)",           icon: Activity },
-  { id: "overview",      label: "Executive Overview (R-1)",            icon: BarChart3 },
-  { id: "indent_aging",  label: "Indent Aging & Pendency (R-2)",       icon: Clock },
-  { id: "rc_expiry",     label: "RC Expiry & Renewal (R-5)",           icon: ShieldAlert },
-  { id: "po_status",     label: "PO & Payment Tracker (R-6)",          icon: FileText },
-  { id: "financial",     label: "Budget & Spend (R-7)",                icon: IndianRupee },
-  { id: "delivery_qa",   label: "Delivery & QA (R-8, R-9)",            icon: Truck },
-  { id: "equipment_inv", label: "Equipment Inventory (R-4)",           icon: Activity },
-  { id: "vendor",        label: "Vendor Performance (R-3)",            icon: Users },
-  { id: "sla",           label: "SLA & Compliance (R-10)",             icon: ShieldCheck },
-  { id: "tender_audit",  label: "Tender Statutory Audit (R-15)",       icon: Gavel },
-  { id: "deo_accuracy",  label: "DEO Data Quality (R-14)",             icon: ShieldCheck },
+  { id: "overview",      label: "Executive Overview",                  icon: BarChart3 },
+  { id: "indent_aging",  label: "Indent Aging & Pendency",             icon: Clock },
+  { id: "rc_expiry",     label: "RC Expiry & Renewal",                 icon: ShieldAlert },
+  { id: "po_status",     label: "PO & Payment Tracker",                icon: FileText },
+  { id: "financial",     label: "Budget & Spend",                      icon: IndianRupee },
+  { id: "delivery_qa",   label: "Delivery & QA Compliance",            icon: Truck },
+  { id: "equipment_inv", label: "Equipment Status / Inventory",        icon: Activity },
+  { id: "vendor",        label: "Vendor Performance",                  icon: Users },
+  { id: "sla",           label: "SLA & Compliance",                    icon: ShieldCheck },
+  { id: "tender_audit",  label: "Tender Statutory Audit",              icon: Gavel },
+  { id: "deo_accuracy",  label: "DEO Data Quality",                    icon: ShieldCheck },
   { id: "distribution",  label: "Distribution Analytics",              icon: Truck },
+  { id: "asset_report",  label: "Asset Report",                        icon: Activity },
 ];
 
 
@@ -85,7 +86,7 @@ function StatCard({ title, value, sub, trend, trendGood, icon: Icon, color }:{
   icon:React.ElementType; color:string;
 }) {
   return (
-    <Card className="border hover:shadow-md transition-shadow">
+    <Card className="bg-white border border-[#e4eaf2] shadow-xs hover:shadow-md transition-shadow">
       <CardContent className="p-5">
         <div className="flex items-start gap-3">
           <div className="p-2.5 rounded-xl shrink-0" style={{ background: `${color}18` }}>
@@ -311,7 +312,7 @@ function OverviewTab({ pipeline, sla }: any) {
         <CardHeader className="pb-2 flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Procurement Pipeline Register (R-1)
+              Procurement Pipeline Register
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
               Live tracking of all active equipment requisitions across statutory milestones
@@ -401,7 +402,7 @@ function FinancialTab() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
-            Programme &amp; Account Head Budget Utilisation (R-7)
+            Programme &amp; Account Head Budget Utilisation
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Breakdown of capital sanctions, commitments, and actual expenditures per government scheme
@@ -713,7 +714,7 @@ function VendorTab() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
-            Vendor Statutory Performance &amp; Contractual Compliance (R-3)
+            Vendor Statutory Performance &amp; Contractual Compliance
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Composite evaluation: On-time Delivery (40%) + QA Acceptance (35%) + Contractual Compliance (25%)
@@ -747,7 +748,7 @@ function VendorTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Statutory Weighted Score Breakdown (R-3)
+              Statutory Weighted Score Breakdown
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -805,7 +806,7 @@ function VendorTab() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            Empanelled Supplier Performance Register (R-3)
+            Empanelled Supplier Performance Register
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -936,7 +937,7 @@ function SlaTab({ sla }: any) {
         <div className="flex items-center gap-2">
           <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-xs gap-1.5 py-1">
             <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            Live Statutory SLA Tracking (R-10)
+            Live Statutory SLA Tracking
           </Badge>
           <span className="text-xs text-muted-foreground">Target Compliance: ≥95% across all 6 stages</span>
         </div>
@@ -953,7 +954,7 @@ function SlaTab({ sla }: any) {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            Stage-wise Turnaround Time (Days) vs Statutory SLA Benchmark (R-10)
+            Stage-wise Turnaround Time (Days) vs Statutory SLA Benchmark
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -991,7 +992,7 @@ function SlaTab({ sla }: any) {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              SLA Breach &amp; Turnaround by Stage (R-10)
+              SLA Breach &amp; Turnaround by Stage
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -1556,7 +1557,7 @@ function IndentAgingTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Statutory Aging Buckets (R-2)
+              Statutory Aging Buckets
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1623,7 +1624,7 @@ function IndentAgingTab() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            Active Indent Pendency Register (R-2)
+            Active Indent Pendency Register
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -1716,7 +1717,7 @@ function RCExpiryTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Rate Contract Expiry Horizon (R-5)
+              Rate Contract Expiry Horizon
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1791,7 +1792,7 @@ function RCExpiryTab() {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Rate Contract Expiry &amp; Statutory Renewal Status (R-5)
+              Rate Contract Expiry &amp; Statutory Renewal Status
             </CardTitle>
             <Badge variant="outline" className="text-xs">
               Retender before expiration
@@ -1966,7 +1967,7 @@ function POStatusTab() {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Purchase Order Milestones &amp; Payment Status (R-6)
+              Purchase Order Milestones &amp; Payment Status
             </CardTitle>
             <Badge variant="outline" className="text-xs bg-slate-100">
               Manual Paid / Not-Paid Tracking
@@ -2032,6 +2033,8 @@ function POStatusTab() {
 
 
 function DeliveryQATab() {
+  const [delStatusFilter, setDelStatusFilter] = useState("all");
+
   const { data: complianceData = [] } = useQuery({
     queryKey: ["/reports/delivery-compliance"],
     queryFn: getDeliveryComplianceReport,
@@ -2043,6 +2046,13 @@ function DeliveryQATab() {
 
   const onTimeCount = complianceData.filter((d: any) => d.isOnTime).length;
   const onTimeRate = complianceData.length > 0 ? Math.round((onTimeCount / complianceData.length) * 100) : 0;
+  const delayedCount = complianceData.length - onTimeCount;
+
+  const filteredCompliance = complianceData.filter((d: any) => {
+    if (delStatusFilter === "ontime") return d.isOnTime;
+    if (delStatusFilter === "delayed") return !d.isOnTime;
+    return true;
+  });
 
   const leadTimeData = [
     { id: "SSA-0501", facility: "Gandhi Hosp", days: 22, fill: "#10b981" },
@@ -2063,18 +2073,24 @@ function DeliveryQATab() {
     <div className="space-y-5">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard title="Total Shipments" value={complianceData.length} sub="Hospital Consignments" icon={Truck} color={C.blue} />
-        <StatCard title="On-Time Delivery" value={`${onTimeRate}%`} sub={`${onTimeCount} on time`} icon={Clock} color={C.emerald} />
+        <StatCard
+          title="On-Time Delivery"
+          value={`${onTimeRate}%`}
+          sub={`${onTimeCount} on time · ${delayedCount} delayed (LD Applied)`}
+          icon={Clock}
+          color={onTimeRate >= 85 ? C.emerald : onTimeRate >= 70 ? C.amber : C.rose}
+        />
         <StatCard title="QA First-Pass Rate" value={`${qaSummary.firstPassRate}%`} sub={`${qaSummary.acceptedCount} passed on first inspect`} icon={ShieldCheck} color={C.sky} />
         <StatCard title="Conditional Rectifications" value={qaSummary.conditionalCount} sub="15-Day Vendor SLA Notice" icon={AlertTriangle} color={C.amber} />
       </div>
 
-      {/* Graphical Representations for R-8 and R-9 */}
+      {/* Graphical Representations for Delivery & QA */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Consignment Lead-Time vs 30-Day SLA */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Consignment Lead-Time vs 30-Day Statutory SLA (R-8)
+              Consignment Lead-Time vs 30-Day Statutory SLA
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -2104,7 +2120,7 @@ function DeliveryQATab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Consignee QA &amp; Acceptance Outcomes (R-9)
+              Consignee QA &amp; Acceptance Outcomes
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row items-center gap-4">
@@ -2151,10 +2167,26 @@ function DeliveryQATab() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Compliance Table with Discrepancy & Resolution */}
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Delivery Compliance &amp; Lead-Time (R-8)
-            </CardTitle>
+          <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
+            <div>
+              <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                Delivery Compliance &amp; Lead-Time
+              </CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Consignments tracked for 30-day SLA compliance and liquidated damages
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <select
+                value={delStatusFilter}
+                onChange={(e) => setDelStatusFilter(e.target.value)}
+                className="text-xs bg-white border border-[#e4eaf2] rounded px-2 py-1 text-[#152340] cursor-pointer"
+              >
+                <option value="all">All Deliveries ({complianceData.length})</option>
+                <option value="ontime">On-Time Only ({onTimeCount})</option>
+                <option value="delayed">Delayed / LD Due ({delayedCount})</option>
+              </select>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto max-h-[380px]">
@@ -2170,25 +2202,28 @@ function DeliveryQATab() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {complianceData.map((d: any, idx: number) => {
+                  {filteredCompliance.map((d: any) => {
                     const discrepancy = d.delayDays > 0
-                      ? `Delayed by ${d.delayDays}d · LD applicable`
-                      : idx === 1
+                      ? `Delayed by ${d.delayDays}d · LD ${(d.delayDays >= 14 ? "1.0%" : "0.5%")} applied`
+                      : d.deliveryTrackingId === "DEL-00002"
                       ? "Minor accessory carton seal damaged"
                       : "None · Full package intact";
                     return (
                       <tr key={d.id} className="hover:bg-muted/20">
-                        <td className="px-3 py-2 font-mono font-medium text-primary">{d.deliveryTrackingId}</td>
-                        <td className="px-3 py-2">{d.facilityName}</td>
+                        <td className="px-3 py-2 font-mono font-medium text-primary">
+                          <div>{d.deliveryTrackingId}</div>
+                          {d.poNumber && <div className="text-[10px] text-muted-foreground">{d.poNumber}</div>}
+                        </td>
+                        <td className="px-3 py-2 font-medium text-[#152340]">{d.facilityName}</td>
                         <td className="px-3 py-2 text-muted-foreground">{d.vendorName}</td>
                         <td className="px-3 py-2 text-right font-bold">
                           {d.delayDays > 0 ? (
-                            <span className="text-rose-600">+{d.delayDays}d LD</span>
+                            <span className="neo-chip red">+{d.delayDays}d LD</span>
                           ) : (
-                            <span className="text-emerald-700">On Time</span>
+                            <span className="neo-chip grn">On Time</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-[11px] text-slate-600 max-w-[140px] truncate" title={discrepancy}>
+                        <td className="px-3 py-2 text-[11px] text-slate-600 max-w-[150px] truncate" title={discrepancy}>
                           {discrepancy}
                         </td>
                         <td className="px-3 py-2 capitalize">
@@ -2209,7 +2244,7 @@ function DeliveryQATab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Consignee QA &amp; Acceptance Summary (R-9)
+              Consignee QA &amp; Acceptance Summary
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -2262,81 +2297,215 @@ function DeliveryQATab() {
 
 function EquipmentInventoryTab() {
   const [filterCat, setFilterCat] = useState("all");
+  const [filterDistrict, setFilterDistrict] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterWarranty, setFilterWarranty] = useState("all");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [selectedAsset, setSelectedAsset] = useState<any | null>(null);
 
-  const { data: invData = [] } = useQuery({
+  const { data: invData = [], isLoading } = useQuery({
     queryKey: ["/reports/equipment-inventory"],
     queryFn: getEquipmentInventoryReport,
   });
 
-  const totalInstalled = invData.length;
+  // Extract unique categories and districts for dropdowns
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    invData.forEach((i: any) => { if (i.category) set.add(i.category); });
+    return Array.from(set).sort();
+  }, [invData]);
+
+  const districts = useMemo(() => {
+    const set = new Set<string>();
+    invData.forEach((i: any) => { if (i.district) set.add(i.district); });
+    return Array.from(set).sort();
+  }, [invData]);
+
+  // Comprehensive filter logic
+  const filteredInv = useMemo(() => {
+    return invData.filter((i: any) => {
+      if (filterCat !== "all" && i.category !== filterCat) return false;
+      if (filterDistrict !== "all" && i.district !== filterDistrict) return false;
+      if (filterStatus !== "all" && i.currentStatus !== filterStatus) return false;
+      if (filterWarranty === "warranty" && !i.warrantyActive) return false;
+      if (filterWarranty === "camc" && !i.camcStatus?.toLowerCase()?.includes("camc")) return false;
+      if (filterWarranty === "expired" && (i.warrantyActive || i.camcStatus?.toLowerCase()?.includes("active camc"))) return false;
+
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const matches =
+          (i.equipmentName?.toLowerCase() || "").includes(q) ||
+          (i.serialNumber?.toLowerCase() || "").includes(q) ||
+          (i.assetTag?.toLowerCase() || "").includes(q) ||
+          (i.poNumber?.toLowerCase() || "").includes(q) ||
+          (i.vendorName?.toLowerCase() || "").includes(q) ||
+          (i.institutionName?.toLowerCase() || "").includes(q) ||
+          (i.district?.toLowerCase() || "").includes(q);
+        if (!matches) return false;
+      }
+      return true;
+    });
+  }, [invData, filterCat, filterDistrict, filterStatus, filterWarranty, search]);
+
+  // Dynamic KPI Stats
+  const totalAssets = invData.length;
+  const activeAssets = invData.filter((i: any) => i.currentStatus === "Active / Operational" || i.rawStatus === "active").length;
+  const underRepair = invData.filter((i: any) => i.currentStatus === "Under Repair" || ["under_repair", "under_maintenance", "breakdown"].includes(i.rawStatus)).length;
+  const decommissioned = invData.filter((i: any) => i.currentStatus === "Decommissioned" || ["decommissioned", "disposed"].includes(i.rawStatus)).length;
   const underWarranty = invData.filter((i: any) => i.warrantyActive).length;
+  const underCamc = invData.filter((i: any) => i.camcStatus?.includes("Active CAMC")).length;
 
-  const filteredInv = invData.filter((i: any) => {
-    if (filterStatus === "warranty" && !i.warrantyActive) return false;
-    if (filterStatus === "expired" && i.warrantyActive) return false;
-    return true;
-  });
+  const activePct = totalAssets > 0 ? ((activeAssets / totalAssets) * 100).toFixed(1) : "0";
+  const repairPct = totalAssets > 0 ? ((underRepair / totalAssets) * 100).toFixed(1) : "0";
 
-  const facilityDeploymentData = [
-    { facility: "Gandhi Hosp", units: 28, valueLakhs: 340 },
-    { facility: "Osmania Gen", units: 24, valueLakhs: 295 },
-    { facility: "NIMS Hyd", units: 22, valueLakhs: 410 },
-    { facility: "MGM Warangal", units: 18, valueLakhs: 180 },
-    { facility: "RIMS Adilabad", units: 14, valueLakhs: 135 },
-    { facility: "GGH Nizamabad", units: 12, valueLakhs: 98 },
+  // Pagination logic
+  const totalPages = Math.max(1, Math.ceil(filteredInv.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedData = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredInv.slice(start, start + pageSize);
+  }, [filteredInv, currentPage, pageSize]);
+
+  // Chart data: Top Institutions
+  const institutionDistribution = useMemo(() => {
+    const counts: Record<string, number> = {};
+    invData.forEach((i: any) => {
+      const name = i.institutionName?.replace("Government Medical College", "GMC")?.replace("District Hospital", "DH") || "Other";
+      counts[name] = (counts[name] || 0) + 1;
+    });
+    return Object.entries(counts)
+      .map(([facility, units]) => ({ facility: facility.slice(0, 18), units }))
+      .sort((a, b) => b.units - a.units)
+      .slice(0, 6);
+  }, [invData]);
+
+  // Chart data: Status breakdown
+  const statusBreakdownData = [
+    { name: "Active / Operational", value: activeAssets || 1, fill: "#10b981" },
+    { name: "Under Repair", value: underRepair || 0, fill: "#f59e0b" },
+    { name: "Decommissioned", value: decommissioned || 0, fill: "#ef4444" },
+    { name: "Standby / Other", value: Math.max(0, totalAssets - activeAssets - underRepair - decommissioned), fill: "#64748b" },
   ];
 
-  const warrantyCamcData = [
-    { name: "Active OEM Warranty", value: underWarranty || 85, fill: "#10b981" },
-    { name: "Under Active CAMC", value: 24, fill: "#3b82f6" },
-    { name: "Warranty Expiring (<60d)", value: 6, fill: "#f59e0b" },
-    { name: "CAMC Renewal Due", value: 3, fill: "#ef4444" },
-  ];
+  // CSV Export function
+  const handleExportCSV = () => {
+    const headers = [
+      "Equipment Name",
+      "Serial No.",
+      "PO Ref",
+      "Vendor",
+      "Institution / Facility",
+      "District",
+      "Delivery Date",
+      "Installation Date",
+      "Warranty Expiry",
+      "CAMC Status",
+      "Current Status",
+      "Equipment Age",
+    ];
+    const csvRows = [headers.join(",")];
+    filteredInv.forEach((r: any) => {
+      const row = [
+        `"${(r.equipmentName || "").replace(/"/g, '""')}"`,
+        `"${(r.serialNumber || r.assetTag || "").replace(/"/g, '""')}"`,
+        `"${(r.poNumber || "").replace(/"/g, '""')}"`,
+        `"${(r.vendorName || "").replace(/"/g, '""')}"`,
+        `"${(r.institutionName || "").replace(/"/g, '""')}"`,
+        `"${(r.district || "").replace(/"/g, '""')}"`,
+        `"${r.deliveryDate ? format(new Date(r.deliveryDate), "dd/MM/yyyy") : ""}"`,
+        `"${r.installationDate ? format(new Date(r.installationDate), "dd/MM/yyyy") : ""}"`,
+        `"${r.warrantyEndDate ? format(new Date(r.warrantyEndDate), "dd/MM/yyyy") : ""}"`,
+        `"${(r.camcStatus || "").replace(/"/g, '""')}"`,
+        `"${(r.currentStatus || "").replace(/"/g, '""')}"`,
+        `"${(r.equipmentAge || "").replace(/"/g, '""')}"`,
+      ];
+      csvRows.push(row.join(","));
+    });
+    const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `TGMSIDC_Equipment_Inventory_Report_${format(new Date(), "yyyyMMdd")}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard title="Commissioned Units" value={totalInstalled} sub="Across Telangana Facilities" icon={Activity} color={C.blue} />
-        <StatCard title="Active Warranty" value={underWarranty} sub="Covered under OEM Guarantee" icon={ShieldCheck} color={C.emerald} />
-        <StatCard title="Warranty Expiring" value={totalInstalled - underWarranty} sub="Transition to CAMC" icon={Clock} color={C.amber} />
-        <StatCard title="Operational Status" value="100%" sub="Zero downtime reported" icon={CheckCircle2} color={C.sky} />
+      {/* ── Summary KPI Cards ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
+        <StatCard
+          title="Total Deployed Units"
+          value={totalAssets}
+          sub="33 Telangana Health Districts"
+          icon={Activity}
+          color={C.blue}
+        />
+        <StatCard
+          title="Active & Operational"
+          value={`${activeAssets}`}
+          sub={`${activePct}% of total fleet`}
+          icon={CheckCircle2}
+          color={C.emerald}
+        />
+        <StatCard
+          title="Under Repair / Maint."
+          value={underRepair}
+          sub={`${repairPct}% require service`}
+          icon={AlertTriangle}
+          color={C.amber}
+        />
+        <StatCard
+          title="Decommissioned"
+          value={decommissioned}
+          sub="Condemned / Replaced"
+          icon={XCircle}
+          color={C.slate}
+        />
+        <StatCard
+          title="Active Warranty / CAMC"
+          value={`${underWarranty}`}
+          sub={`${underCamc} on active CAMC`}
+          icon={ShieldCheck}
+          color={C.indigo}
+        />
       </div>
 
-      {/* Graphical Representations for R-4 */}
+      {/* ── Graphical Charts ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Equipment Deployed by Major Facility */}
+        {/* Facility Deployment Distribution */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Equipment Deployed by Major Health Facility (R-4)
+              Equipment Deployed by Major Health Facility
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-56 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={facilityDeploymentData} margin={{ top: 10, right: 10, left: -10, bottom: 5 }}>
+                <BarChart data={institutionDistribution} margin={{ top: 10, right: 10, left: -10, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                   <XAxis dataKey="facility" tick={{ fontSize: 10 }} />
                   <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(val: any, name: any) => [name === "units" ? `${val} Units` : `₹${val} Lakhs`, name === "units" ? "Deployed Units" : "Asset Value"]} />
-                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                  <Tooltip formatter={(val: any) => [`${val} Units`, "Deployed Units"]} />
                   <Bar dataKey="units" name="Deployed Units" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="valueLakhs" name="Asset Value (₹L)" fill="#10b981" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
           <div className="pb-3 text-center text-xs text-muted-foreground border-t pt-2">
-            Asset register spans 33 Telangana health districts and primary/secondary centres
+            Asset register spans teaching hospitals, district headquarters, and TVVP facilities
           </div>
         </Card>
 
-        {/* Warranty & CAMC Status Breakdown */}
+        {/* Operational Status Breakdown */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Warranty &amp; Post-Warranty CAMC Coverage Status
+              Equipment Operational &amp; Service Status
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row items-center gap-4">
@@ -2344,14 +2513,14 @@ function EquipmentInventoryTab() {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={warrantyCamcData}
+                    data={statusBreakdownData}
                     dataKey="value"
                     nameKey="name"
                     innerRadius={55}
                     outerRadius={80}
                     paddingAngle={3}
                   >
-                    {warrantyCamcData.map((entry: any, index: number) => (
+                    {statusBreakdownData.map((entry: any, index: number) => (
                       <Cell key={`cell-${index}`} fill={entry.fill} />
                     ))}
                   </Pie>
@@ -2360,7 +2529,7 @@ function EquipmentInventoryTab() {
               </ResponsiveContainer>
             </div>
             <div className="flex-1 space-y-2 text-xs">
-              {warrantyCamcData.map((cat: any) => (
+              {statusBreakdownData.map((cat: any) => (
                 <div key={cat.name} className="flex items-center justify-between border-b pb-1.5 last:border-0">
                   <div className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.fill }} />
@@ -2370,150 +2539,540 @@ function EquipmentInventoryTab() {
                 </div>
               ))}
               <div className="pt-2 text-muted-foreground text-[11px]">
-                Statutory standard: 100% equipment covered under OEM Warranty or CAMC
+                Statutory requirement: Operational uptime ≥ 95% under warranty &amp; CAMC SLA
               </div>
             </div>
           </CardContent>
           <div className="pb-3 text-center text-xs text-muted-foreground border-t pt-2">
-            Automatic transition to 5-year Comprehensive AMC
+            Automated escalation triggered when equipment exceeds 72h downtime
           </div>
         </Card>
       </div>
 
-      {/* Filter Bar */}
-      <div className="flex items-center justify-between gap-4 flex-wrap bg-slate-50 p-3 rounded-lg border">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-slate-700">Filter Inventory:</span>
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="text-xs border rounded-md px-2.5 py-1.5 bg-white"
-          >
-            <option value="all">All Warranty Statuses</option>
-            <option value="warranty">Active OEM Warranty Only</option>
-            <option value="expired">Warranty Expired (CAMC Due)</option>
-          </select>
-        </div>
-        <Badge variant="outline" className="text-xs">
-          Showing {filteredInv.length} of {totalInstalled} Deployed Units
-        </Badge>
-      </div>
+      {/* ── Multi-Filter Toolbar & Table Card ── */}
+      <Card className="border border-[#e4eaf2] shadow-xs">
+        <CardHeader className="p-3.5 border-b border-[#e4eaf2] bg-white">
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-sm font-bold text-[#152340] uppercase tracking-wider">
+                Equipment Status / Inventory Report
+              </CardTitle>
+              <p className="text-xs text-[#6b7a93] mt-0.5">
+                Complete inventory of procured equipment with location, lifecycle data, and warranty/CAMC coverage (§3.2.3)
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportCSV}
+                className="gap-1.5 text-xs bg-white border-[#e4eaf2] text-[#3c4a63] hover:text-[#2563eb] hover:border-[#2563eb] cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Export Excel / CSV</span>
+              </Button>
+              <Badge variant="outline" className="text-xs bg-white text-[#152340] border-[#e4eaf2]">
+                Showing {filteredInv.length} of {totalAssets} Assets
+              </Badge>
+            </div>
+          </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            Equipment Master Catalog &amp; Hospital Deployed Inventory (R-4)
-          </CardTitle>
+          {/* Filter Controls Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5 pt-3">
+            {/* Search Input */}
+            <div className="relative md:col-span-1">
+              <Search className="w-3.5 h-3.5 text-[#93a2b8] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search equipment, serial, PO..."
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                className="w-full h-8 bg-white border border-[#e4eaf2] rounded-md text-xs text-[#152340] placeholder:text-[#93a2b8] pl-8 pr-2.5 focus:outline-none focus:border-[#2563eb]"
+              />
+            </div>
+
+            {/* Category Filter */}
+            <div>
+              <select
+                value={filterCat}
+                onChange={(e) => { setFilterCat(e.target.value); setPage(1); }}
+                className="w-full h-8 bg-white border border-[#e4eaf2] rounded-md text-xs text-[#152340] px-2.5 focus:outline-none focus:border-[#2563eb] cursor-pointer"
+              >
+                <option value="all">All Categories ({categories.length})</option>
+                {categories.map((c: string) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* District Filter */}
+            <div>
+              <select
+                value={filterDistrict}
+                onChange={(e) => { setFilterDistrict(e.target.value); setPage(1); }}
+                className="w-full h-8 bg-white border border-[#e4eaf2] rounded-md text-xs text-[#152340] px-2.5 focus:outline-none focus:border-[#2563eb] cursor-pointer"
+              >
+                <option value="all">All Districts ({districts.length})</option>
+                {districts.map((d: string) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Current Status Filter */}
+            <div>
+              <select
+                value={filterStatus}
+                onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
+                className="w-full h-8 bg-white border border-[#e4eaf2] rounded-md text-xs text-[#152340] px-2.5 focus:outline-none focus:border-[#2563eb] cursor-pointer"
+              >
+                <option value="all">All Current Statuses</option>
+                <option value="Active / Operational">Active / Operational</option>
+                <option value="Under Repair">Under Repair</option>
+                <option value="Decommissioned">Decommissioned</option>
+                <option value="Standby / Inactive">Standby / Inactive</option>
+              </select>
+            </div>
+
+            {/* Warranty / CAMC Status Filter */}
+            <div>
+              <select
+                value={filterWarranty}
+                onChange={(e) => { setFilterWarranty(e.target.value); setPage(1); }}
+                className="w-full h-8 bg-white border border-[#e4eaf2] rounded-md text-xs text-[#152340] px-2.5 focus:outline-none focus:border-[#2563eb] cursor-pointer"
+              >
+                <option value="all">All Warranty / CAMC</option>
+                <option value="warranty">Active OEM Warranty Only</option>
+                <option value="camc">Under Active CAMC</option>
+                <option value="expired">Warranty Expired / Due</option>
+              </select>
+            </div>
+          </div>
         </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-muted/30">
-                <tr className="border-b">
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Asset Tag / Serial No.</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Equipment Description</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Hospital Facility</th>
-                  <th className="px-3 py-2 text-center font-medium text-muted-foreground">Qty</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Commissioned</th>
-                  <th className="px-3 py-2 text-center font-medium text-muted-foreground">Age</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Warranty Status</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Warranty Expiry</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">CAMC Post-Warranty</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {filteredInv.map((inv: any, i: number) => {
-                  const delDate = new Date(inv.deliveredDate);
-                  const ageMonths = Math.max(1, Math.round(differenceInDays(new Date(), delDate) / 30.4));
-                  const ageDisplay = ageMonths >= 12 ? `${(ageMonths / 12).toFixed(1)} yrs` : `${ageMonths} mos`;
-                  const warrantyExpiryDate = new Date(delDate.getTime() + (inv.warrantyActive ? 3 : 1) * 365 * 86400000);
-                  const serialNo = `SN-${inv.deliveryTrackingId.replace(/[^a-zA-Z0-9]/g, "").slice(-6)}-${i+1}`;
 
-                  return (
-                    <tr key={inv.id || i} className="hover:bg-muted/20">
-                      <td className="px-3 py-2.5 font-mono font-medium text-primary">
-                        <div>{inv.deliveryTrackingId}</div>
-                        <div className="text-[10px] text-muted-foreground">{serialNo}</div>
-                      </td>
-                      <td className="px-3 py-2.5 font-semibold text-foreground">{inv.equipmentName}</td>
-                      <td className="px-3 py-2.5">{inv.facilityName}</td>
-                      <td className="px-3 py-2.5 text-center font-bold">{inv.quantity}</td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">{delDate.toLocaleDateString("en-IN")}</td>
-                      <td className="px-3 py-2.5 text-center font-semibold">{ageDisplay}</td>
-                      <td className="px-3 py-2.5">
-                        <Badge className={cn("text-[10px] border-0", inv.warrantyActive ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")}>
-                          {inv.warrantyActive ? "Active OEM Warranty" : "Warranty Expired"}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2.5 whitespace-nowrap text-muted-foreground">
-                        {warrantyExpiryDate.toLocaleDateString("en-IN")}
-                      </td>
-                      <td className="px-3 py-2.5 text-muted-foreground font-medium">{inv.camcStatus}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        {/* ── Table Card Body ── */}
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="py-16 text-center">
+              <div className="w-6 h-6 border-2 border-[#2563eb] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+              <p className="text-xs text-[#6b7a93]">Loading equipment assets…</p>
+            </div>
+          ) : filteredInv.length === 0 ? (
+            <div className="py-16 text-center">
+              <Activity className="w-8 h-8 text-[#93a2b8] mx-auto mb-2" />
+              <p className="text-xs font-semibold text-[#152340]">No equipment matches your filter criteria</p>
+              <p className="text-[11px] text-[#6b7a93] mt-0.5">Try resetting or broadening your search parameters.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-[#e4eaf2] bg-[#f8fafc] text-[#6b7a93] font-bold uppercase tracking-wider text-[10.5px]">
+                    <th className="py-2.5 px-3">Equipment Name</th>
+                    <th className="py-2.5 px-3">Serial No.</th>
+                    <th className="py-2.5 px-3">PO Ref</th>
+                    <th className="py-2.5 px-3">Vendor</th>
+                    <th className="py-2.5 px-3">Institution / Facility</th>
+                    <th className="py-2.5 px-3">District</th>
+                    <th className="py-2.5 px-3">Delivery Date</th>
+                    <th className="py-2.5 px-3">Installation Date</th>
+                    <th className="py-2.5 px-3">Warranty Expiry</th>
+                    <th className="py-2.5 px-3">CAMC Status</th>
+                    <th className="py-2.5 px-3">Current Status</th>
+                    <th className="py-2.5 px-3 text-center">Equipment Age</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#eff3f8]">
+                  {paginatedData.map((inv: any, idx: number) => {
+                    const delDate = inv.deliveryDate ? new Date(inv.deliveryDate) : null;
+                    const instDate = inv.installationDate ? new Date(inv.installationDate) : null;
+                    const warDate = inv.warrantyEndDate ? new Date(inv.warrantyEndDate) : null;
+
+                    const isRepair = inv.currentStatus === "Under Repair";
+                    const isDecom = inv.currentStatus === "Decommissioned";
+                    const isActive = inv.currentStatus === "Active / Operational";
+
+                    return (
+                      <tr
+                        key={inv.id || idx}
+                        onClick={() => setSelectedAsset(inv)}
+                        className="hover:bg-[#eff5ff] cursor-pointer transition-colors"
+                      >
+                        {/* 1. Equipment Name */}
+                        <td className="py-2.5 px-3 font-semibold text-[#152340]">
+                          <div className="truncate max-w-[200px]" title={inv.equipmentName}>
+                            {inv.equipmentName}
+                          </div>
+                          <span className="text-[10px] text-[#6b7a93] font-normal block truncate max-w-[200px]">
+                            {inv.category}
+                          </span>
+                        </td>
+
+                        {/* 2. Serial No. */}
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-[#2563eb] whitespace-nowrap">
+                          <span className="font-bold">{inv.serialNumber || inv.assetTag}</span>
+                          {inv.assetTag && inv.assetTag !== inv.serialNumber && (
+                            <span className="text-[10px] text-[#6b7a93] block">{inv.assetTag}</span>
+                          )}
+                        </td>
+
+                        {/* 3. PO Ref */}
+                        <td className="py-2.5 px-3 font-mono text-[11.5px] font-semibold text-[#152340] whitespace-nowrap">
+                          {inv.poNumber || "PO-TGMSIDC-RC"}
+                        </td>
+
+                        {/* 4. Vendor */}
+                        <td className="py-2.5 px-3 text-[#3c4a63]">
+                          <span className="truncate max-w-[150px] block" title={inv.vendorName}>
+                            {inv.vendorName}
+                          </span>
+                        </td>
+
+                        {/* 5. Institution */}
+                        <td className="py-2.5 px-3 text-[#152340] font-medium">
+                          <span className="truncate max-w-[170px] block" title={inv.institutionName}>
+                            {inv.institutionName}
+                          </span>
+                        </td>
+
+                        {/* 6. District */}
+                        <td className="py-2.5 px-3 text-[#3c4a63] whitespace-nowrap">
+                          {inv.district || "Hyderabad"}
+                        </td>
+
+                        {/* 7. Delivery Date */}
+                        <td className="py-2.5 px-3 text-[#6b7a93] text-[11px] whitespace-nowrap">
+                          {delDate ? format(delDate, "dd MMM yyyy") : "—"}
+                        </td>
+
+                        {/* 8. Installation Date */}
+                        <td className="py-2.5 px-3 text-[#6b7a93] text-[11px] whitespace-nowrap">
+                          {instDate ? format(instDate, "dd MMM yyyy") : "—"}
+                        </td>
+
+                        {/* 9. Warranty Expiry */}
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span className={cn(
+                            "text-[11px]",
+                            inv.warrantyActive ? "text-emerald-700 font-medium" : "text-amber-700 font-medium"
+                          )}>
+                            {warDate ? format(warDate, "dd MMM yyyy") : "—"}
+                          </span>
+                        </td>
+
+                        {/* 10. CAMC Status */}
+                        <td className="py-2.5 px-3 text-[#475569]">
+                          <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 truncate max-w-[140px] inline-block" title={inv.camcStatus}>
+                            {inv.camcStatus || "Under OEM Guarantee"}
+                          </span>
+                        </td>
+
+                        {/* 11. Current Status */}
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span className={cn(
+                            "neo-chip",
+                            isActive ? "grn" : isRepair ? "amb" : isDecom ? "red" : "gry"
+                          )}>
+                            <span className={cn(
+                              "w-1.5 h-1.5 rounded-full shrink-0",
+                              isActive ? "bg-emerald-600" : isRepair ? "bg-amber-600" : isDecom ? "bg-rose-600" : "bg-slate-400"
+                            )} />
+                            <span>{inv.currentStatus}</span>
+                          </span>
+                        </td>
+
+                        {/* 12. Equipment Age */}
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <span className="inline-block px-2 py-0.5 bg-slate-100 border border-slate-200 text-[#152340] font-semibold text-[11px] rounded">
+                            {inv.equipmentAge || "—"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* ── Bottom Right Pagination Controls ── */}
+          <div className="p-3 border-t border-[#e4eaf2] bg-[#f8fafc] flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs">
+            <div className="flex items-center gap-2 text-[#6b7a93]">
+              <span>Rows per page:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                className="bg-white border border-[#e4eaf2] rounded px-2 py-1 text-xs text-[#152340] focus:outline-none focus:border-[#2563eb] cursor-pointer"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+              <span className="hidden sm:inline">
+                Showing {filteredInv.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredInv.length)} of {filteredInv.length} assets
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 ml-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="h-7 px-2 text-xs border-[#e4eaf2] cursor-pointer disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-3.5 h-3.5 mr-0.5" />
+                <span>Prev</span>
+              </Button>
+              <span className="text-xs font-semibold px-2 text-[#152340]">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="h-7 px-2 text-xs border-[#e4eaf2] cursor-pointer disabled:cursor-not-allowed"
+              >
+                <span>Next</span>
+                <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Asset Quick Details Dialog ── */}
+      {selectedAsset && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => setSelectedAsset(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-lg w-full p-5 space-y-4 border border-slate-200 animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between border-b pb-3">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 block">
+                  Asset Details · {selectedAsset.assetTag}
+                </span>
+                <h3 className="text-base font-bold text-slate-900 mt-0.5">
+                  {selectedAsset.equipmentName}
+                </h3>
+              </div>
+              <button
+                onClick={() => setSelectedAsset(null)}
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold px-2 py-0.5 rounded cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="p-2.5 bg-slate-50 rounded border">
+                <span className="text-[10px] text-muted-foreground uppercase font-bold block">Serial Number</span>
+                <span className="font-mono font-semibold text-slate-800">{selectedAsset.serialNumber || selectedAsset.assetTag}</span>
+              </div>
+              <div className="p-2.5 bg-slate-50 rounded border">
+                <span className="text-[10px] text-muted-foreground uppercase font-bold block">PO Reference</span>
+                <span className="font-mono font-semibold text-slate-800">{selectedAsset.poNumber}</span>
+              </div>
+              <div className="p-2.5 bg-slate-50 rounded border">
+                <span className="text-[10px] text-muted-foreground uppercase font-bold block">Empanelled Vendor</span>
+                <span className="font-medium text-slate-800">{selectedAsset.vendorName}</span>
+              </div>
+              <div className="p-2.5 bg-slate-50 rounded border">
+                <span className="text-[10px] text-muted-foreground uppercase font-bold block">Hospital / Institution</span>
+                <span className="font-medium text-slate-800">{selectedAsset.institutionName}</span>
+              </div>
+              <div className="p-2.5 bg-slate-50 rounded border">
+                <span className="text-[10px] text-muted-foreground uppercase font-bold block">District</span>
+                <span className="font-medium text-slate-800">{selectedAsset.district}</span>
+              </div>
+              <div className="p-2.5 bg-slate-50 rounded border">
+                <span className="text-[10px] text-muted-foreground uppercase font-bold block">Equipment Age</span>
+                <span className="font-bold text-slate-800">{selectedAsset.equipmentAge}</span>
+              </div>
+              <div className="p-2.5 bg-slate-50 rounded border">
+                <span className="text-[10px] text-muted-foreground uppercase font-bold block">Delivery Date</span>
+                <span className="font-medium text-slate-800">
+                  {selectedAsset.deliveryDate ? format(new Date(selectedAsset.deliveryDate), "dd MMM yyyy") : "—"}
+                </span>
+              </div>
+              <div className="p-2.5 bg-slate-50 rounded border">
+                <span className="text-[10px] text-muted-foreground uppercase font-bold block">Installation Date</span>
+                <span className="font-medium text-slate-800">
+                  {selectedAsset.installationDate ? format(new Date(selectedAsset.installationDate), "dd MMM yyyy") : "—"}
+                </span>
+              </div>
+              <div className="p-2.5 bg-slate-50 rounded border">
+                <span className="text-[10px] text-muted-foreground uppercase font-bold block">Warranty Expiry</span>
+                <span className="font-medium text-emerald-700">
+                  {selectedAsset.warrantyEndDate ? format(new Date(selectedAsset.warrantyEndDate), "dd MMM yyyy") : "—"}
+                </span>
+              </div>
+              <div className="p-2.5 bg-slate-50 rounded border">
+                <span className="text-[10px] text-muted-foreground uppercase font-bold block">CAMC Status</span>
+                <span className="font-medium text-slate-800">{selectedAsset.camcStatus}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between border-t pt-3">
+              <span className="text-xs text-slate-500">
+                Current Status: <strong className="text-slate-800">{selectedAsset.currentStatus}</strong>
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setSelectedAsset(null)}
+                className="h-8 text-xs cursor-pointer"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-
 function TenderAuditTab() {
-  const [tenderFilter, setTenderFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [portalFilter, setPortalFilter] = useState("all");
+  const [fyFilter, setFyFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+  const [selectedTender, setSelectedTender] = useState<any | null>(null);
 
   const { data: tenderData = [] } = useQuery({
     queryKey: ["/reports/tender-audit"],
     queryFn: getTenderAuditReport,
   });
 
-  const activeTenders = tenderData.filter((t: any) => !t.isCancelled && t.status !== "contract_awarded").length;
-  const awardedCount = tenderData.filter((t: any) => t.status === "contract_awarded").length;
-  const cancelledCount = tenderData.filter((t: any) => t.isCancelled).length;
-  const gemCount = tenderData.filter((t: any) => t.portal === "gem").length;
+  const totalCount = tenderData.length;
+  const activeCount = tenderData.filter((t: any) => t.status === "Active").length;
+  const approvedCount = tenderData.filter((t: any) => t.status === "Approved").length;
+  const cancelledCount = tenderData.filter((t: any) => t.status === "Cancelled").length;
+  const avgDuration = totalCount > 0
+    ? Math.round(tenderData.reduce((s: number, t: any) => s + (t.durationDays || 0), 0) / totalCount)
+    : 0;
 
+  // Multi-Filter logic
   const filteredTenders = tenderData.filter((t: any) => {
-    if (tenderFilter === "active") return !t.isCancelled && t.status !== "contract_awarded";
-    if (tenderFilter === "awarded") return t.status === "contract_awarded";
-    if (tenderFilter === "cancelled") return t.isCancelled;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      const matchName = (t.equipmentName || "").toLowerCase().includes(q);
+      const matchCat = (t.equipmentCategory || "").toLowerCase().includes(q);
+      const matchNum = (t.tenderNumber || "").toLowerCase().includes(q);
+      const matchRc = (t.rcRef || "").toLowerCase().includes(q);
+      const matchRe = (t.reTenderRef || "").toLowerCase().includes(q);
+      if (!matchName && !matchCat && !matchNum && !matchRc && !matchRe) return false;
+    }
+    if (statusFilter !== "all" && t.status !== statusFilter) return false;
+    if (typeFilter !== "all" && t.tenderType !== typeFilter) return false;
+    if (portalFilter !== "all" && t.portal !== portalFilter) return false;
+    if (fyFilter !== "all" && t.financialYear !== fyFilter) return false;
     return true;
   });
 
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filteredTenders.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const startIndex = (currentPage - 1) * pageSize;
+  const pagedTenders = filteredTenders.slice(startIndex, startIndex + pageSize);
+
+  const clearFilters = () => {
+    setSearch("");
+    setStatusFilter("all");
+    setTypeFilter("all");
+    setPortalFilter("all");
+    setFyFilter("all");
+    setPage(1);
+  };
+
+  const exportCSV = () => {
+    const headers = [
+      "Equipment Name",
+      "Equipment Category",
+      "Tender Ref No",
+      "Tender Date",
+      "Tender Type",
+      "Current Stage",
+      "Status",
+      "Stage of Cancellation",
+      "Reason for Cancellation",
+      "Re-tender Ref",
+      "BFC Approval Date",
+      "RC Ref",
+      "Total Tender Duration (days)",
+    ];
+    const rows = filteredTenders.map(t => [
+      t.equipmentName || "",
+      t.equipmentCategory || "",
+      t.tenderNumber || "",
+      t.tenderDate || "",
+      t.tenderType || "",
+      t.currentStage || "",
+      t.status || "",
+      t.cancellationStage || "—",
+      t.cancellationReason || "—",
+      t.reTenderRef || "—",
+      t.bfcApprovalDate || "—",
+      t.rcRef || "—",
+      t.durationDays ?? "",
+    ]);
+    const csvContent = [
+      headers.map(h => `"${h.replace(/"/g, '""')}"`).join(","),
+      ...rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")),
+    ].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `Tender_Statutory_Audit_Report_${new Date().toISOString().split("T")[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const tenderFunnelData = [
-    { stage: "NIT Formulated", count: tenderData.length || 14, fill: "#3b82f6" },
-    { stage: "Bids Received", count: 12, fill: "#6366f1" },
-    { stage: "Tech Qualified", count: 9, fill: "#8b5cf6" },
-    { stage: "L1 Evaluated", count: 7, fill: "#f59e0b" },
-    { stage: "RC Awarded", count: awardedCount || 6, fill: "#10b981" },
+    { stage: "Stage 1: NIT Published", count: totalCount || 14, fill: "#3b82f6" },
+    { stage: "Stage 2: Pre-bid Queries", count: Math.max(1, totalCount - 1), fill: "#6366f1" },
+    { stage: "Stage 4: Evaluation", count: Math.max(1, totalCount - cancelledCount - 1), fill: "#8b5cf6" },
+    { stage: "Stage 7: Financial / BFC", count: Math.max(1, activeCount + approvedCount), fill: "#f59e0b" },
+    { stage: "Stage 10: RC Finalized", count: approvedCount || 5, fill: "#10b981" },
   ];
 
   const portalShareData = [
-    { name: "GeM (Govt e-Marketplace)", value: gemCount || 8, fill: "#8b5cf6" },
-    { name: "Telangana eProcurement", value: Math.max(2, (tenderData.length || 14) - (gemCount || 8)), fill: "#3b82f6" },
+    { name: "Telangana e-Procurement", value: tenderData.filter((t: any) => t.portal !== "GeM").length || 10, fill: "#3b82f6" },
+    { name: "GeM (Govt e-Marketplace)", value: tenderData.filter((t: any) => t.portal === "GeM").length || 4, fill: "#8b5cf6" },
   ];
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard title="Total Tenders Formulated" value={tenderData.length} sub="Statutory Procurements" icon={Gavel} color={C.blue} />
-        <StatCard title="Active In Progress" value={activeTenders} sub="Stages 1 through 7" icon={Clock} color={C.amber} />
-        <StatCard title="Contracts Awarded" value={awardedCount} sub="Finalized Rate Agreements" icon={CheckCircle2} color={C.emerald} />
-        <StatCard title="GeM Portal Share" value={`${tenderData.length ? Math.round((gemCount / tenderData.length) * 100) : 0}%`} sub="National portal adoption" icon={Activity} color={C.violet} />
+      {/* ── KPI Summary Cards (All White Backgrounds) ── */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
+        <StatCard title="Total Tenders" value={totalCount} sub="Statutory Procurements" icon={Gavel} color={C.blue} />
+        <StatCard title="Active In Progress" value={activeCount} sub="Under Statutory Stages" icon={Clock} color={C.amber} />
+        <StatCard title="Contracts Awarded" value={approvedCount} sub="RCs Created & Finalized" icon={CheckCircle2} color={C.emerald} />
+        <StatCard title="Cancelled / Re-tendered" value={cancelledCount} sub="Justified with Audit Reason" icon={XCircle} color={C.rose} />
+        <StatCard title="Avg Duration" value={`${avgDuration}d`} sub="Tender Date to Finality" icon={Activity} color={C.violet} />
       </div>
 
-      {/* Graphical representations for R-15 */}
+      {/* ── Graphical Visualizations (White Backgrounds) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Tender Evaluation Funnel */}
-        <Card>
-          <CardHeader className="pb-2">
+        {/* Tender Progression Funnel */}
+        <Card className="bg-white border border-[#e4eaf2] shadow-xs">
+          <CardHeader className="pb-2 border-b border-[#e4eaf2]/60">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Tender Progression &amp; Evaluation Funnel (R-15)
+              Tender Progression &amp; Statutory Milestone Funnel
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-4">
             <div className="h-56 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={tenderFunnelData} margin={{ top: 10, right: 10, left: -10, bottom: 5 }}>
@@ -2529,20 +3088,20 @@ function TenderAuditTab() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            <div className="pt-2 text-center text-xs text-muted-foreground border-t border-[#e4eaf2]/60 mt-2">
+              Statutory 10-stage lifecycle governed under Telangana Transparency in Public Procurement Act
+            </div>
           </CardContent>
-          <div className="pb-3 text-center text-xs text-muted-foreground border-t pt-2">
-            Statutory 8-stage lifecycle tracked under Telangana Transparency in Public Procurement Act
-          </div>
         </Card>
 
         {/* Portal Adoption Share */}
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="bg-white border border-[#e4eaf2] shadow-xs">
+          <CardHeader className="pb-2 border-b border-[#e4eaf2]/60">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Tender Channel &amp; Portal Adoption Share
+              Portal Channel Distribution
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col sm:flex-row items-center gap-4">
+          <CardContent className="pt-4 flex flex-col sm:flex-row items-center gap-4">
             <div className="h-52 w-52 shrink-0">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -2562,118 +3121,490 @@ function TenderAuditTab() {
                 </PieChart>
               </ResponsiveContainer>
             </div>
-            <div className="flex-1 space-y-2 text-xs">
+            <div className="flex-1 space-y-2.5 text-xs w-full">
               {portalShareData.map((cat) => (
-                <div key={cat.name} className="flex items-center justify-between border-b pb-1.5 last:border-0">
+                <div key={cat.name} className="flex items-center justify-between border-b border-[#e4eaf2]/60 pb-1.5 last:border-0">
                   <div className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.fill }} />
-                    <span className="text-slate-700 font-medium truncate max-w-[150px]">{cat.name}</span>
+                    <span className="text-slate-700 font-medium truncate max-w-[170px]">{cat.name}</span>
                   </div>
-                  <span className="font-bold text-slate-800">{cat.value}</span>
+                  <span className="font-bold text-slate-800">{cat.value} Tenders</span>
                 </div>
               ))}
               <div className="pt-2 text-muted-foreground text-[11px]">
-                Target: ≥60% GeM adoption for standard medical device categories
+                Procurement portal reference: Telangana e-Procurement Portal &amp; GeM (Govt e-Marketplace)
               </div>
             </div>
           </CardContent>
-          <div className="pb-3 text-center text-xs text-muted-foreground border-t pt-2">
-            Integration with GeM API &amp; Telangana eProcurement verified
+          <div className="pb-3 text-center text-xs text-muted-foreground border-t border-[#e4eaf2]/60 pt-2">
+            Reference link enabled for state tender notifications (no automated third-party sync)
           </div>
         </Card>
       </div>
 
-      {/* Filter bar */}
-      <div className="flex items-center justify-between gap-4 flex-wrap bg-slate-50 p-3 rounded-lg border">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-slate-700">Filter Tenders:</span>
-          <select
-            value={tenderFilter}
-            onChange={(e) => setTenderFilter(e.target.value)}
-            className="text-xs border rounded-md px-2.5 py-1.5 bg-white font-medium"
-          >
-            <option value="all">All Tenders ({tenderData.length})</option>
-            <option value="active">Active Evaluation ({activeTenders})</option>
-            <option value="awarded">Awarded RC ({awardedCount})</option>
-            <option value="cancelled">Cancelled / Re-tendered ({cancelledCount})</option>
-          </select>
+      {/* ── Multi-Filter Toolbar (White Background) ── */}
+      <div className="p-3.5 bg-white border border-[#e4eaf2] rounded-xl shadow-xs space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+            <div className="relative w-full max-w-sm">
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search equipment, category, tender ref..."
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                className="w-full text-xs bg-white border border-[#e4eaf2] rounded-lg pl-8 pr-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary text-slate-800"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Status Filter */}
+            <select
+              value={statusFilter}
+              onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+              className="text-xs bg-white border border-[#e4eaf2] rounded-lg px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              <option value="all">Status: All ({totalCount})</option>
+              <option value="Active">Active ({activeCount})</option>
+              <option value="Approved">Approved / RC ({approvedCount})</option>
+              <option value="Cancelled">Cancelled ({cancelledCount})</option>
+            </select>
+
+            {/* Tender Type Filter */}
+            <select
+              value={typeFilter}
+              onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
+              className="text-xs bg-white border border-[#e4eaf2] rounded-lg px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              <option value="all">Type: All Types</option>
+              <option value="Open">Open Tender</option>
+              <option value="Limited">Limited Tender</option>
+              <option value="GeM">GeM Tender</option>
+            </select>
+
+            {/* Portal Filter */}
+            <select
+              value={portalFilter}
+              onChange={(e) => { setPortalFilter(e.target.value); setPage(1); }}
+              className="text-xs bg-white border border-[#e4eaf2] rounded-lg px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              <option value="all">Portal: All Channels</option>
+              <option value="Telangana e-Procurement">Telangana e-Procurement</option>
+              <option value="GeM">GeM</option>
+            </select>
+
+            {/* Financial Year Filter */}
+            <select
+              value={fyFilter}
+              onChange={(e) => { setFyFilter(e.target.value); setPage(1); }}
+              className="text-xs bg-white border border-[#e4eaf2] rounded-lg px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              <option value="all">FY: All Years</option>
+              <option value="2026-27">FY 2026-27</option>
+              <option value="2025-26">FY 2025-26</option>
+              <option value="2024-25">FY 2024-25</option>
+            </select>
+
+            {(search || statusFilter !== "all" || typeFilter !== "all" || portalFilter !== "all" || fyFilter !== "all") && (
+              <Button variant="ghost" size="sm" onClick={clearFilters} className="text-xs h-8 text-muted-foreground hover:text-foreground">
+                <X className="h-3.5 w-3.5 mr-1" /> Reset
+              </Button>
+            )}
+
+            <Button variant="outline" size="sm" onClick={exportCSV} className="text-xs h-8 gap-1.5 bg-white border-[#e4eaf2]">
+              <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" /> Export CSV (13 Columns)
+            </Button>
+          </div>
         </div>
-        <Badge variant="outline" className="text-xs">
-          Mandatory Audit Log (R-15)
-        </Badge>
       </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            Tender Statutory Audit Register (R-15)
-          </CardTitle>
+      {/* ── 13-Column Statutory Audit Register Table Card (White Background) ── */}
+      <Card className="bg-white border border-[#e4eaf2] shadow-xs overflow-hidden">
+        <CardHeader className="p-3.5 border-b border-[#e4eaf2] bg-white flex flex-row items-center justify-between gap-3">
+          <div>
+            <CardTitle className="text-sm font-bold text-[#152340] uppercase tracking-wider">
+              Tender Statutory Audit Report (§3.2.7)
+            </CardTitle>
+            <p className="text-xs text-[#6b7a93] mt-0.5">
+              13 statutory audit columns covering equipment details, statutory stages, cancellation justifications, BFC approval, and Rate Contract linkages
+            </p>
+          </div>
+          <Badge variant="outline" className="text-xs bg-white border-[#e4eaf2]">
+            {filteredTenders.length} Records
+          </Badge>
         </CardHeader>
+
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead className="bg-muted/30">
-                <tr className="border-b">
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Tender Reference</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Portal</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Scope / Equipment</th>
-                  <th className="px-3 py-2 text-center font-medium text-muted-foreground">Current Stage</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">BFC Approval</th>
-                  <th className="px-3 py-2 text-center font-medium text-muted-foreground">Duration</th>
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Bids Recd</th>
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Tech Qual</th>
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">L1 Price (₹)</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Status / Cancellation Reason</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Re-tender Ref</th>
-                  <th className="px-3 py-2 text-center font-medium text-muted-foreground">Action</th>
+              <thead className="bg-[#f8fafc] border-b border-[#e4eaf2]">
+                <tr>
+                  <th className="px-3 py-2.5 text-left font-semibold text-[#152340] whitespace-nowrap">#</th>
+                  <th className="px-3 py-2.5 text-left font-semibold text-[#152340] whitespace-nowrap">1. Equipment Name</th>
+                  <th className="px-3 py-2.5 text-left font-semibold text-[#152340] whitespace-nowrap">2. Equipment Category</th>
+                  <th className="px-3 py-2.5 text-left font-semibold text-[#152340] whitespace-nowrap">3. Tender Ref No</th>
+                  <th className="px-3 py-2.5 text-left font-semibold text-[#152340] whitespace-nowrap">4. Tender Date</th>
+                  <th className="px-3 py-2.5 text-center font-semibold text-[#152340] whitespace-nowrap">5. Tender Type</th>
+                  <th className="px-3 py-2.5 text-left font-semibold text-[#152340] whitespace-nowrap">6. Current Stage</th>
+                  <th className="px-3 py-2.5 text-center font-semibold text-[#152340] whitespace-nowrap">7. Status</th>
+                  <th className="px-3 py-2.5 text-left font-semibold text-[#152340] whitespace-nowrap">8. Stage of Cancellation</th>
+                  <th className="px-3 py-2.5 text-left font-semibold text-[#152340] whitespace-nowrap min-w-[200px]">9. Reason for Cancellation</th>
+                  <th className="px-3 py-2.5 text-left font-semibold text-[#152340] whitespace-nowrap">10. Re-tender Ref</th>
+                  <th className="px-3 py-2.5 text-left font-semibold text-[#152340] whitespace-nowrap">11. BFC Approval Date</th>
+                  <th className="px-3 py-2.5 text-left font-semibold text-[#152340] whitespace-nowrap">12. RC Ref</th>
+                  <th className="px-3 py-2.5 text-center font-semibold text-[#152340] whitespace-nowrap">13. Duration (days)</th>
+                  <th className="px-3 py-2.5 text-center font-semibold text-[#152340] whitespace-nowrap sticky right-0 bg-[#f8fafc]">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
-                {filteredTenders.map((t: any, idx: number) => {
-                  const bfcApprovalDate = "2025-12-28";
-                  const totalDuration = t.status === "contract_awarded" ? "66d" : t.isCancelled ? "34d" : "42d";
-                  const cancellationDetail = t.isCancelled
-                    ? `Stage ${t.cancellationStage || 'N/A'} · ${t.cancellationReason || 'Reason not recorded'} · Re-tender: ${t.reTenderRef || 'Not yet re-tendered'}`
-                    : t.status === "contract_awarded"
-                    ? `Awarded · RC: ${t.rcRef || 'RC pending creation'}`
-                    : `In Progress · Stage ${t.currentStageNumber} of 10`;
-
-                  return (
-                    <tr key={t.id || idx} className="hover:bg-muted/20">
-                      <td className="px-3 py-2.5 font-mono font-medium text-primary">{t.tenderNumber}</td>
-                      <td className="px-3 py-2.5 uppercase font-semibold">{t.portal}</td>
-                      <td className="px-3 py-2.5 font-medium">{t.equipmentName}</td>
-                      <td className="px-3 py-2.5 text-center">
-                        <span className="neo-chip grn text-[10px]">
-                          Stage {t.currentStageNumber} of 8
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5 whitespace-nowrap text-muted-foreground">{bfcApprovalDate}</td>
-                      <td className="px-3 py-2.5 text-center font-mono font-semibold">{totalDuration}</td>
-                      <td className="px-3 py-2.5 text-right font-semibold">{t.bidsReceivedCount}</td>
-                      <td className="px-3 py-2.5 text-right font-semibold text-emerald-700">{t.techQualifiedCount}</td>
-                      <td className="px-3 py-2.5 text-right font-mono font-bold">{t.l1Rate ? `₹${t.l1Rate.toLocaleString("en-IN")}` : "Under Eval"}</td>
-                      <td className="px-3 py-2.5 text-[11px] max-w-[180px] truncate" title={cancellationDetail}>
-                        {t.isCancelled ? (
-                          <span className="text-red-600 font-semibold">{cancellationDetail}</span>
-                        ) : (
-                          <span className="text-slate-600">{cancellationDetail}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5 font-mono text-xs">{t.reTenderRef || '—'}</td>
-                      <td className="px-3 py-2.5 text-center">
-                        <Link href={`/tenders/${t.id}`}>
-                          <span className="text-[11px] text-primary hover:underline cursor-pointer font-semibold">Open NIT →</span>
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
+              <tbody className="divide-y divide-[#e4eaf2]">
+                {pagedTenders.length === 0 ? (
+                  <tr>
+                    <td colSpan={15} className="py-8 text-center text-muted-foreground text-xs">
+                      No tenders found matching the selected filters.
+                    </td>
+                  </tr>
+                ) : (
+                  pagedTenders.map((t: any, idx: number) => {
+                    const rowNumber = startIndex + idx + 1;
+                    return (
+                      <tr
+                        key={t.id || t.tenderNumber}
+                        onClick={() => setSelectedTender(t)}
+                        className="hover:bg-slate-50/80 cursor-pointer transition-colors"
+                      >
+                        <td className="px-3 py-2.5 text-muted-foreground font-mono">{rowNumber}</td>
+                        {/* 1. Equipment Name */}
+                        <td className="px-3 py-2.5 font-medium text-slate-900 max-w-[220px]">
+                          <div className="truncate font-semibold" title={t.equipmentName}>
+                            {t.equipmentName}
+                          </div>
+                        </td>
+                        {/* 2. Equipment Category */}
+                        <td className="px-3 py-2.5 text-slate-700 whitespace-nowrap">
+                          {t.equipmentCategory}
+                        </td>
+                        {/* 3. Tender Ref No */}
+                        <td className="px-3 py-2.5 font-mono font-medium text-primary whitespace-nowrap">
+                          {t.tenderNumber}
+                        </td>
+                        {/* 4. Tender Date */}
+                        <td className="px-3 py-2.5 text-slate-600 font-mono whitespace-nowrap">
+                          {t.tenderDate || "—"}
+                        </td>
+                        {/* 5. Tender Type */}
+                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                          <span className={cn(
+                            "px-2 py-0.5 rounded text-[10.5px] font-semibold border",
+                            t.tenderType === "Open" ? "bg-blue-50 text-blue-700 border-blue-200" :
+                            t.tenderType === "GeM" ? "bg-violet-50 text-violet-700 border-violet-200" :
+                            "bg-slate-100 text-slate-700 border-slate-200"
+                          )}>
+                            {t.tenderType}
+                          </span>
+                        </td>
+                        {/* 6. Current Stage */}
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          <span className="text-[11px] font-medium text-slate-800">
+                            {t.currentStage}
+                          </span>
+                        </td>
+                        {/* 7. Status */}
+                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                          <span className={cn(
+                            "px-2 py-0.5 rounded-full text-[10.5px] font-bold border",
+                            t.status === "Approved" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                            t.status === "Cancelled" ? "bg-red-50 text-red-700 border-red-200" :
+                            "bg-blue-50 text-blue-700 border-blue-200"
+                          )}>
+                            {t.status}
+                          </span>
+                        </td>
+                        {/* 8. Stage of Cancellation */}
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          {t.isCancelled && t.cancellationStage ? (
+                            <span className="text-red-700 font-semibold">{t.cancellationStage}</span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        {/* 9. Reason for Cancellation */}
+                        <td className="px-3 py-2.5 text-[11px] max-w-[240px]">
+                          {t.isCancelled && t.cancellationReason ? (
+                            <span className="text-red-600 font-medium line-clamp-2" title={t.cancellationReason}>
+                              {t.cancellationReason}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        {/* 10. Re-tender Ref */}
+                        <td className="px-3 py-2.5 font-mono text-[11px] whitespace-nowrap">
+                          {t.reTenderRef ? (
+                            <span className="text-primary font-semibold">{t.reTenderRef}</span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        {/* 11. BFC Approval Date */}
+                        <td className="px-3 py-2.5 text-slate-700 font-mono whitespace-nowrap">
+                          {t.bfcApprovalDate || "—"}
+                        </td>
+                        {/* 12. RC Ref */}
+                        <td className="px-3 py-2.5 font-mono text-[11px] whitespace-nowrap">
+                          {t.rcRef ? (
+                            <span className="text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                              {t.rcRef}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        {/* 13. Total Duration (days) */}
+                        <td className="px-3 py-2.5 text-center font-mono font-bold text-slate-800 whitespace-nowrap">
+                          {t.durationDays !== undefined ? `${t.durationDays}d` : "—"}
+                        </td>
+                        {/* 14. Action */}
+                        <td className="px-3 py-2.5 text-center whitespace-nowrap sticky right-0 bg-white">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => { e.stopPropagation(); setSelectedTender(t); }}
+                            className="h-7 px-2 text-xs text-primary hover:text-primary font-medium gap-1"
+                          >
+                            <Eye className="h-3 w-3" /> Audit
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
+
+          {/* ── Table Footer & Pagination (Bottom Right) ── */}
+          <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 border-t border-[#e4eaf2] bg-white gap-3">
+            <div className="text-xs text-muted-foreground">
+              Showing <span className="font-semibold text-slate-800">{filteredTenders.length === 0 ? 0 : startIndex + 1}</span> to{" "}
+              <span className="font-semibold text-slate-800">{Math.min(startIndex + pageSize, filteredTenders.length)}</span> of{" "}
+              <span className="font-semibold text-slate-800">{filteredTenders.length}</span> tenders
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="h-8 px-2.5 text-xs bg-white border-[#e4eaf2] gap-1"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" /> Previous
+              </Button>
+              <span className="text-xs font-medium text-slate-700 px-2">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="h-8 px-2.5 text-xs bg-white border-[#e4eaf2] gap-1"
+              >
+                Next <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
+
+      {/* ── Audit Trail Modal Dialog ── */}
+      {selectedTender && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-xl border border-[#e4eaf2] shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in-50 duration-150">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-[#e4eaf2] flex items-center justify-between bg-white">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-900">{selectedTender.tenderNumber}</h3>
+                  <Badge variant="outline" className={cn(
+                    "text-xs font-bold",
+                    selectedTender.status === "Approved" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                    selectedTender.status === "Cancelled" ? "bg-red-50 text-red-700 border-red-200" :
+                    "bg-blue-50 text-blue-700 border-blue-200"
+                  )}>
+                    {selectedTender.status}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground font-mono">{selectedTender.financialYear}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {selectedTender.equipmentName} · {selectedTender.equipmentCategory}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedTender(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-4 overflow-y-auto space-y-4 text-xs">
+              {/* 4 Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-2.5 bg-white rounded-lg border border-[#e4eaf2]">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground">Tender Date</p>
+                  <p className="font-semibold text-slate-800 mt-0.5">{selectedTender.tenderDate || "—"}</p>
+                </div>
+                <div className="p-2.5 bg-white rounded-lg border border-[#e4eaf2]">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground">Tender Type</p>
+                  <p className="font-semibold text-slate-800 mt-0.5">{selectedTender.tenderType} ({selectedTender.portal})</p>
+                </div>
+                <div className="p-2.5 bg-white rounded-lg border border-[#e4eaf2]">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground">Current Stage</p>
+                  <p className="font-semibold text-slate-800 mt-0.5">{selectedTender.currentStage}</p>
+                </div>
+                <div className="p-2.5 bg-white rounded-lg border border-[#e4eaf2]">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground">Total Duration</p>
+                  <p className="font-semibold text-slate-800 mt-0.5">{selectedTender.durationDays} Days</p>
+                </div>
+              </div>
+
+              {/* Cancellation Detail Box */}
+              {selectedTender.isCancelled && (
+                <div className="p-3 bg-red-50/60 border border-red-200 rounded-lg space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-red-800 font-bold">
+                    <AlertTriangle className="h-4 w-4 text-red-600" />
+                    Statutory Cancellation Audit Information
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                    <div>
+                      <span className="text-muted-foreground font-medium">Cancellation Stage: </span>
+                      <span className="font-bold text-red-700">{selectedTender.cancellationStage}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground font-medium">Re-tender Ref: </span>
+                      <span className="font-mono font-bold text-slate-800">{selectedTender.reTenderRef || "Pending NIT"}</span>
+                    </div>
+                  </div>
+                  <div className="pt-1">
+                    <span className="text-muted-foreground font-medium">Reason for Cancellation: </span>
+                    <p className="text-red-900 font-medium mt-0.5">{selectedTender.cancellationReason}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Rate Contract & BFC Approval Box */}
+              {selectedTender.status === "Approved" && (
+                <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded-lg space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-emerald-800 font-bold">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    Board Finance Committee (BFC) &amp; Rate Contract Details
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs pt-1">
+                    <div>
+                      <span className="text-muted-foreground font-medium">BFC Approval Date: </span>
+                      <span className="font-mono font-bold text-emerald-800">{selectedTender.bfcApprovalDate || "Recorded"}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground font-medium">Rate Contract Ref: </span>
+                      <span className="font-mono font-bold text-primary">{selectedTender.rcRef}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground font-medium">L1 Awarded Price: </span>
+                      <span className="font-mono font-bold text-slate-800">
+                        {selectedTender.l1BidAmount ? `₹${selectedTender.l1BidAmount.toLocaleString("en-IN")}` : "As per RC"}
+                      </span>
+                    </div>
+                  </div>
+                  {selectedTender.l1VendorName && (
+                    <div className="pt-1 text-slate-700">
+                      <span className="text-muted-foreground font-medium">L1 Vendor: </span>
+                      <span className="font-semibold">{selectedTender.l1VendorName}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Statutory 10-Stage Lifecycle Audit Trail */}
+              <div className="border border-[#e4eaf2] rounded-lg p-3 bg-white space-y-2">
+                <h4 className="font-bold text-slate-800 uppercase text-[11px] tracking-wider">
+                  Statutory 10-Stage Lifecycle Audit Register
+                </h4>
+                <div className="space-y-1.5">
+                  {[
+                    { num: 1, name: "Tender Opened / NIT Formulated", desc: "NIT published on Telangana e-Procurement / GeM portal" },
+                    { num: 2, name: "Pre-bid Queries & Clarifications", desc: "Prospective bidders technical queries and committee clarifications" },
+                    { num: 3, name: "Amendments & Corrigendum", desc: "Corrigendum published on public portal if specifications modified" },
+                    { num: 4, name: "Bid Evaluation (Technical)", desc: "Scrutiny of commercial eligibility, EMD, and technical responsiveness" },
+                    { num: 5, name: "Demo & Technical Evaluation", desc: "Physical equipment demonstration and NABL calibration testing" },
+                    { num: 6, name: "Technical Committee Approval", desc: "Recommendation of qualified vendors to Board Finance Committee" },
+                    { num: 7, name: "Financial Bid & BFC Prep", desc: "Financial bid decryption and preparation of comparative statement" },
+                    { num: 8, name: "BFC Meeting", desc: "Board Finance Committee agenda presentation and deliberation" },
+                    { num: 9, name: "BFC Decision & Sanction", desc: "Executive Director approval and sanction of negotiated L1 rates" },
+                    { num: 10, name: "RC Header Entry & Issuance", desc: "Rate Contract finalized, signed with vendor, and active in system" },
+                  ].map((stg) => {
+                    const isDone = selectedTender.status === "Approved" || selectedTender.currentStageNumber > stg.num;
+                    const isCurrent = selectedTender.status === "Active" && selectedTender.currentStageNumber === stg.num;
+                    const isCancelledAtThisStage = selectedTender.isCancelled && selectedTender.cancellationStage?.includes(`Stage ${stg.num}`);
+
+                    return (
+                      <div
+                        key={stg.num}
+                        className={cn(
+                          "flex items-center justify-between p-2 rounded border text-xs",
+                          isCancelledAtThisStage ? "bg-red-50/80 border-red-200" :
+                          isDone ? "bg-emerald-50/40 border-emerald-200" :
+                          isCurrent ? "bg-blue-50/60 border-blue-200 font-semibold" :
+                          "bg-white border-[#e4eaf2] text-muted-foreground"
+                        )}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={cn(
+                            "w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px]",
+                            isCancelledAtThisStage ? "bg-red-600 text-white" :
+                            isDone ? "bg-emerald-600 text-white" :
+                            isCurrent ? "bg-blue-600 text-white" :
+                            "bg-slate-200 text-slate-600"
+                          )}>
+                            {stg.num}
+                          </span>
+                          <div>
+                            <p className="font-semibold text-slate-800">{stg.name}</p>
+                            <p className="text-[10px] text-muted-foreground">{stg.desc}</p>
+                          </div>
+                        </div>
+                        <Badge variant="outline" className={cn(
+                          "text-[10px] font-semibold",
+                          isCancelledAtThisStage ? "bg-red-100 text-red-700 border-red-300" :
+                          isDone ? "bg-emerald-100 text-emerald-800 border-emerald-300" :
+                          isCurrent ? "bg-blue-100 text-blue-800 border-blue-300" :
+                          "bg-slate-100 text-slate-600 border-slate-200"
+                        )}>
+                          {isCancelledAtThisStage ? "Cancelled Here" : isDone ? "Completed" : isCurrent ? "Current Stage" : "Pending"}
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 border-t border-[#e4eaf2] bg-white flex items-center justify-between">
+              <Link href={`/tenders/${selectedTender.id}`}>
+                <Button variant="default" size="sm" className="text-xs gap-1.5">
+                  Open Tender Workbench →
+                </Button>
+              </Link>
+              <Button variant="outline" size="sm" onClick={() => setSelectedTender(null)} className="text-xs bg-white border-[#e4eaf2]">
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2718,7 +3649,7 @@ function DEOAccuracyTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              DEO Unit Accuracy % vs Statutory Benchmark (R-14)
+              DEO Unit Accuracy % vs Statutory Benchmark
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -2748,7 +3679,7 @@ function DEOAccuracyTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Scrutiny Correction Categories (R-14)
+              Scrutiny Correction Categories
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row items-center gap-4">
@@ -2796,7 +3727,7 @@ function DEOAccuracyTab() {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              DEO / Digitization Unit Accuracy &amp; Corrections Report (R-14)
+              DEO / Digitization Unit Accuracy &amp; Corrections Report
             </CardTitle>
             <Badge variant="outline" className="text-xs bg-blue-50 text-blue-800 border-blue-200">
               Statutory Quality Benchmark: 85% Accuracy
@@ -2852,7 +3783,7 @@ export default function Reports() {
       const p = new URLSearchParams(window.location.search).get("tab");
       if (p) return p;
     }
-    return "asset_report";
+    return "overview";
   });
   const [selectedFY, setSelectedFY] = useState("FY 2026-27");
   const [selectedQuarter, setSelectedQuarter] = useState("all");
@@ -2973,7 +3904,6 @@ export default function Reports() {
       </div>
 
       {/* Tab content */}
-      {tab === "asset_report"   && <AssetReport />}
       {tab === "overview"       && <OverviewTab     pipeline={pipeline} sla={sla} />}
       {tab === "indent_aging"   && <IndentAgingTab />}
       {tab === "rc_expiry"      && <RCExpiryTab />}
@@ -2986,6 +3916,7 @@ export default function Reports() {
       {tab === "tender_audit"   && <TenderAuditTab />}
       {tab === "deo_accuracy"   && <DEOAccuracyTab />}
       {tab === "distribution"   && <DistributionTab />}
+      {tab === "asset_report"   && <AssetReport />}
     </div>
   );
 }

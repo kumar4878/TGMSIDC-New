@@ -39,7 +39,10 @@ export function getIndentLifecycleData(
     pos = livePOs.filter((po) =>
       String(po.indentId) === String(indentId) ||
       (indent && String(po.indentId) === String(indent.id)) ||
-      (indent && po.indentNumber === indent.indentNumber)
+      (indent && po.indentNumber === indent.indentNumber) ||
+      (indent?.purchaseOrderId && String(indent.purchaseOrderId) === String(po.id)) ||
+      (indent?.poNumber && indent.poNumber === po.poNumber) ||
+      (indent?.lineItems && indent.lineItems.some((li: any) => li.poNumber === po.poNumber || String(li.poId) === String(po.id)))
     );
   }
   // Only check mockPurchaseOrders if livePOs was not provided (e.g. offline mock environment)

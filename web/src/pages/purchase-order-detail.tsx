@@ -20,6 +20,7 @@ import {
   createDelivery,
   submitPOForApproval,
   gmReviewPO,
+  updatePurchaseOrder,
 } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -32,10 +33,10 @@ import { Badge } from "@/components/ui/badge";
 import {
   ArrowLeft, IndianRupee, ShieldCheck, CreditCard, CheckCircle2, Clock,
   AlertTriangle, FileText, Building2, History, RotateCcw, Wrench, Truck,
-  Upload, Loader2, CheckCheck, Lock, ExternalLink, Send
+  Upload, Loader2, CheckCheck, Lock, ExternalLink, Send, Package, Pencil, Save
 } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ProductSpecSheet } from "@/components/ProductSpecSheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -50,6 +51,16 @@ export default function PurchaseOrderDetail() {
   const { toast } = useToast();
   const { user } = useAuth();
   const role = user?.role || "tgmsidc_user";
+
+  // Ensure PO detail view always starts at the top (starting details) when opened
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    const mainEl = document.getElementById("main-scroll-container") || document.querySelector("main");
+    if (mainEl) {
+      mainEl.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      mainEl.scrollTop = 0;
+    }
+  }, [id, isLoading]);
   
   const { data: po, isLoading } = useGetPurchaseOrder(id, { query: { enabled: !!id, queryKey: getGetPurchaseOrderQueryKey(id) } });
   const { data: deliveries } = useListDeliveries({ poId: id }, { query: { enabled: !!id, queryKey: getListDeliveriesQueryKey({ poId: id }) } });
@@ -119,6 +130,12 @@ export default function PurchaseOrderDetail() {
   const [issuePODialog, setIssuePODialog] = useState(false);
   const [issuePORemarks, setIssuePORemarks] = useState("Official purchase order issued to empanelled vendor.");
   const [issuingPO, setIssuingPO] = useState(false);
+
+  // Edit PO Items State (for Draft PO)
+  const [editItemsOpen, setEditItemsOpen] = useState(false);
+  const [editItemsList, setEditItemsList] = useState<any[]>([]);
+  const [savingItems, setSavingItems] = useState(false);
+  const [activeSpecItemIndex, setActiveSpecItemIndex] = useState(0);
 
   // PO Closure Checklist & State
   const [closureCheckResult, setClosureCheckResult] = useState<any>(null);
@@ -391,6 +408,22 @@ export default function PurchaseOrderDetail() {
   const isT1Paid = rawPO.tranche1Paid || rawPO.paymentStatus === "paid" || rawPO.paymentStatus === "partial";
   const isT2Paid = rawPO.tranche2Paid || (rawPO.paymentStatus === "paid" && rawPO.status === "completed");
 
+  const poItems = (po?.items && po.items.length > 0)
+    ? po.items
+    : [{
+        equipmentId: po?.equipmentId,
+        equipmentName: po?.equipmentName || "Medical Equipment",
+        rateContractId: po?.rateContractId,
+        rcNumber: rawPO.rcNumber,
+        quantity: po?.quantity || 1,
+        unitPrice: po?.unitPrice || 0,
+        gstRate: po?.gstRate || 12,
+        gstAmount: Math.round(((po?.unitPrice || 0) * (po?.quantity || 1) * (po?.gstRate || 12)) / 100),
+        unitPriceInclTax: Math.round((po?.unitPrice || 0) * (1 + (po?.gstRate || 12) / 100)),
+        totalAmount: po?.totalAmount || 0,
+        specifications: rawPO.specifications || "",
+      }];
+
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-12">
       {/* Top Header */}
@@ -587,12 +620,16 @@ export default function PurchaseOrderDetail() {
                     <span className="font-medium font-mono">Indent #{rawPO.indentNumber || linkedIndent?.indentNumber || "Requisition"}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Equipment Item:</span>
-                    <span className="font-semibold text-slate-900 text-right">{po.equipmentName || rawPO.itemDescription || "Medical Equipment"}</span>
+                    <span className="text-slate-500">{poItems.length > 1 ? "Consolidated Items:" : "Equipment Item:"}</span>
+                    <span className="font-semibold text-slate-900 text-right">
+                      {poItems.length > 1
+                        ? `${poItems.length} Items (${poItems.map(i => i.equipmentName).join(", ")})`
+                        : (po.equipmentName || rawPO.itemDescription || "Medical Equipment")}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Allocated Quantity:</span>
-                    <span className="font-mono font-bold text-slate-900">{po.quantity || 1} Unit(s)</span>
+                    <span className="font-mono font-bold text-slate-900">{po.quantity || 1} Total Unit(s)</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Consignee Facility:</span>
@@ -831,6 +868,131 @@ export default function PurchaseOrderDetail() {
         </CardContent>
       </Card>
 
+      {/* Consolidated Equipment & Line Items Schedule */}
+      <Card className="border border-border/80 shadow-sm overflow-hidden">
+        <CardHeader className="pb-3 bg-muted/20 border-b flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Package className="h-4 w-4 text-emerald-600" />
+              Consolidated Equipment &amp; Line Items Schedule
+              <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-800 border-emerald-300 font-mono">
+                {poItems.length} {poItems.length === 1 ? "Item" : "Consolidated Items"}
+              </Badge>
+            </CardTitle>
+            <CardDescription className="text-xs text-muted-foreground mt-0.5">
+              Empanelled Vendor: <strong className="text-slate-800">{po.vendorName}</strong> · Indent #{rawPO.indentNumber || linkedIndent?.indentNumber || "Requisition"}
+            </CardDescription>
+          </div>
+          {(po.status === "draft" || rawPO.approvalStatus === "draft") && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs gap-1.5 border-emerald-300 text-emerald-800 hover:bg-emerald-50 cursor-pointer"
+              onClick={() => {
+                setEditItemsList(poItems.map(it => ({ ...it })));
+                setEditItemsOpen(true);
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Update Items &amp; Quantities
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent className="p-0">
+          {poItems.length > 1 && (
+            <div className="p-3 bg-emerald-50/70 border-b border-emerald-200 text-xs text-emerald-950 flex items-center gap-2.5">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+              <span>
+                <strong>Shared Empanelled Vendor Identified:</strong> Multiple items from Indent #{rawPO.indentNumber || linkedIndent?.indentNumber || "Requisition"} share vendor <strong>{po.vendorName}</strong> based on their tagged Rate Contracts and have been consolidated into this single Purchase Order.
+              </span>
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/40 border-b text-muted-foreground uppercase">
+                <tr>
+                  <th className="px-4 py-2.5 text-center font-semibold w-12">#</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">Equipment Item Description</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">Rate Contract Ref</th>
+                  <th className="px-4 py-2.5 text-center font-semibold">Qty</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">Unit Base Rate</th>
+                  <th className="px-4 py-2.5 text-center font-semibold">GST Slab</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">GST Amount</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">Landed Subtotal</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {poItems.map((item: any, idx: number) => {
+                  const qty = item.quantity || 1;
+                  const unitPrice = item.unitPrice || 0;
+                  const gstRate = item.gstRate != null ? item.gstRate : 12;
+                  const baseSubtotal = unitPrice * qty;
+                  const gstAmt = item.gstAmount != null ? item.gstAmount : Math.round((baseSubtotal * gstRate) / 100);
+                  const landedSubtotal = item.totalAmount != null ? item.totalAmount : baseSubtotal + gstAmt;
+
+                  return (
+                    <tr key={idx} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3 text-center font-mono text-muted-foreground">{idx + 1}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-slate-900 text-xs">{item.equipmentName}</div>
+                        {(item.category || item.department) && (
+                          <div className="text-[11px] text-muted-foreground mt-0.5">
+                            {item.department ? `${item.department} · ` : ""}{item.category || "Medical Equipment"}
+                          </div>
+                        )}
+                        {item.specifications && (
+                          <div className="text-[10px] text-slate-500 mt-0.5 line-clamp-1 italic">
+                            {item.specifications}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {item.rateContractId ? (
+                          <Link href={`/rate-contracts/${item.rateContractId}`}>
+                            <Badge variant="outline" className="font-mono text-[10px] bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 cursor-pointer">
+                              {item.rcNumber || "RC-LINKED"}
+                            </Badge>
+                          </Link>
+                        ) : (
+                          <span className="font-mono text-muted-foreground">{item.rcNumber || "—"}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center font-mono font-bold text-slate-900">{qty} Unit{qty > 1 ? "s" : ""}</td>
+                      <td className="px-4 py-3 text-right font-mono">₹{unitPrice.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-center font-mono">{gstRate}%</td>
+                      <td className="px-4 py-3 text-right font-mono text-slate-600">₹{gstAmt.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-right font-mono font-bold text-emerald-700">₹{landedSubtotal.toLocaleString("en-IN")}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot className="bg-slate-50/90 border-t font-semibold">
+                <tr>
+                  <td colSpan={3} className="px-4 py-3 text-right text-slate-700">Consolidated Grand Totals:</td>
+                  <td className="px-4 py-3 text-center font-mono font-bold text-slate-900">
+                    {poItems.reduce((acc: number, it: any) => acc + (it.quantity || 1), 0)} Units
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-700">
+                    ₹{poItems.reduce((acc: number, it: any) => acc + ((it.unitPrice || 0) * (it.quantity || 1)), 0).toLocaleString("en-IN")}
+                  </td>
+                  <td className="px-4 py-3"></td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-700">
+                    ₹{poItems.reduce((acc: number, it: any) => {
+                      const qty = it.quantity || 1;
+                      const gstRate = it.gstRate != null ? it.gstRate : 12;
+                      return acc + (it.gstAmount != null ? it.gstAmount : Math.round(((it.unitPrice || 0) * qty * gstRate) / 100));
+                    }, 0).toLocaleString("en-IN")}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono font-bold text-emerald-800 text-sm">
+                    ₹{(po.totalAmount || 0).toLocaleString("en-IN")}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Order & Delivery Details Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Order Details */}
@@ -955,14 +1117,32 @@ export default function PurchaseOrderDetail() {
       <Card className="border border-border/80 shadow-sm">
         <CardHeader className="pb-3 bg-muted/20 border-b flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Wrench className="h-4 w-4 text-primary" /> Technical Specifications ({po.equipmentName})
+            <Wrench className="h-4 w-4 text-primary" /> Technical Specifications ({poItems[activeSpecItemIndex]?.equipmentName || po.equipmentName})
           </CardTitle>
           <span className="text-xs text-muted-foreground">Standardized Equipment Master Specs</span>
         </CardHeader>
+        {poItems.length > 1 && (
+          <div className="px-4 py-2.5 flex items-center gap-2 border-b bg-muted/10 overflow-x-auto">
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase shrink-0">Select Equipment:</span>
+            {poItems.map((item: any, idx: number) => (
+              <Button
+                key={idx}
+                type="button"
+                variant={activeSpecItemIndex === idx ? "default" : "outline"}
+                size="sm"
+                className="text-xs h-7 gap-1.5 cursor-pointer shrink-0"
+                onClick={() => setActiveSpecItemIndex(idx)}
+              >
+                <Package className="h-3 w-3" />
+                {item.equipmentName}
+              </Button>
+            ))}
+          </div>
+        )}
         <CardContent className="p-4">
           <ProductSpecSheet
-            equipmentId={po.equipmentId || po.equipmentName}
-            equipmentName={po.equipmentName}
+            equipmentId={poItems[activeSpecItemIndex]?.equipmentId || poItems[activeSpecItemIndex]?.equipmentName || po.equipmentId || po.equipmentName}
+            equipmentName={poItems[activeSpecItemIndex]?.equipmentName || po.equipmentName}
             editable={false}
           />
         </CardContent>
@@ -1216,6 +1396,124 @@ export default function PurchaseOrderDetail() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Edit PO Items Dialog (When in Draft) */}
+      <Dialog open={editItemsOpen} onOpenChange={setEditItemsOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-emerald-700" />
+              Update Equipment Line Items &amp; Quantities
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Modify line item quantities within this Draft Purchase Order. Landed totals and GST will be recalculated automatically.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-3 max-h-[60vh] overflow-y-auto">
+            {editItemsList.map((item, idx) => {
+              const qty = item.quantity || 1;
+              const sub = (item.unitPrice || 0) * qty;
+              const gst = Math.round((sub * (item.gstRate ?? 12)) / 100);
+              const land = sub + gst;
+
+              return (
+                <div key={idx} className="p-3.5 border rounded-lg bg-slate-50/60 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="font-semibold text-xs text-slate-900 block">{item.equipmentName}</span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {item.rcNumber && (
+                          <Badge variant="outline" className="text-[10px] font-mono bg-purple-50 text-purple-700 border-purple-200">
+                            {item.rcNumber}
+                          </Badge>
+                        )}
+                        <span className="text-[11px] text-muted-foreground font-mono">
+                          Unit: ₹{(item.unitPrice || 0).toLocaleString("en-IN")} + {item.gstRate ?? 12}% GST
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] text-muted-foreground uppercase block">Landed Value</span>
+                      <span className="text-xs font-mono font-bold text-emerald-700">₹{land.toLocaleString("en-IN")}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="w-32">
+                      <Label className="text-[10px] text-muted-foreground uppercase">Order Quantity</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={item.quantity || 1}
+                        onChange={(e) => {
+                          const val = Math.max(1, parseInt(e.target.value) || 1);
+                          setEditItemsList(prev => prev.map((it, i) => i === idx ? {
+                            ...it,
+                            quantity: val,
+                            gstAmount: Math.round(((it.unitPrice || 0) * val * (it.gstRate ?? 12)) / 100),
+                            totalAmount: ((it.unitPrice || 0) * val) + Math.round(((it.unitPrice || 0) * val * (it.gstRate ?? 12)) / 100),
+                          } : it));
+                        }}
+                        className="h-8 text-xs font-mono font-bold mt-1 bg-white"
+                      />
+                    </div>
+                    <div className="text-xs text-slate-600 pt-3">
+                      Subtotal: <span className="font-mono font-semibold">₹{sub.toLocaleString("en-IN")}</span> + GST ({item.gstRate ?? 12}%): <span className="font-mono font-semibold">₹{gst.toLocaleString("en-IN")}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-lg flex items-center justify-between text-xs">
+              <span className="font-bold text-emerald-950">Updated Purchase Order Total:</span>
+              <span className="text-sm font-bold font-mono text-emerald-800">
+                ₹{editItemsList.reduce((acc, it) => {
+                  const sub = (it.unitPrice || 0) * (it.quantity || 1);
+                  const gst = Math.round((sub * (it.gstRate ?? 12)) / 100);
+                  return acc + sub + gst;
+                }, 0).toLocaleString("en-IN")}
+              </span>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setEditItemsOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={savingItems}
+              onClick={async () => {
+                setSavingItems(true);
+                try {
+                  await updatePurchaseOrder(id, { items: editItemsList });
+                  queryClient.invalidateQueries({ queryKey: getGetPurchaseOrderQueryKey(id) });
+                  queryClient.invalidateQueries({ queryKey: ["/purchase-orders"] });
+                  setEditItemsOpen(false);
+                  toast({
+                    title: "Purchase Order Updated",
+                    description: "Line item quantities and totals have been successfully updated.",
+                  });
+                } catch (err: any) {
+                  toast({
+                    title: "Update Failed",
+                    description: err.message || "Failed to update line items",
+                    variant: "destructive",
+                  });
+                } finally {
+                  setSavingItems(false);
+                }
+              }}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5"
+            >
+              {savingItems ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              Save Updated Items
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Record Payment Dialog (Scope Boundary) */}
       <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>

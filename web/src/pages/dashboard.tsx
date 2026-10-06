@@ -4,7 +4,7 @@ import {
 } from "@/lib/api-hooks";
 import {
   FileText, ShoppingCart, Truck, AlertTriangle, CheckCircle2, Clock,
-  TrendingUp, Activity, Wrench, ShieldCheck, Plus, ArrowUpRight,
+  TrendingUp, Activity, ShieldCheck, Plus, ArrowUpRight,
   ChevronRight, ArrowRight, Layers, FileCheck, RefreshCw, BarChart2
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
@@ -62,13 +62,6 @@ export default function Dashboard() {
   const budgetUtilized = summary?.totalBudgetUtilized ?? 0;
   const budgetAllocated = 500000000; // ₹50 Cr FY Allocation baseline
   const budgetPct = Math.min(100, Math.round((budgetUtilized / budgetAllocated) * 100));
-
-  const totalEquipment = summary?.totalEquipment ?? 20;
-  const totalDistricts = summary?.totalDistricts ?? 18;
-  const totalInstitutions = summary?.totalInstitutions ?? 17;
-  const unitsUnderWarranty = summary?.unitsUnderWarranty ?? 14;
-  const activeCamcContracts = summary?.activeCamcContracts ?? 2;
-  const pendingInstallations = summary?.pendingInstallations ?? 3;
 
   return (
     <div className="space-y-5 pb-8">
@@ -135,16 +128,27 @@ export default function Dashboard() {
               {pendingIndents} pending
             </span>
           </div>
-          {/* Progress Bar */}
-          <div className="w-full bg-[#eff3f8] h-1.5 rounded-full overflow-hidden relative my-2">
+          {/* Progress Bar with 80% Target Benchmark Marker */}
+          <div className="w-full bg-[#eff3f8] h-1.5 rounded-full relative my-2 overflow-visible">
             <div
               className="bg-[#2563eb] h-full rounded-full transition-all"
               style={{ width: `${indentApprovalRate}%` }}
             />
+            {/* Visual Target 80% Benchmark Pin */}
+            <div
+              className="absolute -top-0.5 -bottom-0.5 w-[2px] bg-[#0f2b5b] rounded-full z-10"
+              style={{ left: "80%" }}
+              title="State Clearance Target: 80%"
+            />
           </div>
           <div className="flex items-center justify-between text-[10.5px] text-[#6b7a93]">
-            <span className="font-semibold text-[#159557]">{indentApprovalRate}% cleared</span>
-            <span>Target: 80%</span>
+            <span className={cn("font-semibold", indentApprovalRate >= 80 ? "text-[#159557]" : "text-[#e08a0b]")}>
+              {indentApprovalRate}% cleared
+            </span>
+            <span className="flex items-center gap-1 font-medium text-[#475569]" title="Institutional statutory SLA clearance goal">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#0f2b5b]" />
+              Target: 80%
+            </span>
           </div>
         </div>
 
@@ -191,7 +195,7 @@ export default function Dashboard() {
               {totalPOs}
             </span>
             <span className="text-[11px] text-[#6b7a93]">
-              {approvedPOs} dispatched
+              {approvedPOs} sanctioned
             </span>
           </div>
           <div className="w-full bg-[#eff3f8] h-1.5 rounded-full overflow-hidden relative my-2">
@@ -230,7 +234,7 @@ export default function Dashboard() {
             />
           </div>
           <div className="flex items-center justify-between text-[10.5px] text-[#6b7a93]">
-            <span className="font-semibold text-[#0284c7]">94% QA pass</span>
+            <span className="font-semibold text-[#0284c7]">{sla?.qaFirstPassRate ?? 83}% QA pass</span>
             <Link href="/deliveries" className="text-[#2563eb] hover:underline">Track</Link>
           </div>
         </div>
@@ -485,55 +489,6 @@ export default function Dashboard() {
               </span>
               <p className="text-[10px] text-[#6b7a93] font-medium mt-1">Avg PO → Delivery</p>
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Equipment & Bio-Medical Assets Command Strip ── */}
-      <div className="bg-white border border-[#e4eaf2] rounded-xl p-4 shadow-xs">
-        <div className="flex items-center justify-between mb-3 border-b border-[#e4eaf2] pb-2.5">
-          <div className="flex items-center gap-2">
-            <Wrench className="w-4 h-4 text-[#e08a0b]" />
-            <h2 className="text-sm font-bold text-[#152340]">
-              Bio-Medical Equipment Fleet & Maintenance Ledger
-            </h2>
-          </div>
-          <Link href="/equipment" className="text-xs font-semibold text-[#2563eb] hover:underline flex items-center gap-1">
-            Open Registry <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-3 bg-[#f4f7fb] border border-[#e4eaf2] rounded-lg">
-            <span className="text-[10.5px] uppercase font-bold text-[#6b7a93] tracking-wide block">
-              Total Assets Registered
-            </span>
-            <span className="text-xl font-bold text-[#152340] mt-1 block">{totalEquipment}</span>
-            <span className="text-[10px] text-[#159557] font-medium">Across {totalDistricts} Districts ({totalInstitutions} Hospitals)</span>
-          </div>
-
-          <div className="p-3 bg-[#f0fbf4] border border-[#c8ebd6] rounded-lg">
-            <span className="text-[10.5px] uppercase font-bold text-[#159557] tracking-wide block">
-              Under Active Warranty
-            </span>
-            <span className="text-xl font-bold text-[#159557] mt-1 block">{unitsUnderWarranty} Units</span>
-            <span className="text-[10px] text-[#159557] font-medium">OEM Standard Warranty (100%)</span>
-          </div>
-
-          <div className="p-3 bg-[#eff5ff] border border-[#c6d6ec] rounded-lg">
-            <span className="text-[10.5px] uppercase font-bold text-[#2563eb] tracking-wide block">
-              Active CAMC Contracts
-            </span>
-            <span className="text-xl font-bold text-[#2563eb] mt-1 block">{activeCamcContracts} Contracts</span>
-            <span className="text-[10px] text-[#2563eb] font-medium">Post-Warranty Comprehensive AMC</span>
-          </div>
-
-          <div className="p-3 bg-[#fff9ec] border border-[#f6e2b8] rounded-lg">
-            <span className="text-[10.5px] uppercase font-bold text-[#e08a0b] tracking-wide block">
-              PM &amp; Installation Pipeline
-            </span>
-            <span className="text-xl font-bold text-[#e08a0b] mt-1 block">{pendingInstallations} Consignments</span>
-            <span className="text-[10px] text-[#e08a0b] font-medium">Consignee Verification Active</span>
           </div>
         </div>
       </div>

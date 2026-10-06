@@ -22,10 +22,26 @@ interface OrderItemRow {
   equipmentId: string;
   equipmentName: string;
   rateContractId: string;
+  rcNumber?: string;
+  vendorId?: string;
+  vendorName?: string;
   unitPrice: number;
   gstRate: number;
   qty: number;
   selected: boolean;
+  indentLineIndex?: number;
+  category?: string;
+  department?: string;
+  specifications?: string;
+  isSameVendor?: boolean;
+  candidateRCs?: Array<{
+    id: string;
+    contractNumber: string;
+    vendorId: string;
+    vendorName: string;
+    unitPrice: number;
+    gstRate?: number;
+  }>;
 }
 
 export default function PurchaseOrderNew() {
@@ -62,6 +78,8 @@ export default function PurchaseOrderNew() {
   });
 
   const [orderItems, setOrderItems] = useState<OrderItemRow[]>([]);
+  const [identifiedVendorId, setIdentifiedVendorId] = useState("");
+  const [identifiedVendorName, setIdentifiedVendorName] = useState("");
 
   // Performance Security (PS) & Bank Guarantee states (Process Book §5 Step 13)
   const [psRequired, setPsRequired] = useState(true);
@@ -90,14 +108,20 @@ export default function PurchaseOrderNew() {
     const matchedRc = rcs.find(r => r.id === rcIdFromParam);
     if (!matchedRc) return;
     // Pre-populate one order item from the matched RC
+    setIdentifiedVendorId(matchedRc.vendorId ? String(matchedRc.vendorId) : "");
+    setIdentifiedVendorName(matchedRc.vendorName || "");
     setOrderItems([{
       equipmentId: matchedRc.equipmentId || "",
       equipmentName: matchedRc.equipmentName,
       rateContractId: matchedRc.id,
+      rcNumber: matchedRc.contractNumber,
+      vendorId: matchedRc.vendorId ? String(matchedRc.vendorId) : undefined,
+      vendorName: matchedRc.vendorName,
       unitPrice: matchedRc.unitPrice,
       gstRate: matchedRc.gstRate ?? 12,
       qty: 1,
       selected: true,
+      isSameVendor: true,
     }]);
     if (!deliveryAddress) {
       setDeliveryAddress("TGMSIDC Central Biomedical Warehouse, Sultan Bazar, Hyderabad, Telangana - 500095");
@@ -120,18 +144,23 @@ export default function PurchaseOrderNew() {
     // Build selectable items from indent
     const items: OrderItemRow[] = [];
     if (indent.lineItems && indent.lineItems.length > 0) {
-      indent.lineItems.forEach((li, idx) => {
-        const isTarget = targetLineIndex !== undefined ? idx === targetLineIndex : true;
+      // First, compute matched RC for each item
+      const resolvedList = indent.lineItems.map((li, idx) => {
         const eqId = li.equipmentId || indent.equipmentId;
 
         // Accurate RC matching priority:
-        // 1. Specified targetRcId from query
-        // 2. RC whose unitPrice (or unitPriceInclTax) matches li.estimatedUnitCost or li.rateContractUnitPrice
-        // 3. li.rateContractId
-        // 4. Any RC for this equipment
-        // 5. Fallback to first available RC
+        // 1. Specified targetRcId from query for targetLineIndex
+        // 2. li.rateContractId
+        // 3. li.candidateRateContracts
+        // 4. RC whose unitPrice matches
+        // 5. Any RC for this equipment
+        const useTargetRc = (targetLineIndex !== undefined && idx === targetLineIndex && targetRcId) ? targetRcId : undefined;
+        const candidateRcIds = (li.candidateRateContracts || []).map((c: any) => String(c.rcId || c.rateContractId));
+
         const matchingRc =
-          (targetRcId && rcs.find(r => r.id === targetRcId)) ||
+          (useTargetRc && rcs.find(r => r.id === useTargetRc)) ||
+          (li.rateContractId && rcs.find(r => r.id === li.rateContractId)) ||
+          (candidateRcIds.length > 0 && rcs.find(r => candidateRcIds.includes(String(r.id)))) ||
           (li.estimatedUnitCost && rcs.find(r =>
             (r.equipmentId === eqId || r.equipmentName.toLowerCase() === (li.equipmentName || "").toLowerCase()) &&
             (r.unitPrice === li.estimatedUnitCost || Math.round(r.unitPrice * (1 + (r.gstRate ?? 12) / 100)) === li.estimatedUnitCost)
@@ -140,23 +169,80 @@ export default function PurchaseOrderNew() {
             (r.equipmentId === eqId || r.equipmentName.toLowerCase() === (li.equipmentName || "").toLowerCase()) &&
             r.unitPrice === li.rateContractUnitPrice
           )) ||
-          (li.rateContractId && rcs.find(r => r.id === li.rateContractId)) ||
           rcs.find(r => r.equipmentId === eqId || r.equipmentName.toLowerCase() === (li.equipmentName || "").toLowerCase()) ||
           rcs[0];
+
+        const eligibleRcs = rcs.filter(r =>
+          (eqId && r.equipmentId === eqId) ||
+          r.equipmentName.toLowerCase().trim() === (li.equipmentName || "").toLowerCase().trim() ||
+          candidateRcIds.includes(String(r.id))
+        );
 
         const resolvedUnitPrice = matchingRc
           ? matchingRc.unitPrice
           : (li.rateContractUnitPrice || li.estimatedUnitCost || 100000);
         const resolvedGstRate = matchingRc ? (matchingRc.gstRate ?? 12) : 12;
 
+        return {
+          li,
+          idx,
+          matchingRc,
+          eligibleRcs,
+          resolvedUnitPrice,
+          resolvedGstRate,
+        };
+      });
+
+      // Target vendor determination:
+      // If targetLineIndex is specified, find its vendor. Otherwise find first with RC.
+      const primaryTarget = (targetLineIndex !== undefined && resolvedList[targetLineIndex])
+        ? resolvedList[targetLineIndex]
+        : resolvedList.find(r => r.matchingRc) || resolvedList[0];
+
+      const primeVendorId = primaryTarget?.matchingRc?.vendorId ? String(primaryTarget.matchingRc.vendorId) : "";
+      const primeVendorName = primaryTarget?.matchingRc?.vendorName || "";
+
+      setIdentifiedVendorId(primeVendorId);
+      setIdentifiedVendorName(primeVendorName);
+
+      resolvedList.forEach(({ li, idx, matchingRc, eligibleRcs, resolvedUnitPrice, resolvedGstRate }) => {
+        const itemVendorId = matchingRc?.vendorId ? String(matchingRc.vendorId) : "";
+        const itemVendorName = matchingRc?.vendorName || "";
+
+        // Check if item shares the same vendor based on tagged Rate Contract
+        const isSameVendor = Boolean(
+          primeVendorId && (itemVendorId === primeVendorId || (itemVendorName && primeVendorName && itemVendorName.toLowerCase().trim() === primeVendorName.toLowerCase().trim()))
+        );
+
+        // Pre-select target line or items sharing the same vendor!
+        const shouldSelect = (targetLineIndex !== undefined)
+          ? (idx === targetLineIndex || isSameVendor)
+          : isSameVendor || idx === 0;
+
         items.push({
-          equipmentId: eqId || matchingRc?.equipmentId || "",
+          equipmentId: li.equipmentId || matchingRc?.equipmentId || "",
           equipmentName: li.equipmentName || matchingRc?.equipmentName || "Medical Equipment",
           rateContractId: matchingRc ? matchingRc.id : (li.rateContractId || indent.rateContractId || ""),
+          rcNumber: matchingRc?.contractNumber || li.rateContractNumber || "",
+          vendorId: itemVendorId,
+          vendorName: itemVendorName,
           unitPrice: resolvedUnitPrice,
           gstRate: resolvedGstRate,
           qty: li.requestedQty || li.quantity || 1,
-          selected: isTarget,
+          selected: shouldSelect,
+          indentLineIndex: idx,
+          category: li.category,
+          department: li.department,
+          specifications: li.specifications,
+          isSameVendor,
+          candidateRCs: eligibleRcs.map(r => ({
+            id: r.id,
+            contractNumber: r.contractNumber,
+            vendorId: String(r.vendorId),
+            vendorName: r.vendorName,
+            unitPrice: r.unitPrice,
+            gstRate: r.gstRate ?? 12,
+          })),
         });
       });
     } else {
@@ -166,14 +252,23 @@ export default function PurchaseOrderNew() {
         rcs.find(r => r.equipmentId === eqId || r.equipmentName.toLowerCase() === (indent.equipmentName || "").toLowerCase()) ||
         (indent.rateContractId ? rcs.find(r => r.id === indent.rateContractId) : rcs[0]);
 
+      if (matchingRc) {
+        setIdentifiedVendorId(String(matchingRc.vendorId));
+        setIdentifiedVendorName(matchingRc.vendorName);
+      }
+
       items.push({
         equipmentId: indent.equipmentId || matchingRc?.equipmentId || "",
         equipmentName: indent.equipmentName || matchingRc?.equipmentName || "Medical Equipment",
         rateContractId: matchingRc ? matchingRc.id : (indent.rateContractId || ""),
+        rcNumber: matchingRc?.contractNumber || "",
+        vendorId: matchingRc?.vendorId ? String(matchingRc.vendorId) : undefined,
+        vendorName: matchingRc?.vendorName,
         unitPrice: matchingRc ? matchingRc.unitPrice : (indent.estimatedTotalValue || 100000),
         gstRate: matchingRc ? (matchingRc.gstRate ?? 12) : 12,
         qty: indent.quantity || 1,
         selected: true,
+        isSameVendor: true,
       });
     }
 
@@ -201,13 +296,26 @@ export default function PurchaseOrderNew() {
     const rc = rcs.find(r => r.id === rcId);
     setOrderItems(prev => prev.map((item, i) => {
       if (i !== index) return item;
+      const primeVid = identifiedVendorId;
+      const primeVnm = identifiedVendorName.toLowerCase().trim();
+      const rcVid = rc ? String(rc.vendorId) : "";
+      const rcVnm = rc?.vendorName ? rc.vendorName.toLowerCase().trim() : "";
+      const isSame = Boolean((primeVid && rcVid === primeVid) || (primeVnm && rcVnm && primeVnm === rcVnm));
       return {
         ...item,
         rateContractId: rcId,
+        rcNumber: rc ? rc.contractNumber : item.rcNumber,
+        vendorId: rcVid || item.vendorId,
+        vendorName: rc?.vendorName || item.vendorName,
         unitPrice: rc ? rc.unitPrice : item.unitPrice,
-        gstRate: rc ? rc.gstRate : item.gstRate,
+        gstRate: rc ? (rc.gstRate ?? 12) : item.gstRate,
+        isSameVendor: isSame,
       };
     }));
+  }
+
+  function selectAllSameVendor(select: boolean) {
+    setOrderItems(prev => prev.map(item => item.isSameVendor ? { ...item, selected: select } : item));
   }
 
   const selectedItems = orderItems.filter(i => i.selected && i.rateContractId);
@@ -251,20 +359,41 @@ export default function PurchaseOrderNew() {
           institutionName: matchedFacility?.name || deliveryAddress.split(",")[0] || "Designated Hospital",
           district: matchedFacility?.district || "Telangana",
           address: deliveryAddress,
-          quantity: isSplit ? l1Qty : primaryItem.qty,
+          quantity: isSplit ? l1Qty : totalQty,
           deliveryStatus: "pending",
         }
       ];
+
+      const itemsPayload = selectedItems.map(item => ({
+        equipmentId: item.equipmentId,
+        equipmentName: item.equipmentName,
+        rateContractId: item.rateContractId,
+        rcNumber: item.rcNumber || rcs.find(r => r.id === item.rateContractId)?.contractNumber || "",
+        quantity: isSplit ? Math.ceil(item.qty * l1Ratio) : item.qty,
+        unitPrice: item.unitPrice,
+        gstRate: item.gstRate,
+        gstAmount: Math.round((item.unitPrice * (isSplit ? Math.ceil(item.qty * l1Ratio) : item.qty) * item.gstRate) / 100),
+        unitPriceInclTax: Math.round(item.unitPrice * (1 + item.gstRate / 100)),
+        totalAmount: Math.round(item.unitPrice * (isSplit ? Math.ceil(item.qty * l1Ratio) : item.qty) * (1 + item.gstRate / 100)),
+        indentLineItemIndex: item.indentLineIndex,
+        specifications: item.specifications || "",
+        category: item.category || "Medical Equipment",
+        department: item.department || "General",
+      }));
 
       // Primary L1 Purchase Order
       const res = await createPO.mutateAsync({
         data: {
           indentId: selectedIndentId || undefined,
-          lineIndex: selectedLineIndex,
+          lineIndex: selectedItems.length === 1 ? selectedItems[0].indentLineIndex : undefined,
           rateContractId: primaryItem.rateContractId || rcIdFromParam,
           vendorId: rc?.vendorId,
+          vendorName: rc?.vendorName || selectedVendor?.name,
           equipmentId: primaryItem.equipmentId,
-          quantity: isSplit ? l1Qty : primaryItem.qty,
+          equipmentName: selectedItems.map(i => i.equipmentName).join(" + "),
+          items: itemsPayload,
+          quantity: isSplit ? l1Qty : totalQty,
+          totalAmount: isSplit ? Math.round(totalCost * l1Ratio) : totalCost,
           deliveryAddress,
           expectedDeliveryDate,
           financialYear: "2026-27",
@@ -283,14 +412,35 @@ export default function PurchaseOrderNew() {
       // If split, create secondary L2 PO
       if (isSplit && l2Qty > 0 && secondaryVendorId) {
         const l2Vendor = vendors.find(v => String(v.id) === secondaryVendorId);
+        const l2ItemsPayload = selectedItems.map(item => ({
+          equipmentId: item.equipmentId,
+          equipmentName: item.equipmentName,
+          rateContractId: item.rateContractId,
+          rcNumber: item.rcNumber || rcs.find(r => r.id === item.rateContractId)?.contractNumber || "",
+          quantity: Math.max(1, item.qty - Math.ceil(item.qty * l1Ratio)),
+          unitPrice: item.unitPrice,
+          gstRate: item.gstRate,
+          gstAmount: Math.round((item.unitPrice * Math.max(1, item.qty - Math.ceil(item.qty * l1Ratio)) * item.gstRate) / 100),
+          unitPriceInclTax: Math.round(item.unitPrice * (1 + item.gstRate / 100)),
+          totalAmount: Math.round(item.unitPrice * Math.max(1, item.qty - Math.ceil(item.qty * l1Ratio)) * (1 + item.gstRate / 100)),
+          indentLineItemIndex: item.indentLineIndex,
+          specifications: item.specifications || "",
+          category: item.category || "Medical Equipment",
+          department: item.department || "General",
+        }));
+
         await createPO.mutateAsync({
           data: {
             indentId: selectedIndentId || undefined,
-            lineIndex: selectedLineIndex,
+            lineIndex: selectedItems.length === 1 ? selectedItems[0].indentLineIndex : undefined,
             rateContractId: primaryItem.rateContractId,
             vendorId: secondaryVendorId,
+            vendorName: l2Vendor?.name || "Secondary Vendor",
             equipmentId: primaryItem.equipmentId,
+            equipmentName: selectedItems.map(i => i.equipmentName).join(" + "),
+            items: l2ItemsPayload,
             quantity: l2Qty,
+            totalAmount: Math.round(totalCost * (1 - l1Ratio)),
             deliveryAddress,
             expectedDeliveryDate,
             financialYear: "2026-27",
@@ -318,7 +468,7 @@ export default function PurchaseOrderNew() {
 
       toast({
         title: "Draft PO Created & Tagged to Indent",
-        description: `Draft PO ${res.poNumber || "PO"} created. It will now be reviewed by GM & SO during Indent approval and issued upon Executive Director (ED) sanction.`,
+        description: `Draft PO ${res.poNumber || "PO"} created with ${selectedItems.length} equipment item(s) for ${rc?.vendorName || selectedVendor?.name || "empanelled vendor"}.`,
       });
 
       navigate(`/purchase-orders/${res.id}?fromDraft=true`);
@@ -455,36 +605,91 @@ export default function PurchaseOrderNew() {
         {(selectedIndentId || (rcIdFromParam && orderItems.length > 0)) && (
           <Card className="border border-border/80 shadow-sm">
             <CardHeader className="pb-3 bg-muted/20 border-b flex flex-row items-center justify-between">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <ShoppingCart className="h-4 w-4 text-emerald-600" />
-                2. Equipment &amp; Rate Contract Line Items ({selectedItems.length} selected)
-              </CardTitle>
+              <div>
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <ShoppingCart className="h-4 w-4 text-emerald-600" />
+                  2. Equipment &amp; Rate Contract Line Items ({selectedItems.length} selected)
+                </CardTitle>
+                <CardDescription className="text-xs text-muted-foreground mt-0.5">
+                  Items sharing the same Rate Contract empanelled vendor can be updated and consolidated into this single PO.
+                </CardDescription>
+              </div>
               <Badge variant="outline" className="text-xs font-mono">
                 {orderItems.length} {rcIdFromParam && !selectedIndentId ? "from Rate Contract" : "Available in Indent"}
               </Badge>
             </CardHeader>
             <CardContent className="space-y-4 pt-4">
+              {/* Same Vendor Identification Banner */}
+              {identifiedVendorName && orderItems.filter(i => i.isSameVendor).length > 1 && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-emerald-950 shadow-2xs">
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-sm text-emerald-900 flex items-center gap-2">
+                        Same Empanelled Vendor Identified — {identifiedVendorName}
+                        <Badge className="bg-emerald-600 text-white text-[10px]">
+                          {orderItems.filter(i => i.isSameVendor).length} Items Eligible
+                        </Badge>
+                      </p>
+                      <p className="text-emerald-800 text-xs mt-0.5">
+                        Based on the Rate Contracts tagged to <strong>{identifiedVendorName}</strong>, multiple items in Indent <strong>#{selectedIndent?.indentNumber || "Requisition"}</strong> share this supplier. You can update quantities, select RCs, and add both items into this single Purchase Order.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs border-emerald-400 bg-white text-emerald-800 hover:bg-emerald-100 cursor-pointer"
+                      onClick={() => selectAllSameVendor(true)}
+                    >
+                      Select All ({orderItems.filter(i => i.isSameVendor).length})
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               <div className="border rounded-xl overflow-hidden divide-y">
                 {orderItems.map((item, idx) => {
                   const subtotal = item.unitPrice * item.qty;
                   const gst = (subtotal * item.gstRate) / 100;
                   const total = subtotal + gst;
+                  const disabledCheckbox = !item.isSameVendor && selectedItems.length > 0;
                   return (
                     <div key={idx} className={`p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-colors ${item.selected ? "bg-emerald-50/40" : "bg-muted/20"}`}>
                       <div className="flex items-center gap-3">
                         <Checkbox
                           checked={item.selected}
                           onCheckedChange={() => toggleItem(idx)}
+                          disabled={disabledCheckbox}
                           id={`item-${idx}`}
                         />
                         <div>
-                          <Label htmlFor={`item-${idx}`} className="text-sm font-bold cursor-pointer flex items-center gap-2">
+                          <Label htmlFor={`item-${idx}`} className={`text-sm font-bold flex items-center gap-2 ${disabledCheckbox ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
                             {item.equipmentName}
                             {item.selected && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
                           </Label>
-                          <p className="text-xs text-muted-foreground mt-0.5 font-mono">
-                            Unit Price: ₹{item.unitPrice.toLocaleString("en-IN")} + {item.gstRate}% GST
-                          </p>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            <span className="text-xs text-muted-foreground font-mono">
+                              Unit Price: ₹{item.unitPrice.toLocaleString("en-IN")} + {item.gstRate}% GST
+                            </span>
+                            {item.vendorName && (
+                              <Badge variant="outline" className={`text-[10px] ${item.isSameVendor ? "bg-emerald-50 text-emerald-800 border-emerald-300 font-medium" : "bg-amber-50 text-amber-800 border-amber-300"}`}>
+                                {item.isSameVendor ? `✓ Same Vendor (${item.vendorName})` : `Different Vendor (${item.vendorName})`}
+                              </Badge>
+                            )}
+                            {item.rcNumber && (
+                              <Badge variant="outline" className="text-[10px] font-mono text-slate-700 bg-slate-50">
+                                {item.rcNumber}
+                              </Badge>
+                            )}
+                            {item.category && (
+                              <span className="text-[11px] text-muted-foreground">
+                                · {item.category}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -523,9 +728,10 @@ export default function PurchaseOrderNew() {
                                 })
                                 .map((rc) => {
                                   const matchesEq = (rc.equipmentId && rc.equipmentId === item.equipmentId) || rc.equipmentName.toLowerCase() === item.equipmentName.toLowerCase();
+                                  const matchesVendor = identifiedVendorId && (String(rc.vendorId) === String(identifiedVendorId) || rc.vendorName === identifiedVendorName);
                                   return (
                                     <SelectItem key={rc.id} value={String(rc.id)} className="text-xs">
-                                      {rc.contractNumber} — ₹{rc.unitPrice.toLocaleString("en-IN")} + {rc.gstRate ?? 12}% GST ({rc.vendorName}){matchesEq ? " ★" : ""}
+                                      {rc.contractNumber} — ₹{rc.unitPrice.toLocaleString("en-IN")} + {rc.gstRate ?? 12}% GST ({rc.vendorName}){matchesVendor ? " ★ Same Vendor" : matchesEq ? " ★" : ""}
                                     </SelectItem>
                                   );
                                 })}
@@ -843,6 +1049,61 @@ export default function PurchaseOrderNew() {
                   </div>
                 </div>
               </div>
+
+              {/* Multi-Item Breakdown Table when > 1 item is selected */}
+              {selectedItems.length > 1 && (
+                <div className="bg-white border border-slate-200 rounded-lg p-3.5 space-y-2.5 shadow-2xs">
+                  <div className="flex items-center justify-between border-b pb-2 border-slate-100">
+                    <span className="text-[11px] font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                      <Layers className="h-3.5 w-3.5 text-emerald-600" />
+                      Consolidated Purchase Order Line Items Schedule ({selectedItems.length} Items)
+                    </span>
+                    <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-800 border-emerald-300">
+                      Empanelled Vendor: {selectedVendor?.name || selectedRc?.vendorName || identifiedVendorName}
+                    </Badge>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50 text-slate-600 border-b">
+                        <tr>
+                          <th className="py-2 px-2.5 text-left font-semibold">#</th>
+                          <th className="py-2 px-2.5 text-left font-semibold">Equipment Item</th>
+                          <th className="py-2 px-2.5 text-left font-semibold">Rate Contract</th>
+                          <th className="py-2 px-2.5 text-center font-semibold">Qty</th>
+                          <th className="py-2 px-2.5 text-right font-semibold">Contracted Rate</th>
+                          <th className="py-2 px-2.5 text-right font-semibold">GST %</th>
+                          <th className="py-2 px-2.5 text-right font-semibold">Landed Subtotal</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {selectedItems.map((it, iIdx) => {
+                          const subtotal = it.unitPrice * it.qty;
+                          const gst = (subtotal * it.gstRate) / 100;
+                          const landed = subtotal + gst;
+                          const itRc = rcs.find(r => r.id === it.rateContractId);
+                          return (
+                            <tr key={iIdx} className="hover:bg-slate-50/60">
+                              <td className="py-2.5 px-2.5 text-slate-500 font-mono">{iIdx + 1}</td>
+                              <td className="py-2.5 px-2.5 font-bold text-slate-900">{it.equipmentName}</td>
+                              <td className="py-2.5 px-2.5 font-mono text-slate-700">{it.rcNumber || itRc?.contractNumber || "RC Active"}</td>
+                              <td className="py-2.5 px-2.5 text-center font-bold font-mono">{it.qty}</td>
+                              <td className="py-2.5 px-2.5 text-right font-mono">₹{it.unitPrice.toLocaleString("en-IN")}</td>
+                              <td className="py-2.5 px-2.5 text-right">{it.gstRate}%</td>
+                              <td className="py-2.5 px-2.5 text-right font-mono font-bold text-emerald-700">₹{Math.round(landed).toLocaleString("en-IN")}</td>
+                            </tr>
+                          );
+                        })}
+                        <tr className="bg-emerald-50/40 font-bold border-t">
+                          <td colSpan={3} className="py-2.5 px-2.5 text-slate-900">Total Consolidated Procurement Value</td>
+                          <td className="py-2.5 px-2.5 text-center font-mono text-slate-900">{totalQty} Units</td>
+                          <td colSpan={2}></td>
+                          <td className="py-2.5 px-2.5 text-right font-mono text-emerald-800 text-sm">₹{Math.round(totalCost).toLocaleString("en-IN")}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {/* Statutory Review Affirmation */}
               <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-lg p-3 text-xs text-emerald-900 flex items-start gap-2.5">

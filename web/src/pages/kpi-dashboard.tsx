@@ -332,7 +332,7 @@ function ProcurementKPIView({ period }: { period: Period }) {
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <BarChart3 className="h-4 w-4 text-emerald-600" />
-                KPI-7: Budget Utilisation by Programme (R-7)
+                KPI-7: Budget Utilisation by Programme
               </CardTitle>
               <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px]">
                 Overall 78.4%
@@ -455,7 +455,7 @@ function ProcurementKPIView({ period }: { period: Period }) {
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-primary" />
-              KPI-10: Empanelled Vendor Performance Scorecard (R-3/KPI-10)
+              KPI-10: Empanelled Vendor Performance Scorecard
             </CardTitle>
             <Badge variant="outline" className="text-xs">
               Statutory Benchmark: ≥80/100

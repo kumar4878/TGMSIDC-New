@@ -60,8 +60,39 @@ async function recalculatePOFulfilment(poId: any) {
 }
 
 async function fmt(r: any) {
-  const vn = r.vendorName ? null : (mongoose.Types.ObjectId.isValid(r.vendorId) ? await Vendor.findById(r.vendorId).catch(() => null) : null);
-  const fac = r.facilityName ? null : (mongoose.Types.ObjectId.isValid(r.facilityId) ? await Institution.findById(r.facilityId).catch(() => null) : null);
+  let vId = r.vendorId ? (typeof r.vendorId === "string" ? r.vendorId : r.vendorId.toString()) : "";
+  let vName = r.vendorName || "";
+  if (!vName && vId && mongoose.Types.ObjectId.isValid(vId)) {
+    const vn = await Vendor.findById(vId).catch(() => null);
+    if (vn) vName = vn.name;
+  }
+  if (!vId && vName) {
+    const vn = await Vendor.findOne({ name: new RegExp(`^${vName}$`, "i") }).catch(() => null);
+    if (vn) vId = vn._id.toString();
+  }
+
+  let fId = r.facilityId ? (typeof r.facilityId === "string" ? r.facilityId : r.facilityId.toString()) : "";
+  let fName = r.facilityName || "";
+  if (!fName && fId && mongoose.Types.ObjectId.isValid(fId)) {
+    const fac = await Institution.findById(fId).catch(() => null);
+    if (fac) fName = fac.name;
+  }
+  if (!fId && fName) {
+    const fac = await Institution.findOne({ name: new RegExp(`^${fName.split(",")[0].trim()}`, "i") }).catch(() => null);
+    if (fac) fId = fac._id.toString();
+  }
+
+  const toIso = (d: any) => {
+    if (!d) return null;
+    if (d instanceof Date) return d.toISOString();
+    try {
+      const dt = new Date(d);
+      return isNaN(dt.getTime()) ? null : dt.toISOString();
+    } catch {
+      return null;
+    }
+  };
+
   return {
     id: r._id.toString(),
     deliveryTrackingId: r.deliveryTrackingId ?? r.qrCode ?? r._id.toString().slice(-8),
@@ -69,26 +100,26 @@ async function fmt(r: any) {
     deliveryNoteNo: r.challanNumber || r.deliveryNoteNo || "",
     purchaseOrderId: r.purchaseOrderId?.toString() ?? "",
     poNumber: r.poNumber ?? "",
-    vendorId: r.vendorId.toString(),
-    vendorName: r.vendorName || vn?.name || "Unknown",
-    facilityId: r.facilityId.toString(),
-    facilityName: r.facilityName || fac?.name || "Unknown",
+    vendorId: vId,
+    vendorName: vName || "Unknown",
+    facilityId: fId,
+    facilityName: fName || "Unknown",
     equipmentId: r.equipmentId?.toString() ?? null,
     equipmentName: r.equipmentName ?? "",
-    orderedQty: r.orderedQty ?? r.quantity,
-    quantity: r.quantity,
+    orderedQty: r.orderedQty ?? r.quantity ?? 1,
+    quantity: r.quantity ?? 1,
     receivedQty: r.receivedQty ?? 0,
-    acceptedQty: r.acceptedQty ?? (r.status === "accepted" ? r.quantity : 0),
+    acceptedQty: r.acceptedQty ?? (r.status === "accepted" ? (r.quantity ?? 1) : 0),
     damagedQty: r.damagedQty ?? 0,
     shortageQty: r.shortageQty ?? 0,
     rejectedQty: r.rejectedQty ?? 0,
     returnedQty: r.returnedQty ?? 0,
-    dispatchDate: r.dispatchDate?.toISOString() ?? null,
+    dispatchDate: toIso(r.dispatchDate),
     transporterName: r.transporterName ?? "",
     challanNumber: r.challanNumber ?? "",
     invoiceNumber: r.invoiceNumber ?? "",
-    expectedDeliveryDate: r.expectedDeliveryDate?.toISOString() ?? null,
-    deliveredDate: r.deliveredDate?.toISOString() ?? null,
+    expectedDeliveryDate: toIso(r.expectedDeliveryDate),
+    deliveredDate: toIso(r.deliveredDate),
     receivedBy: r.receivedBy ?? "",
     condition: r.condition ?? "pending_inspection",
     serialNumbers: r.serialNumbers ?? [],
@@ -96,56 +127,77 @@ async function fmt(r: any) {
     delayDays: r.delayDays ?? 0,
     deliveryCertUploaded: r.deliveryCertUploaded ?? false,
     deliveryCertFilename: r.deliveryCertFilename ?? "",
-    deliveryCertDate: r.deliveryCertDate?.toISOString() ?? null,
+    deliveryCertDate: toIso(r.deliveryCertDate),
     dccVerified: r.dccVerified ?? false,
     dccVerifiedBy: r.dccVerifiedBy ?? null,
-    dccVerifiedDate: r.dccVerifiedDate?.toISOString() ?? null,
+    dccVerifiedDate: toIso(r.dccVerifiedDate),
     discrepancies: r.discrepancies ?? [],
     discrepancyNotes: r.discrepancyNotes ?? "",
     qaInspectionItems: r.qaInspectionItems ?? [],
     qaCommitteeName: r.qaCommitteeName ?? "",
-    qaInspectionDate: r.qaInspectionDate?.toISOString() ?? null,
+    qaInspectionDate: toIso(r.qaInspectionDate),
     qaDecision: r.qaDecision ?? "pending",
     qaComplianceScore: r.qaComplianceScore ?? 0,
     qaNotes: r.qaNotes ?? "",
     isReinspection: r.isReinspection ?? false,
     reinspectionCount: r.reinspectionCount ?? 0,
     reinspectionDecision: r.reinspectionDecision ?? null,
-    acceptanceCertificateIssued: r.acceptanceCertificateIssued,
-    acceptanceCertDate: r.acceptanceCertDate?.toISOString() ?? null,
+    acceptanceCertificateIssued: r.acceptanceCertificateIssued ?? false,
+    acceptanceCertDate: toIso(r.acceptanceCertDate),
     installationRequired: r.installationRequired ?? false,
     installationStatus: r.installationStatus ?? "not_required",
-    installationDate: r.installationDate?.toISOString() ?? null,
+    installationDate: toIso(r.installationDate),
     trainingCompleted: r.trainingCompleted ?? false,
     equipmentRegistered: r.equipmentRegistered ?? false,
     registeredAssetTags: r.registeredAssetTags ?? [],
-    warrantyStartDate: r.warrantyStartDate?.toISOString() ?? null,
-    warrantyEndDate: r.warrantyEndDate?.toISOString() ?? null,
+    warrantyStartDate: toIso(r.warrantyStartDate),
+    warrantyEndDate: toIso(r.warrantyEndDate),
     warrantyMonths: r.warrantyMonths ?? 12,
     paymentStatus: r.paymentStatus ?? "not_paid",
     grnNumber: r.grnNumber || (r.status === "accepted" || r.status === "delivered" ? (r.deliveryTrackingId ? `GRN/HPC/2026/${r.deliveryTrackingId.replace("DEL-", "")}` : "") : ""),
-    grnDate: r.grnDate?.toISOString() ?? (r.deliveredDate?.toISOString() ?? null),
+    grnDate: toIso(r.grnDate) || toIso(r.deliveredDate),
     annexure6: r.annexure6 ?? null,
-    documentsUploaded: r.documentsUploaded,
+    documentsUploaded: r.documentsUploaded ?? [],
     status: r.status,
-    createdAt: r.createdAt.toISOString(),
-    updatedAt: r.updatedAt.toISOString(),
+    createdAt: toIso(r.createdAt) || new Date().toISOString(),
+    updatedAt: toIso(r.updatedAt) || new Date().toISOString(),
   };
 }
 
 router.get("/deliveries", async (req, res): Promise<void> => {
-  const filter: Record<string, any> = {};
-  if (req.query.status && req.query.status !== "all") filter.status = req.query.status;
-  if (req.query.poId) filter.purchaseOrderId = req.query.poId;
-  if (req.query.vendorId) filter.vendorId = req.query.vendorId;
-  const rows = await Delivery.find(filter).sort({ createdAt: -1 });
-  res.json(await Promise.all(rows.map(fmt)));
+  try {
+    const filter: Record<string, any> = {};
+    if (req.query.status && req.query.status !== "all") filter.status = req.query.status;
+    if (req.query.poId) filter.purchaseOrderId = req.query.poId;
+    if (req.query.vendorId) {
+      const vId = req.query.vendorId as string;
+      if (mongoose.Types.ObjectId.isValid(vId)) {
+        filter.$or = [
+          { vendorId: vId },
+          { vendorId: new mongoose.Types.ObjectId(vId) },
+        ];
+      } else {
+        filter.vendorId = vId;
+      }
+    }
+    if (req.query.vendorName) {
+      filter.vendorName = new RegExp(`^${req.query.vendorName}$`, "i");
+    }
+    const rows = await Delivery.find(filter).sort({ createdAt: -1 });
+    res.json(await Promise.all(rows.map(fmt)));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.get("/deliveries/:id", async (req, res): Promise<void> => {
-  const r = await Delivery.findById(req.params.id);
-  if (!r) { res.status(404).json({ error: "Not found" }); return; }
-  res.json(await fmt(r));
+  try {
+    const r = await Delivery.findById(req.params.id);
+    if (!r) { res.status(404).json({ error: "Not found" }); return; }
+    res.json(await fmt(r));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post("/deliveries", async (req, res): Promise<void> => {

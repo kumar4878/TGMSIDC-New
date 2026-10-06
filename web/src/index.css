@@ -11,11 +11,11 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
 
-  --color-card: hsl(var(--card));
+  --color-card: var(--card);
   --color-card-foreground: hsl(var(--card-foreground));
   --color-card-border: hsl(var(--card-border));
 
-  --color-popover: hsl(var(--popover));
+  --color-popover: var(--card);
   --color-popover-foreground: hsl(var(--popover-foreground));
   --color-popover-border: hsl(var(--popover-border));
 

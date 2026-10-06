@@ -183,6 +183,16 @@ export default function IndentDetail(props?: { id?: string }) {
     query: { enabled: !!id, queryKey: getGetIndentQueryKey(id) },
   });
 
+  // Ensure Indent detail view always starts at the top (starting details) when opened
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    const mainEl = document.getElementById("main-scroll-container") || document.querySelector("main");
+    if (mainEl) {
+      mainEl.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      mainEl.scrollTop = 0;
+    }
+  }, [id, isLoading]);
+
   const { data: steps = [], refetch: refetchSteps } = useQuery({
     queryKey: stepKey(id),
     queryFn: async () => {
@@ -705,7 +715,10 @@ export default function IndentDetail(props?: { id?: string }) {
   const firstDeliveredDelivery = linkedDeliveries.find((d) => d.deliveredDate || d.status === "delivered");
   const firstQAPassedDelivery = linkedDeliveries.find((d) => d.status === "qa_passed" || d.status === "accepted" || d.qaDecision === "accepted" || (d.qaComplianceScore != null && d.qaComplianceScore >= 100));
   const firstAcceptedDelivery = linkedDeliveries.find((d) => d.acceptanceCertificateIssued);
-  const isPOPaid = linkedPOs.some((p: any) => p.paymentStatus === "paid") || linkedInvoices.some((i: any) => i.status === "paid");
+  const isPOPaid = linkedPOs.some((p: any) => p.paymentStatus === "paid" || (p.tranche1Paid && p.tranche2Paid)) || linkedInvoices.some((i: any) => i.status === "paid") || indent.paymentStatus === "paid";
+  const isT1Paid = linkedPOs.some((p: any) => p.tranche1Paid || p.paymentStatus === "paid" || p.paymentStatus === "partial") || indent.tranche1Paid || indent.paymentStatus === "paid";
+  const isT2Paid = linkedPOs.some((p: any) => p.tranche2Paid || (p.paymentStatus === "paid" && (p.status === "completed" || p.tranche2Paid))) || indent.tranche2Paid || (indent.paymentStatus === "paid" && (indent.tranche2Paid || indent.tranche1Paid));
+  const isFullyPaid = (isT1Paid && isT2Paid) || isPOPaid;
 
   const LIFECYCLE_STAGES = [
     "Indent Raised", "Approved", "PO Issued", "Delivered", "QA Passed", "Accepted",
@@ -1616,6 +1629,61 @@ export default function IndentDetail(props?: { id?: string }) {
                 </span>
               </CardHeader>
               <CardContent className="p-0">
+                {(() => {
+                  const groups: Record<string, { vendorName: string; lineIndices: number[]; rcs: string[] }> = {};
+                  lineItems.forEach((li: any, idx: number) => {
+                    const vendor = li.rateContractVendor || (li.candidateRateContracts?.[0]?.vendorName);
+                    const rcNum = li.rateContractNumber || (li.candidateRateContracts?.[0]?.contractNumber);
+                    if (vendor) {
+                      const vKey = vendor.toLowerCase().trim();
+                      if (!groups[vKey]) {
+                        groups[vKey] = { vendorName: vendor, lineIndices: [], rcs: [] };
+                      }
+                      groups[vKey].lineIndices.push(idx);
+                      if (rcNum && !groups[vKey].rcs.includes(rcNum)) {
+                        groups[vKey].rcs.push(rcNum);
+                      }
+                    }
+                  });
+                  const multiGroups = Object.values(groups).filter(g => g.lineIndices.length > 1);
+                  if (multiGroups.length === 0) return null;
+
+                  return (
+                    <div className="p-3 border-b border-[#e4eaf2] bg-emerald-50/50 space-y-2">
+                      {multiGroups.map((grp, gIdx) => {
+                        const allDrafted = grp.lineIndices.every(i => lineItems[i]?.lineStatus === "po_drafted" || lineItems[i]?.poId);
+                        return (
+                          <div key={gIdx} className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-emerald-950">
+                            <div className="flex items-start gap-2">
+                              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                              <div>
+                                <span className="font-bold">Same Vendor Identified — {grp.vendorName} ({grp.lineIndices.length} Items): </span>
+                                <span className="text-emerald-800">
+                                  Based on tagged Rate Contracts ({grp.rcs.join(", ")}), these items can be consolidated into a single combined Purchase Order.
+                                </span>
+                              </div>
+                            </div>
+                            {user?.role !== "deo" && !allDrafted && (
+                              <Button
+                                size="sm"
+                                className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white font-semibold gap-1.5 shadow-xs shrink-0 cursor-pointer"
+                                onClick={() => {
+                                  const firstIdx = grp.lineIndices[0];
+                                  const firstLi = lineItems[firstIdx];
+                                  const targetRcId = firstLi.rateContractId || firstLi.candidateRateContracts?.[0]?.rcId || "";
+                                  setLocation(`/purchase-orders/new?indentId=${indent.id || (indent as any)._id}&lineIndex=${firstIdx}&equipmentId=${firstLi.equipmentId || ''}&rcId=${targetRcId}&sameVendor=true`);
+                                }}
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                                Raise Consolidated PO ({grp.lineIndices.length} Items)
+                              </Button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
@@ -1781,19 +1849,96 @@ export default function IndentDetail(props?: { id?: string }) {
                                     Excluded from current PO cycle
                                   </span>
                                 </div>
-                              ) : li.lineStatus === "po_raised" || li.lineStatus === "po_drafted" || li.poNumber ? (
-                                <div className="flex flex-col items-start gap-1">
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-300">
-                                    <CheckCheck className="h-3 w-3 text-emerald-700 shrink-0" />
-                                    {li.lineStatus === "po_drafted" ? "Draft PO: " : "PO Raised: "} {li.poNumber}
-                                  </span>
-                                  <Link href={li.poId || li.purchaseOrderId ? `/purchase-orders/${li.poId || li.purchaseOrderId}` : `/purchase-orders`}>
-                                    <span className="text-[10.5px] text-slate-700 hover:underline cursor-pointer flex items-center gap-1 font-medium">
-                                      View PO Details <ExternalLink className="h-2.5 w-2.5" />
+                              ) : li.lineStatus === "po_raised" || li.lineStatus === "po_drafted" || li.poNumber ? (() => {
+                                const matchedPo = linkedPOs.find((p: any) =>
+                                  (li.poNumber && p.poNumber === li.poNumber) ||
+                                  (li.poId && String(p.id) === String(li.poId))
+                                ) || (linkedPOs.length === 1 ? linkedPOs[0] : null);
+
+                                const poVal = matchedPo?.totalAmount || li.estimatedTotalCost || ((li.approvedQty ?? qty) * rate);
+                                const t1Amt = matchedPo?.tranche1Amount ?? li.tranche1Amount ?? Math.round(poVal * 0.9);
+                                const t2Amt = matchedPo?.tranche2Amount ?? li.tranche2Amount ?? (poVal - t1Amt);
+
+                                const isT1 = Boolean(
+                                  matchedPo?.tranche1Paid ||
+                                  li.tranche1Paid ||
+                                  (matchedPo?.paymentStatus === "paid" && matchedPo?.tranche2Paid !== true) ||
+                                  (matchedPo?.paymentStatus === "paid" && matchedPo?.tranche1Paid === undefined) ||
+                                  matchedPo?.paymentStatus === "partial" ||
+                                  li.paymentStatus === "paid" ||
+                                  li.paymentStatus === "partial"
+                                );
+                                const isT2 = Boolean(
+                                  matchedPo?.tranche2Paid ||
+                                  li.tranche2Paid ||
+                                  (matchedPo?.paymentStatus === "paid" && (matchedPo?.tranche1Paid || matchedPo?.status === "completed" || matchedPo?.tranche2Paid !== false)) ||
+                                  (li.paymentStatus === "paid" && (li.tranche1Paid || li.tranche2Paid !== false))
+                                );
+
+                                const pct = (isT1 && isT2) ? 100 : (isT1 ? 90 : (isT2 ? 10 : 0));
+                                const t1Ref = matchedPo?.tranche1Reference || li.tranche1Reference || (isT1 ? (matchedPo?.paymentReference || `PAY-90-${li.poNumber || matchedPo?.poNumber}`) : "");
+                                const t2Ref = matchedPo?.tranche2Reference || li.tranche2Reference || (isT2 ? (matchedPo?.paymentReference || `PAY-10-${li.poNumber || matchedPo?.poNumber}`) : "");
+                                const paidTotal = (isT1 ? t1Amt : 0) + (isT2 ? t2Amt : 0);
+
+                                return (
+                                  <div className="flex flex-col items-start gap-1 max-w-[280px]">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-300">
+                                      <CheckCheck className="h-3 w-3 text-emerald-700 shrink-0" />
+                                      {li.lineStatus === "po_drafted" ? "Draft PO: " : "PO Raised: "} {li.poNumber || matchedPo?.poNumber}
                                     </span>
-                                  </Link>
-                                </div>
-                              ) : li.lineStatus === "tender_initiated" || li.tenderNumber ? (
+                                    <Link href={li.poId || li.purchaseOrderId || matchedPo?.id ? `/purchase-orders/${li.poId || li.purchaseOrderId || matchedPo?.id}` : `/purchase-orders`}>
+                                      <span className="text-[10.5px] text-slate-700 hover:underline cursor-pointer flex items-center gap-1 font-medium">
+                                        View PO Details <ExternalLink className="h-2.5 w-2.5" />
+                                      </span>
+                                    </Link>
+
+                                    {/* Statutory 2-Tranche Payment Division */}
+                                    {(matchedPo || li.paymentStatus || isT1 || isT2) && (
+                                      <div className="mt-1 pt-1.5 border-t border-slate-200/90 w-full space-y-1">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          {pct === 100 ? (
+                                            <Badge variant="outline" className="bg-emerald-100 text-emerald-900 border-emerald-300 text-[10px] font-bold gap-1 py-0 px-1.5">
+                                              <CheckCircle2 className="h-2.5 w-2.5 text-emerald-700" />
+                                              100% Paid (90% + 10%)
+                                            </Badge>
+                                          ) : pct === 90 ? (
+                                            <Badge variant="outline" className="bg-blue-50 text-blue-900 border-blue-300 text-[10px] font-bold gap-1 py-0 px-1.5">
+                                              <Clock className="h-2.5 w-2.5 text-blue-700" />
+                                              90% Paid (Tranche 1)
+                                            </Badge>
+                                          ) : pct === 10 ? (
+                                            <Badge variant="outline" className="bg-amber-50 text-amber-900 border-amber-300 text-[10px] font-bold gap-1 py-0 px-1.5">
+                                              10% Paid (Tranche 2)
+                                            </Badge>
+                                          ) : (
+                                            <Badge variant="outline" className="bg-slate-100 text-slate-600 border-slate-300 text-[10px] py-0 px-1.5">
+                                              Payment Pending
+                                            </Badge>
+                                          )}
+                                          <span className="text-[10px] font-mono font-semibold text-slate-700">
+                                            ₹{paidTotal.toLocaleString("en-IN")}
+                                          </span>
+                                        </div>
+
+                                        <div className="space-y-0.5 text-[9.5px]">
+                                          <div className="flex items-center justify-between gap-1 text-slate-600 bg-slate-50/90 px-1.5 py-0.5 rounded border border-slate-200/70">
+                                            <span className="font-medium text-slate-700">Tranche 1 (90%):</span>
+                                            <span className={cn("font-bold truncate max-w-[160px]", isT1 ? "text-emerald-700" : "text-amber-700")} title={t1Ref ? `Ref: ${t1Ref}` : undefined}>
+                                              ₹{t1Amt.toLocaleString("en-IN")} · {isT1 ? (t1Ref ? `Paid (${t1Ref})` : "Released") : "Pending"}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center justify-between gap-1 text-slate-600 bg-slate-50/90 px-1.5 py-0.5 rounded border border-slate-200/70">
+                                            <span className="font-medium text-slate-700">Tranche 2 (10%):</span>
+                                            <span className={cn("font-bold truncate max-w-[160px]", isT2 ? "text-emerald-700" : "text-slate-500")} title={t2Ref ? `Ref: ${t2Ref}` : undefined}>
+                                              ₹{t2Amt.toLocaleString("en-IN")} · {isT2 ? (t2Ref ? `Paid (${t2Ref})` : "Released") : "Retained (QPC)"}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })() : li.lineStatus === "tender_initiated" || li.tenderNumber ? (
                                 <div className="flex flex-col items-start gap-1">
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-300">
                                     <Layers className="h-3 w-3 text-slate-700 shrink-0" />
@@ -2306,23 +2451,35 @@ export default function IndentDetail(props?: { id?: string }) {
                   </Button>
                 )}
 
-                {/* 3. Release Payment */}
-                {(firstAcceptedDelivery && !isPOPaid) && (
+                {/* 3. Release Payment Actions (Statutory 2-Tranche Division) */}
+                {(firstAcceptedDelivery && !isT1Paid) && (
                   <Button
                     size="sm"
                     disabled={lifecycleLoading}
-                    onClick={() => handleAdvanceLifecycle("record_payment")}
-                    className="text-xs gap-1.5 shadow-xs"
+                    onClick={() => handleAdvanceLifecycle("release_tranche1")}
+                    className="text-xs gap-1.5 shadow-xs bg-emerald-600 hover:bg-emerald-700 text-white"
                   >
                     <Receipt className="h-3.5 w-3.5" />
-                    <span>Release Payment (Accounts)</span>
+                    <span>Release Tranche 1 (90% Supply Payment)</span>
                   </Button>
                 )}
 
-                {firstAcceptedDelivery && isPOPaid && (
+                {(firstAcceptedDelivery && isT1Paid && !isT2Paid) && (
+                  <Button
+                    size="sm"
+                    disabled={lifecycleLoading}
+                    onClick={() => handleAdvanceLifecycle("release_tranche2")}
+                    className="text-xs gap-1.5 shadow-xs bg-indigo-600 hover:bg-indigo-700 text-white"
+                  >
+                    <Receipt className="h-3.5 w-3.5" />
+                    <span>Release Tranche 2 (10% Retention Post-QPC)</span>
+                  </Button>
+                )}
+
+                {firstAcceptedDelivery && isFullyPaid && (
                   <Badge variant="outline" className="bg-emerald-50 text-emerald-800 border-emerald-300 py-1.5 px-3 text-xs font-semibold flex items-center gap-1.5">
                     <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                    <span>Full Procurement Lifecycle Completed</span>
+                    <span>Full Procurement Lifecycle Completed · 100% Paid (90% + 10%)</span>
                   </Badge>
                 )}
               </div>
@@ -2334,13 +2491,21 @@ export default function IndentDetail(props?: { id?: string }) {
                 { title: "1. Indent Approved", done: !!indent.approvedBy || !["pending_review", "pending_approval", "rejected"].includes(indent.status), active: indent.status === "pending_approval" },
                 {
                   title: linkedPOs.some((p: any) => p.status === "draft") && !linkedPOs.some((p: any) => p.status === "issued" || p.status === "po_approved") ? "2. PO Drafted" : "2. PO Issued",
-                  done: linkedPOs.some((p: any) => p.status === "issued" || p.status === "po_approved" || p.status === "approved" || p.status === "delivered" || p.status === "in_transit") || indent.status === "po_issued" || indent.status === "completed",
-                  active: linkedPOs.some((p: any) => p.status === "draft") && indent.status !== "po_issued"
+                  done: linkedPOs.some((p: any) => p.status === "issued" || p.status === "po_approved" || p.status === "approved" || p.status === "delivered" || p.status === "in_transit") || indent.status === "po_issued" || indent.status === "completed" || isPOIssued,
+                  active: false
                 },
                 { title: "3. Dispatched & In Transit", done: linkedDeliveries.length > 0, active: linkedDeliveries.length > 0 && !firstDeliveredDelivery },
                 { title: "4. Delivered at Site", done: !!firstDeliveredDelivery, active: !!firstDeliveredDelivery && !firstQAPassedDelivery },
                 { title: "5. QA Inspected (100%)", done: !!firstQAPassedDelivery, active: !!firstQAPassedDelivery && !firstAcceptedDelivery },
-                { title: "6. GRN & Paid", done: !!firstAcceptedDelivery && isPOPaid, active: !!firstAcceptedDelivery && !isPOPaid },
+                {
+                  title: isFullyPaid
+                    ? "6. GRN & 100% Paid"
+                    : isT1Paid
+                    ? "6. GRN & 90% Paid (10% Retained)"
+                    : "6. GRN & Paid",
+                  done: !!firstAcceptedDelivery && isFullyPaid,
+                  active: !!firstAcceptedDelivery && !isFullyPaid
+                },
               ].map((st, sIdx) => (
                 <div
                   key={sIdx}
@@ -2479,18 +2644,35 @@ export default function IndentDetail(props?: { id?: string }) {
                     <p className="text-[10px] text-muted-foreground uppercase font-semibold">Total PO Value</p>
                     <p className="text-sm font-bold text-emerald-700 tabular-nums">{formatINR(totalPOValue)}</p>
                   </div>
-                  <div className="space-y-1">
-                    {linkedPOs.map((po) => (
-                      <Link key={po.id} href={`/purchase-orders/${po.id}`}>
-                        <div className={cn("p-1.5 border rounded-md transition-colors cursor-pointer flex items-center justify-between", po.status === "draft" ? "bg-amber-50/70 border-amber-200/80 hover:bg-amber-100/70" : "bg-emerald-50/70 border-emerald-200/80 hover:bg-emerald-100/70")}>
-                          <div className="flex items-center gap-1.5">
-                            <span className={cn("text-[11px] font-mono font-bold", po.status === "draft" ? "text-amber-900" : "text-emerald-800")}>{po.poNumber || "PO"}</span>
-                            {po.status === "draft" && <Badge variant="outline" className="text-[9px] px-1 py-0 bg-white text-amber-700 border-amber-200">Draft</Badge>}
+                  <div className="space-y-1.5">
+                    {linkedPOs.map((po) => {
+                      const pTot = po.totalAmount || 0;
+                      const pT1 = po.tranche1Amount || Math.round(pTot * 0.9);
+                      const pT2 = po.tranche2Amount || (pTot - pT1);
+                      const pIsT1 = Boolean(po.tranche1Paid || po.paymentStatus === "paid" || po.paymentStatus === "partial");
+                      const pIsT2 = Boolean(po.tranche2Paid || (po.paymentStatus === "paid" && (po.status === "completed" || po.tranche2Paid)));
+                      const pPaidPct = (pIsT1 && pIsT2) ? 100 : (pIsT1 ? 90 : (pIsT2 ? 10 : 0));
+
+                      return (
+                        <Link key={po.id} href={`/purchase-orders/${po.id}`}>
+                          <div className={cn("p-2 border rounded-md transition-colors cursor-pointer space-y-1", po.status === "draft" ? "bg-amber-50/70 border-amber-200/80 hover:bg-amber-100/70" : "bg-emerald-50/70 border-emerald-200/80 hover:bg-emerald-100/70")}>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className={cn("text-[11px] font-mono font-bold", po.status === "draft" ? "text-amber-900" : "text-emerald-800")}>{po.poNumber || "PO"}</span>
+                                {po.status === "draft" && <Badge variant="outline" className="text-[9px] px-1 py-0 bg-white text-amber-700 border-amber-200">Draft</Badge>}
+                              </div>
+                              <span className={cn("text-[10px] font-semibold", po.status === "draft" ? "text-amber-800" : "text-emerald-700")}>{formatINR(po.totalAmount)}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] text-slate-600 border-t border-emerald-200/60 pt-1">
+                              <span className="text-muted-foreground">Payment:</span>
+                              <span className={cn("font-semibold text-[10px]", pPaidPct === 100 ? "text-emerald-700" : (pPaidPct === 90 ? "text-blue-700" : "text-slate-500"))}>
+                                {pPaidPct === 100 ? "100% Paid (90%+10%)" : pPaidPct === 90 ? "90% Paid (Tranche 1)" : "Pending"}
+                              </span>
+                            </div>
                           </div>
-                          <span className={cn("text-[10px] font-semibold", po.status === "draft" ? "text-amber-800" : "text-emerald-700")}>{formatINR(po.totalAmount)}</span>
-                        </div>
-                      </Link>
-                    ))}
+                        </Link>
+                      );
+                    })}
                   </div>
                   <Link href={linkedPOs.length > 0 ? `/purchase-orders/${linkedPOs[0].id}` : "/purchase-orders"}>
                     <span className="text-[11px] text-emerald-700 hover:underline font-semibold block pt-1 cursor-pointer">
@@ -2590,46 +2772,75 @@ export default function IndentDetail(props?: { id?: string }) {
           </Card>
 
           {/* 5. Invoices & Payments card */}
-          <Card className="border-border shadow-xs">
-            <CardContent className="pt-4 pb-4 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center shrink-0">
-                    <Receipt className="h-4 w-4 text-indigo-600" />
+          {(() => {
+            const hasPoPayment = linkedPOs.some((p: any) => p.paymentStatus === "paid" || p.tranche1Paid || p.paymentStatus === "partial") || indent.paymentStatus === "paid" || (indent.totalPaidAmount && indent.totalPaidAmount > 0);
+            const primPO = linkedPOs[0];
+            const pTot = linkedPOs.reduce((s: number, p: any) => s + (p.totalAmount || 0), 0) || indent.estimatedTotalProcurementValue || indent.estimatedTotalValue || 0;
+            const t1 = primPO?.tranche1Amount ?? indent.tranche1Amount ?? Math.round(pTot * 0.9);
+            const t2 = primPO?.tranche2Amount ?? indent.tranche2Amount ?? (pTot - t1);
+            const isT1 = Boolean(primPO?.tranche1Paid || indent.tranche1Paid || (primPO?.paymentStatus === "paid" && primPO?.tranche2Paid !== true) || (primPO?.paymentStatus === "paid" && primPO?.tranche1Paid === undefined) || primPO?.paymentStatus === "partial" || indent.paymentStatus === "paid" || indent.paymentStatus === "partial");
+            const isT2 = Boolean(primPO?.tranche2Paid || indent.tranche2Paid || (primPO?.paymentStatus === "paid" && (primPO?.tranche1Paid || primPO?.status === "completed" || primPO?.tranche2Paid !== false)) || (indent.paymentStatus === "paid" && (indent.tranche2Paid || indent.tranche1Paid)));
+            const pct = (isT1 && isT2) ? 100 : (isT1 ? 90 : (isT2 ? 10 : 0));
+            const paidAmt = (isT1 ? t1 : 0) + (isT2 ? t2 : 0);
+
+            return (
+              <Card className="border-border shadow-xs">
+                <CardContent className="pt-4 pb-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-8 w-8 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center shrink-0">
+                        <Receipt className="h-4 w-4 text-indigo-600" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-foreground">Invoices &amp; Payments</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {hasPoPayment ? `${linkedPOs.length || 1} PO · 2-Tranche Model` : `${linkedInvoices.length} invoice${linkedInvoices.length !== 1 ? "s" : ""}`}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200">
+                      {pct === 100 || allInvoicesPaid ? "100% Cleared" : (pct === 90 ? "90% Released" : (linkedInvoices.length > 0 ? "In Process" : "Pending"))}
+                    </Badge>
                   </div>
-                  <div>
-                    <p className="text-xs font-semibold text-foreground">Invoices &amp; Payments</p>
-                    <p className="text-[11px] text-muted-foreground">{linkedInvoices.length} invoice{linkedInvoices.length !== 1 ? "s" : ""}</p>
-                  </div>
-                </div>
-                <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200">
-                  {allInvoicesPaid ? "100% Cleared" : (linkedInvoices.length > 0 ? "In Process" : "Pending")}
-                </Badge>
-              </div>
-              {linkedInvoices.length === 0 ? (
-                <div className="py-2">
-                  <p className="text-xs text-muted-foreground italic">No invoices submitted</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">Bills raised post delivery appear here.</p>
-                </div>
-              ) : (
-                <div className="space-y-1.5 pt-1">
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase font-semibold">Total Invoiced Amount</p>
-                    <p className="text-sm font-bold text-indigo-800 tabular-nums">{formatINR(totalInvoiced || totalPOValue)}</p>
-                  </div>
-                  <div className="text-[11px] text-muted-foreground space-y-0.5">
-                    <p className="truncate">Inv: {linkedInvoices[0].invoiceNumber}</p>
-                    <p className="text-emerald-700 font-medium">Payment: {linkedInvoices[0].status === "paid" ? "Treasury Tranche Paid" : "Verified by Finance"}</p>
-                  </div>
-                  <Link href="/invoices">
-                    <span className="text-[11px] text-indigo-700 hover:underline font-semibold block pt-1 cursor-pointer">
-                      Open Invoices &amp; Ledger →
-                    </span>
-                  </Link>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  {(!hasPoPayment && linkedInvoices.length === 0) ? (
+                    <div className="py-2">
+                      <p className="text-xs text-muted-foreground italic">No invoices submitted</p>
+                      <p className="text-[11px] text-muted-foreground mt-1">Bills raised post delivery appear here.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 pt-1">
+                      <div>
+                        <p className="text-[10px] text-muted-foreground uppercase font-semibold">Total Paid / Released</p>
+                        <p className="text-sm font-bold text-indigo-800 tabular-nums">
+                          {formatINR(hasPoPayment ? paidAmt : (totalInvoiced || totalPOValue))}
+                        </p>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground space-y-0.5">
+                        {hasPoPayment ? (
+                          <>
+                            <p className="truncate text-slate-700 font-medium">{`Ref: PAY-90-${primPO?.poNumber || indent.poNumber || 'PO'}`}</p>
+                            <p className="text-emerald-700 font-semibold">
+                              Tranche 1 (90%): {isT1 ? "Released" : "Pending"} · Tranche 2 (10%): {isT2 ? "Released" : "Pending"}
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="truncate">Inv: {linkedInvoices[0]?.invoiceNumber}</p>
+                            <p className="text-emerald-700 font-medium">Payment: {linkedInvoices[0]?.status === "paid" ? "Treasury Tranche Paid" : "Verified by Finance"}</p>
+                          </>
+                        )}
+                      </div>
+                      <Link href="/payments">
+                        <span className="text-[11px] text-indigo-700 hover:underline font-semibold block pt-1 cursor-pointer">
+                          Open Statutory Payments →
+                        </span>
+                      </Link>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })()}
 
         </div>
       </div>

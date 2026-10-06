@@ -65,6 +65,23 @@ const IndentLineItemSchema = new Schema({
     type: String,
     default: "draft",
   },
+  paymentStatus: {
+    type: String,
+    enum: ["not_paid", "partial", "paid", "payment_status_not_updated", ""],
+    default: "not_paid",
+  },
+  paidAmount: { type: Number, default: 0 },
+  paidPercentage: { type: Number, default: 0 },
+  tranche1Paid: { type: Boolean, default: false },
+  tranche1Amount: { type: Number, default: 0 },
+  tranche1Reference: { type: String, default: "" },
+  tranche1PaidDate: { type: Date },
+  tranche1PaidBy: { type: String, default: "" },
+  tranche2Paid: { type: Boolean, default: false },
+  tranche2Amount: { type: Number, default: 0 },
+  tranche2Reference: { type: String, default: "" },
+  tranche2PaidDate: { type: Date },
+  tranche2PaidBy: { type: String, default: "" },
 });
 
 const IndentInstitutionSchema = new Schema({
@@ -146,6 +163,25 @@ export interface IIndent extends Document {
   createdByUserId?: string;
   reviewedBy?: string;
   approvedBy?: string;
+
+  /* Payment & Statutory 2-Tranche Breakdown */
+  paymentStatus?: string;
+  totalPaidAmount?: number;
+  paidPercentage?: number;
+  paymentReference?: string;
+  paymentDate?: Date;
+  paidBy?: string;
+  paymentRemarks?: string;
+  tranche1Paid?: boolean;
+  tranche1Amount?: number;
+  tranche1Reference?: string;
+  tranche1PaidDate?: Date;
+  tranche1PaidBy?: string;
+  tranche2Paid?: boolean;
+  tranche2Amount?: number;
+  tranche2Reference?: string;
+  tranche2PaidDate?: Date;
+  tranche2PaidBy?: string;
 
   /* Administrative Sanction & Cost Estimation Validation */
   asAmount?: number;
@@ -232,6 +268,25 @@ const IndentSchema = new Schema<IIndent>(
     createdByUserId: { type: String },
     reviewedBy: { type: String },
     approvedBy: { type: String },
+
+    /* Payment & Statutory 2-Tranche Breakdown */
+    paymentStatus: { type: String, default: "not_paid" },
+    totalPaidAmount: { type: Number, default: 0 },
+    paidPercentage: { type: Number, default: 0 },
+    paymentReference: { type: String, default: "" },
+    paymentDate: { type: Date },
+    paidBy: { type: String, default: "" },
+    paymentRemarks: { type: String, default: "" },
+    tranche1Paid: { type: Boolean, default: false },
+    tranche1Amount: { type: Number, default: 0 },
+    tranche1Reference: { type: String, default: "" },
+    tranche1PaidDate: { type: Date },
+    tranche1PaidBy: { type: String, default: "" },
+    tranche2Paid: { type: Boolean, default: false },
+    tranche2Amount: { type: Number, default: 0 },
+    tranche2Reference: { type: String, default: "" },
+    tranche2PaidDate: { type: Date },
+    tranche2PaidBy: { type: String, default: "" },
 
     /* Budget & Administrative Sanction */
     asAmount: { type: Number, default: 0 },

@@ -16,8 +16,10 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Search, Plus, Eye, Package, CheckCircle2, Upload,
   ClipboardList, FileText, X, Printer, AlertTriangle, Building2,
+  Filter, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 
 interface UploadedDoc { name: string; size: string; type: string; }
 
@@ -572,6 +574,10 @@ export default function GRN() {
 
   const [grns, setGrns] = useState<GRNRecord[]>(INIT_GRNS);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [facilityFilter, setFacilityFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [addOpen, setAddOpen] = useState(false);
   const [selectedDeliveryId, setSelectedDeliveryId] = useState<string>("");
   const [detailOpen, setDetailOpen] = useState<GRNRecord | null>(null);
@@ -748,12 +754,50 @@ export default function GRN() {
     return list;
   }, [purchaseOrders]);
 
-  const filtered = grns.filter(g =>
-    !search || g.grnNumber.toLowerCase().includes(search.toLowerCase()) ||
-    g.poNumber.toLowerCase().includes(search.toLowerCase()) ||
-    g.facilityName.toLowerCase().includes(search.toLowerCase()) ||
-    g.deliveryNoteNo.toLowerCase().includes(search.toLowerCase())
-  );
+  const facilityOptions = useMemo(() => {
+    const set = new Set<string>();
+    grns.forEach((g) => {
+      if (g.facilityName?.trim()) set.add(g.facilityName.trim());
+    });
+    return Array.from(set).sort();
+  }, [grns]);
+
+  const filtered = useMemo(() => {
+    return grns.filter((g) => {
+      if (search) {
+        const q = search.toLowerCase();
+        const matchesSearch =
+          g.grnNumber.toLowerCase().includes(q) ||
+          g.poNumber.toLowerCase().includes(q) ||
+          g.facilityName.toLowerCase().includes(q) ||
+          (g.deliveryNoteNo && g.deliveryNoteNo.toLowerCase().includes(q)) ||
+          (g.equipmentName && g.equipmentName.toLowerCase().includes(q)) ||
+          (g.vendorName && g.vendorName.toLowerCase().includes(q));
+        if (!matchesSearch) return false;
+      }
+      if (statusFilter !== "all") {
+        if (statusFilter === "verified" && g.status !== "verified") return false;
+        if (statusFilter === "submitted" && g.status !== "submitted") return false;
+        if (statusFilter === "draft" && g.status !== "draft") return false;
+        if (statusFilter === "installation_pending" && g.installationStatus === "completed") return false;
+        if (statusFilter === "installation_completed" && g.installationStatus !== "completed") return false;
+        if (statusFilter === "annexure_issued" && !g.annexure6) return false;
+      }
+      if (facilityFilter !== "all" && (g.facilityName ?? "").trim() !== facilityFilter) return false;
+      return true;
+    });
+  }, [grns, search, statusFilter, facilityFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, facilityFilter, pageSize]);
+
+  const paginatedGrns = useMemo(() => {
+    const startIndex = (page - 1) * pageSize;
+    return filtered.slice(startIndex, startIndex + pageSize);
+  }, [filtered, page, pageSize]);
 
   function handleFileAdd(files: FileList | null, tag: string) {
     if (!files) return;
@@ -1002,101 +1046,261 @@ export default function GRN() {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4">
+      {/* ── Page Header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#e4eaf2] pb-3">
         <div>
-          <h1 className="text-2xl font-bold">Goods Receipt Notes (GRN)</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Record delivery receipt, inspection and issue Annexure 6 Installation/Acceptance Certificate</p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#152340]">
+              Goods Receipt Notes (GRN) & Installation
+            </h1>
+            <span className="neo-chip gry">Post-Delivery Commissioning</span>
+          </div>
+          <p className="text-xs text-[#6b7a93] mt-0.5">
+            Record consignment receipt, physical inspection, equipment commissioning, and statutory Annexure 6 certification
+          </p>
         </div>
         {can("grn.create") && (
-          <Button size="sm" className="gap-2" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4" />New GRN
+          <Button size="sm" className="gap-1.5 cursor-pointer" onClick={() => setAddOpen(true)}>
+            <Plus className="w-3.5 h-3.5" />
+            <span>New GRN</span>
           </Button>
         )}
       </div>
 
-      {/* Summary row */}
-      <div className="grid grid-cols-4 gap-4">
-        {[
-          { label: "Total GRNs", value: grns.length, color: "text-primary" },
-          { label: "Verified", value: grns.filter(g => g.status === "verified").length, color: "text-emerald-600" },
-          { label: "Installation Pending", value: grns.filter(g => g.installationStatus === "not_started").length, color: "text-amber-600" },
-          { label: "Annexure 6 Issued", value: grns.filter(g => g.annexure6 !== null).length, color: "text-blue-600" },
-        ].map(s => (
-          <Card key={s.label}>
-            <CardContent className="p-4">
-              <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
-            </CardContent>
-          </Card>
-        ))}
+      {/* ── KPI Ribbon ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#6b7a93] uppercase tracking-wider block">
+            Total GRNs
+          </span>
+          <span className="text-2xl font-bold text-[#152340] tabular-nums mt-1 block">
+            {grns.length}
+          </span>
+          <span className="text-[10.5px] text-[#6b7a93] mt-1 block">Registered receipts</span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#159557] uppercase tracking-wider block">
+            Verified / Accepted
+          </span>
+          <span className="text-2xl font-bold text-[#159557] tabular-nums mt-1 block">
+            {grns.filter(g => g.status === "verified").length}
+          </span>
+          <span className="text-[10.5px] text-[#159557] font-semibold mt-1 block">Stock confirmed</span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#e08a0b] uppercase tracking-wider block">
+            Installation Pending
+          </span>
+          <span className="text-2xl font-bold text-[#e08a0b] tabular-nums mt-1 block">
+            {grns.filter(g => g.installationStatus === "not_started").length}
+          </span>
+          <span className="text-[10.5px] text-[#e08a0b] font-semibold mt-1 block">Commissioning awaited</span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#2563eb] uppercase tracking-wider block">
+            Annexure 6 Issued
+          </span>
+          <span className="text-2xl font-bold text-[#2563eb] tabular-nums mt-1 block">
+            {grns.filter(g => g.annexure6 !== null).length}
+          </span>
+          <span className="text-[10.5px] text-[#2563eb] font-semibold mt-1 block">Statutory installation</span>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="relative max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search GRN, PO, delivery note, facility..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+      {/* ── Table Card ── */}
+      <div className="bg-white border border-[#e4eaf2] rounded-xl shadow-xs overflow-hidden">
+        {/* Filter bar */}
+        <div className="p-3 border-b border-[#e4eaf2] bg-[#f8fafc] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 flex-1 max-w-md">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-[#93a2b8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search by GRN, PO, delivery note, facility, equipment..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full h-[32px] bg-white border border-[#e4eaf2] rounded-md text-xs text-[#152340] placeholder:text-[#93a2b8] pl-9 pr-3 focus:outline-none focus:border-[#2563eb]"
+              />
+            </div>
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <Filter className="w-3.5 h-3.5 text-[#6b7a93] shrink-0" />
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-36 sm:w-44 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-xs">All Statuses</SelectItem>
+                <SelectItem value="verified" className="text-xs">Verified / Accepted</SelectItem>
+                <SelectItem value="submitted" className="text-xs">Submitted / In-Review</SelectItem>
+                <SelectItem value="draft" className="text-xs">Draft</SelectItem>
+                <SelectItem value="installation_pending" className="text-xs">Installation Pending</SelectItem>
+                <SelectItem value="installation_completed" className="text-xs">Installation Done</SelectItem>
+                <SelectItem value="annexure_issued" className="text-xs">Annexure 6 Issued</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+              <SelectTrigger className="w-44 sm:w-52 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md text-[#152340]">
+                <SelectValue placeholder="All facilities" />
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                <SelectItem value="all" className="text-xs">All facilities</SelectItem>
+                {facilityOptions.map((f) => (
+                  <SelectItem key={f} value={f} className="text-xs">
+                    {f}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <span className="text-xs font-medium text-[#6b7a93] ml-1 whitespace-nowrap">
+              Showing <span className="font-bold text-[#152340]">{filtered.length}</span> of {grns.length}
+            </span>
+          </div>
+        </div>
+
+        {/* Table Contents */}
+        {deliveriesLoading ? (
+          <div className="py-16 text-center">
+            <div className="w-6 h-6 border-2 border-[#2563eb] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+            <p className="text-xs text-[#6b7a93]">Loading goods receipt notes…</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="py-16 text-center">
+            <FileText className="w-8 h-8 text-[#93a2b8] mx-auto mb-2" />
+            <p className="text-xs font-semibold text-[#152340]">No GRN records match your criteria</p>
+            <p className="text-[11px] text-[#6b7a93] mt-0.5">Try clearing the search or changing status filter.</p>
+          </div>
+        ) : (
+          <div className="w-full overflow-x-auto">
+            <table className="w-full table-fixed text-left text-xs border-collapse min-w-[1260px]">
+              <colgroup>
+                <col className="w-[10%]" />
+                <col className="w-[8.5%]" />
+                <col className="w-[8.5%]" />
+                <col className="w-[14%]" />
+                <col className="w-[13%]" />
+                <col className="w-[5%]" />
+                <col className="w-[6%]" />
+                <col className="w-[6%]" />
+                <col className="w-[7%]" />
+                <col className="w-[6.5%]" />
+                <col className="w-[15.5%]" />
+              </colgroup>
               <thead>
-                <tr className="border-b bg-muted/40">
-                  {["GRN No.", "Delivery Note No.", "PO No.", "Equipment", "Facility", "Recd/Ordered", "Condition", "Installation", "Annexure 6", "Status", "Actions"].map(h => (
-                    <th key={h} className="text-left text-xs font-semibold text-muted-foreground px-3 py-3">{h}</th>
-                  ))}
+                <tr className="border-b border-[#e4eaf2] bg-[#f8fafc] text-[#6b7a93] font-bold uppercase tracking-wider text-[10.5px]">
+                  <th className="py-2.5 px-2.5 text-left whitespace-nowrap">GRN No.</th>
+                  <th className="py-2.5 px-2.5 text-left whitespace-nowrap">Delivery Note</th>
+                  <th className="py-2.5 px-2.5 text-left whitespace-nowrap">PO No.</th>
+                  <th className="py-2.5 px-2.5 text-left whitespace-nowrap">Equipment</th>
+                  <th className="py-2.5 px-2.5 text-left whitespace-nowrap">Consignee (Facility)</th>
+                  <th className="py-2.5 px-2 text-center whitespace-nowrap">Recd/Ord</th>
+                  <th className="py-2.5 px-2 text-center whitespace-nowrap">Condition</th>
+                  <th className="py-2.5 px-2 text-center whitespace-nowrap">Install</th>
+                  <th className="py-2.5 px-2 text-center whitespace-nowrap">Annexure 6</th>
+                  <th className="py-2.5 px-2 text-center whitespace-nowrap">Status</th>
+                  <th className="py-2.5 px-3 text-right whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                {filtered.map(g => (
-                  <tr key={g.id} className="border-b hover:bg-muted/20">
-                    <td className="px-3 py-3 font-mono text-xs font-semibold text-primary whitespace-nowrap">{g.grnNumber}</td>
-                    <td className="px-3 py-3 font-mono text-xs text-amber-700 font-semibold">{g.deliveryNoteNo || "—"}</td>
-                    <td className="px-3 py-3">
+              <tbody className="divide-y divide-[#eff3f8]">
+                {paginatedGrns.map((g) => (
+                  <tr
+                    key={g.id}
+                    onClick={() => setDetailOpen(g)}
+                    className="hover:bg-[#eff5ff] cursor-pointer transition-colors group"
+                  >
+                    <td className="py-2.5 px-2.5 truncate align-middle">
+                      <span className="font-mono text-xs font-bold text-[#2563eb] group-hover:underline truncate block" title={g.grnNumber}>
+                        {g.grnNumber}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-2.5 truncate align-middle">
+                      <span className="font-mono text-xs font-semibold text-amber-700 truncate block" title={g.deliveryNoteNo}>
+                        {g.deliveryNoteNo || "—"}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-2.5 align-middle truncate" onClick={(e) => e.stopPropagation()}>
                       <Link href={`/purchase-orders/${g.poId}`}>
-                        <span className="text-primary hover:underline text-xs font-mono">{g.poNumber}</span>
+                        <span className="text-primary hover:underline text-xs font-mono font-medium block truncate" title={g.poNumber}>
+                          {g.poNumber}
+                        </span>
                       </Link>
                     </td>
-                    <td className="px-3 py-3 max-w-[140px] truncate text-xs">{g.equipmentName}</td>
-                    <td className="px-3 py-3 text-muted-foreground text-xs whitespace-nowrap">{g.facilityName}</td>
-                    <td className="px-3 py-3 font-semibold text-xs">{g.receivedQty} / {g.orderedQty}</td>
-                    <td className="px-3 py-3">
-                      <Badge variant="outline" className={`text-xs border ${CONDITION_STYLE[g.condition]}`}>{g.condition}</Badge>
+                    <td className="py-2.5 px-2.5 align-middle">
+                      <span className="font-medium text-[#152340] text-xs truncate block" title={g.equipmentName}>
+                        {g.equipmentName}
+                      </span>
                     </td>
-                    <td className="px-3 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-full border ${g.installationStatus === "completed" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-gray-100 text-gray-600 border-gray-200"}`}>
+                    <td className="py-2.5 px-2.5 align-middle">
+                      <div className="flex items-center gap-1.5 min-w-0" title={g.facilityName}>
+                        <Building2 className="w-3.5 h-3.5 text-[#6b7a93] shrink-0" />
+                        <span className="font-medium text-[#152340] text-xs truncate block">
+                          {g.facilityName}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-2 text-center tabular-nums font-semibold text-[#152340] align-middle whitespace-nowrap">
+                      {g.receivedQty} / {g.orderedQty}
+                    </td>
+                    <td className="py-2.5 px-2 text-center align-middle whitespace-nowrap">
+                      <span className={cn("text-[10.5px] font-semibold px-2 py-0.5 rounded-full border capitalize", CONDITION_STYLE[g.condition] || "bg-gray-100 text-gray-700 border-gray-200")}>
+                        {g.condition}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-2 text-center align-middle whitespace-nowrap">
+                      <span className={cn("text-[10.5px] font-semibold px-2 py-0.5 rounded-full border", g.installationStatus === "completed" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200")}>
                         {g.installationStatus === "completed" ? "Done" : "Pending"}
                       </span>
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="py-2.5 px-2 text-center align-middle whitespace-nowrap">
                       {g.annexure6 ? (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">Issued</span>
+                        <span className="text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                          Issued
+                        </span>
                       ) : (
-                        <span className="text-xs text-muted-foreground">Pending</span>
+                        <span className="text-[10.5px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                          Pending
+                        </span>
                       )}
                     </td>
-                    <td className="px-3 py-3">
-                      <Badge variant="outline" className={`text-xs border ${STATUS_STYLE[g.status]}`}>{g.status}</Badge>
+                    <td className="py-2.5 px-2 text-center align-middle whitespace-nowrap">
+                      <span className={cn("text-[10.5px] font-semibold px-2 py-0.5 rounded-full border capitalize", STATUS_STYLE[g.status] || "bg-gray-100 text-gray-600 border-gray-200")}>
+                        {g.status}
+                      </span>
                     </td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="View GRN Details" onClick={() => setDetailOpen(g)}>
-                          <Eye className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50" title="Annexure 6 Certificate" onClick={() => openAnnexure(g)}>
-                          <ClipboardList className="h-3.5 w-3.5 mr-1" />Cert
-                        </Button>
+                    <td className="py-2.5 px-2.5 text-right align-middle" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1 flex-nowrap">
+                        <button
+                          onClick={() => setDetailOpen(g)}
+                          className="px-2 py-1 rounded text-[11px] font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 bg-white border border-[#e2e8f0] text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                          title="View GRN Details"
+                        >
+                          <Eye className="w-3.5 h-3.5 shrink-0" />
+                          <span>View</span>
+                        </button>
+                        <button
+                          onClick={() => openAnnexure(g)}
+                          className="px-2 py-1 rounded text-[11px] font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100"
+                          title="Annexure 6 Certificate"
+                        >
+                          <ClipboardList className="w-3.5 h-3.5 shrink-0" />
+                          <span>Cert</span>
+                        </button>
                         {(g.status !== "verified" || g.installationStatus !== "completed") && (
-                          <Button
-                            size="sm"
-                            className="h-7 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-xs gap-1"
-                            title="Complete GRN and issue Annexure 6"
+                          <button
                             onClick={() => openAnnexure(g)}
+                            className="px-2 py-1 rounded text-[11px] font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                            title="Complete GRN and issue Annexure 6"
                           >
-                            <CheckCircle2 className="h-3 w-3" />Complete GRN
-                          </Button>
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>Complete</span>
+                          </button>
                         )}
                       </div>
                     </td>
@@ -1104,10 +1308,81 @@ export default function GRN() {
                 ))}
               </tbody>
             </table>
-            {filtered.length === 0 && <div className="text-center py-12 text-muted-foreground">No GRN records found</div>}
           </div>
-        </CardContent>
-      </Card>
+        )}
+
+        {/* Pagination Bar */}
+        {filtered.length > 0 && (
+          <div className="p-3 border-t border-[#e4eaf2] bg-[#f8fafc] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="text-xs text-[#6b7a93]">
+              Showing <span className="font-semibold text-[#152340]">{(page - 1) * pageSize + 1}</span> to{" "}
+              <span className="font-semibold text-[#152340]">
+                {Math.min(page * pageSize, filtered.length)}
+              </span>{" "}
+              of <span className="font-semibold text-[#152340]">{filtered.length}</span> goods receipt notes
+            </div>
+
+            <div className="flex items-center gap-3 sm:ml-auto">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[#6b7a93] whitespace-nowrap">Rows per page</span>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(val) => {
+                    setPageSize(Number(val));
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-[66px] h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md font-medium text-[#152340] px-2.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10" className="text-xs">10</SelectItem>
+                    <SelectItem value="20" className="text-xs">20</SelectItem>
+                    <SelectItem value="50" className="text-xs">50</SelectItem>
+                    <SelectItem value="100" className="text-xs">100</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center transition-colors border border-transparent",
+                    page <= 1
+                      ? "bg-[#f1f5f9] text-[#94a3b8] cursor-not-allowed opacity-40"
+                      : "bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0] cursor-pointer"
+                  )}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <span className="text-xs text-[#6b7a93] whitespace-nowrap px-1">
+                  Page {page} of {totalPages}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center transition-colors border border-transparent",
+                    page >= totalPages
+                      ? "bg-[#f1f5f9] text-[#94a3b8] cursor-not-allowed opacity-40"
+                      : "bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0] cursor-pointer"
+                  )}
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* New GRN Dialog */}
       <Dialog open={addOpen} onOpenChange={v => { setAddOpen(v); if (!v) { setFormDocs([]); setSelectedDeliveryId(""); } }}>

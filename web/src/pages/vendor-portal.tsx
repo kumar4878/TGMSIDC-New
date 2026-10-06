@@ -52,7 +52,7 @@ function VendorPOSummaryReport() {
   return (
     <div className="space-y-5">
       <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
-        <strong>R-11: Vendor PO Summary Report</strong> — Self-service view of all POs allocated to your firm with acknowledgement, dispatch, fulfilment, and payment status.
+        <strong>PO Summary Report</strong> — Self-service view of all POs allocated to your firm with acknowledgement, dispatch, fulfilment, and payment status.
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -82,7 +82,7 @@ function VendorPOSummaryReport() {
         <CardHeader className="pb-2 bg-muted/20 border-b">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Purchase Order Register — Vendor Self-View (R-11)
+              Purchase Order Register — Vendor Self-View
             </CardTitle>
             <Badge variant="outline" className="text-xs">Rule: Acknowledge within 7 calendar days</Badge>
           </div>
@@ -173,7 +173,7 @@ function VendorCertStatusReport() {
   return (
     <div className="space-y-5">
       <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
-        <strong>R-12: Vendor Delivery &amp; Certificate Status Report</strong> — Track delivery timelines, QA inspection outcomes, and DCC certificate upload compliance for all your consignments.
+        <strong>Vendor Delivery &amp; Certificate Status Report</strong> — Track delivery timelines, QA inspection outcomes, and DCC certificate upload compliance for all your consignments.
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -202,7 +202,7 @@ function VendorCertStatusReport() {
         <CardHeader className="pb-2 bg-muted/20 border-b">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-              Delivery &amp; DCC Compliance Register (R-12)
+              Delivery &amp; DCC Compliance Register
             </CardTitle>
             <Badge variant="outline" className="text-xs">SLA: DCC upload within 7 working days of delivery</Badge>
           </div>
@@ -297,7 +297,7 @@ function VendorSelfViewReport({ currentVendor }: { currentVendor: any }) {
   return (
     <div className="space-y-5">
       <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
-        <strong>R-13: Vendor Performance Self-View Report</strong> — Monthly period-wise procurement scorecard. Weighted formula: On-time Delivery 40% + QA First-Pass 35% + Compliance 25%. Target: ≥80/100.
+        <strong>Vendor Performance Self-View Report</strong> — Monthly period-wise procurement scorecard. Weighted formula: On-time Delivery 40% + QA First-Pass 35% + Compliance 25%. Target: ≥80/100.
       </div>
 
       {/* Score Summary Banner */}
@@ -332,7 +332,7 @@ function VendorSelfViewReport({ currentVendor }: { currentVendor: any }) {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            6-Month Performance Trend (R-13)
+            6-Month Performance Trend
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -834,13 +834,13 @@ export default function VendorPortal() {
             <MessageSquare className="h-4 w-4" /> Clarifications &amp; Grievances ({grievances.length})
           </TabsTrigger>
           <TabsTrigger value="r11_po_summary" className="gap-2 text-xs font-semibold data-[state=active]:bg-[#186812] data-[state=active]:text-white">
-            <FileText className="h-4 w-4" /> R-11: PO Summary Report
+            <FileText className="h-4 w-4" /> PO Summary Report
           </TabsTrigger>
           <TabsTrigger value="r12_cert_status" className="gap-2 text-xs font-semibold data-[state=active]:bg-[#186812] data-[state=active]:text-white">
-            <FileCheck className="h-4 w-4" /> R-12: Delivery &amp; Certificate Status
+            <FileCheck className="h-4 w-4" /> Delivery &amp; Certificate Status
           </TabsTrigger>
           <TabsTrigger value="r13_self_view" className="gap-2 text-xs font-semibold data-[state=active]:bg-[#186812] data-[state=active]:text-white">
-            <Award className="h-4 w-4" /> R-13: Performance Self-View
+            <Award className="h-4 w-4" /> Performance Self-View
           </TabsTrigger>
         </TabsList>
 

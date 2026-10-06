@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-type ChipTone = "grn" | "amb" | "red" | "blu" | "gry";
+type ChipTone = "grn" | "amb" | "red" | "blu" | "vio" | "gry";
 
 const statusConfig: Record<string, { label: string; tone: ChipTone }> = {
   // Step 1 - 10: Indent & Budget Validation
@@ -37,6 +37,27 @@ const statusConfig: Record<string, { label: string; tone: ChipTone }> = {
   expired: { label: "Expired", tone: "red" },
   closed: { label: "Closed", tone: "gry" },
   renewed: { label: "Renewed", tone: "gry" },
+
+  // Tender Milestone Stages
+  planning: { label: "Tender Planning", tone: "blu" },
+  doc_prep: { label: "Document Preparation (TID/NIT)", tone: "blu" },
+  doc_preparation: { label: "Document Preparation (TID/NIT)", tone: "blu" },
+  approval: { label: "Approved for Tender", tone: "blu" },
+  tender_approved: { label: "Approved for Tender", tone: "blu" },
+  invited: { label: "Notice Inviting Tender (NIT)", tone: "blu" },
+  pre_bid: { label: "Pre-Bid / Bid Submission Open", tone: "blu" },
+  bids_received: { label: "Bids Received & Opened", tone: "amb" },
+  bid_query: { label: "Bid Query Handling", tone: "amb" },
+  technical_eval: { label: "Technical Evaluation In Progress", tone: "amb" },
+  technical_evaluation: { label: "Technical Evaluation In Progress", tone: "amb" },
+  evaluation: { label: "Technical Evaluation In Progress", tone: "amb" },
+  commercial_eval: { label: "Commercial Evaluation / Price Bid Open", tone: "amb" },
+  commercial_evaluation: { label: "Commercial Evaluation / Price Bid Open", tone: "amb" },
+  financial_eval: { label: "Commercial Evaluation / Price Bid Open", tone: "amb" },
+  l1_identified: { label: "L1 Identified / Award Approved", tone: "grn" },
+  awarded: { label: "L1 Identified / Award Approved", tone: "grn" },
+  contract_final: { label: "Contract Finalisation / LOI Issued", tone: "grn" },
+  rc_created: { label: "Rate Contract Created", tone: "grn" },
 
   // Step 16 - 23: Purchase Order
   po_draft: { label: "PO Draft", tone: "gry" },
@@ -93,7 +114,8 @@ const DOT_COLOR: Record<ChipTone, string> = {
   grn: "bg-emerald-600",
   amb: "bg-amber-600",
   red: "bg-rose-600",
-  blu: "bg-slate-600",
+  blu: "bg-blue-600",
+  vio: "bg-indigo-600",
   gry: "bg-slate-400",
 };
 

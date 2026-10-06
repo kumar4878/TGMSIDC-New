@@ -73,6 +73,39 @@ async function fmt(r: any) {
     unitPriceInclTax: r.unitPriceInclTax ?? r.unitPrice * (1 + r.gstRate / 100),
     totalEquipmentCost: r.totalEquipmentCost ?? r.unitPrice * r.quantity,
     totalAmount: r.totalAmount,
+    items: r.items && r.items.length > 0 ? r.items.map((it: any) => ({
+      equipmentId: it.equipmentId?.toString() ?? "",
+      equipmentName: it.equipmentName || "Medical Equipment",
+      rateContractId: it.rateContractId?.toString() ?? "",
+      rcNumber: it.rcNumber || "",
+      quantity: it.quantity || 1,
+      unitPrice: it.unitPrice || 0,
+      gstRate: it.gstRate ?? 12,
+      gstAmount: it.gstAmount ?? Math.round((it.unitPrice || 0) * (it.quantity || 1) * (it.gstRate ?? 12) / 100),
+      unitPriceInclTax: it.unitPriceInclTax ?? Math.round((it.unitPrice || 0) * (1 + (it.gstRate ?? 12) / 100)),
+      totalAmount: it.totalAmount ?? Math.round((it.unitPrice || 0) * (it.quantity || 1) * (1 + (it.gstRate ?? 12) / 100)),
+      indentLineItemIndex: it.indentLineItemIndex,
+      specifications: it.specifications || "",
+      category: it.category || "Medical Equipment",
+      department: it.department || "General",
+    })) : [
+      {
+        equipmentId: r.equipmentId?.toString() ?? "",
+        equipmentName: r.equipmentName || eq?.name || "Medical Equipment",
+        rateContractId: r.rateContractId?.toString() ?? "",
+        rcNumber: r.rcNumber ?? "",
+        quantity: r.quantity,
+        unitPrice: r.unitPrice,
+        gstRate: r.gstRate,
+        gstAmount: r.gstAmount ?? Math.round((r.unitPrice || 0) * (r.quantity || 1) * (r.gstRate || 12) / 100),
+        unitPriceInclTax: r.unitPriceInclTax ?? Math.round((r.unitPrice || 0) * (1 + (r.gstRate || 12) / 100)),
+        totalAmount: r.totalAmount,
+        indentLineItemIndex: r.indentLineItemIndex,
+        specifications: "",
+        category: "Medical Equipment",
+        department: "General",
+      }
+    ],
     consignees: r.consignees ?? [],
     psRequired: r.psRequired ?? false,
     psPercent: r.psPercent ?? 0,
@@ -171,33 +204,117 @@ router.get("/purchase-orders/:id", async (req, res): Promise<void> => {
 });
 
 router.post("/purchase-orders", async (req, res): Promise<void> => {
-  let { indentId, rateContractId, vendorId, equipmentId, quantity, deliveryAddress } = req.body;
-  if (!rateContractId) {
-    res.status(400).json({ error: "rateContractId is required" }); return;
-  }
-  const rc = await RateContract.findById(rateContractId);
+  let { indentId, rateContractId, vendorId, equipmentId, quantity, deliveryAddress, items } = req.body;
+  
   const indent = indentId ? await Indent.findById(indentId).catch(() => null) : null;
-  if (!rc) { res.status(400).json({ error: "Rate contract not found" }); return; }
-
-  vendorId = vendorId || rc.vendorId;
-  equipmentId = equipmentId || rc.equipmentId || indent?.equipmentId;
-  quantity = quantity || indent?.quantity || 1;
-  deliveryAddress = deliveryAddress || indent?.facilityName || "Telangana Medical Facility, Central Warehouse";
-
-  const vn = await Vendor.findById(vendorId).catch(() => null);
-  const eq = await Equipment.findById(equipmentId).catch(() => null);
-
-  const unitPrice = rc.unitPrice;
-  const gstRate = rc.gstRate ?? 12;
-  const gstAmt = unitPrice * quantity * gstRate / 100;
-  const total = unitPrice * quantity + gstAmt;
   const count = await PurchaseOrder.countDocuments();
   const fy = req.body.financialYear || indent?.financialYear || "2026-27";
   const fyCode = fy.replace("-", "").slice(2);
 
+  let processedItems: any[] = [];
+  let totalEquipmentCost = 0;
+  let gstAmt = 0;
+  let total = 0;
+  let totalQuantity = 0;
+  let primaryEquipmentName = "";
+  let primaryEquipmentId = equipmentId;
+  let primaryRcNumber = "";
+  let primaryRcId = rateContractId;
+  let vendorName = "";
+
+  if (Array.isArray(items) && items.length > 0) {
+    // Multi-item creation
+    for (const it of items) {
+      const itQty = Math.max(1, Number(it.quantity || it.qty) || 1);
+      const itUnitPrice = Number(it.unitPrice) || 0;
+      const itGstRate = it.gstRate != null ? Number(it.gstRate) : 12;
+      const itSubtotal = itUnitPrice * itQty;
+      const itGst = Math.round((itSubtotal * itGstRate) / 100);
+      const itLanded = itSubtotal + itGst;
+
+      totalQuantity += itQty;
+      totalEquipmentCost += itSubtotal;
+      gstAmt += itGst;
+      total += itLanded;
+
+      let itemRc = null;
+      if (it.rateContractId) {
+        itemRc = await RateContract.findById(it.rateContractId).catch(() => null);
+      }
+      const itemRcNumber = it.rcNumber || itemRc?.contractNumber || "";
+      if (!primaryRcId && it.rateContractId) primaryRcId = it.rateContractId;
+      if (!primaryRcNumber && itemRcNumber) primaryRcNumber = itemRcNumber;
+      if (!vendorId && itemRc?.vendorId) vendorId = itemRc.vendorId;
+      if (!vendorName && itemRc?.vendorName) vendorName = itemRc.vendorName;
+
+      processedItems.push({
+        equipmentId: it.equipmentId,
+        equipmentName: it.equipmentName,
+        rateContractId: it.rateContractId,
+        rcNumber: itemRcNumber,
+        quantity: itQty,
+        unitPrice: itUnitPrice,
+        gstRate: itGstRate,
+        gstAmount: itGst,
+        unitPriceInclTax: Math.round(itUnitPrice * (1 + itGstRate / 100)),
+        totalAmount: itLanded,
+        indentLineItemIndex: it.indentLineItemIndex ?? it.indentLineIndex,
+        specifications: it.specifications || "",
+        category: it.category || "Medical Equipment",
+        department: it.department || "General",
+      });
+    }
+
+    primaryEquipmentName = processedItems.map(p => p.equipmentName).join(" + ");
+    primaryEquipmentId = processedItems[0]?.equipmentId || equipmentId;
+  } else {
+    // Single item creation
+    if (!rateContractId) {
+      res.status(400).json({ error: "rateContractId is required" }); return;
+    }
+    const rc = await RateContract.findById(rateContractId);
+    if (!rc) { res.status(400).json({ error: "Rate contract not found" }); return; }
+
+    vendorId = vendorId || rc.vendorId;
+    vendorName = rc.vendorName;
+    primaryRcNumber = rc.contractNumber;
+    primaryEquipmentId = equipmentId || rc.equipmentId || indent?.equipmentId;
+    const eq = await Equipment.findById(primaryEquipmentId).catch(() => null);
+    primaryEquipmentName = eq?.name ?? rc.equipmentName ?? "";
+
+    totalQuantity = quantity || indent?.quantity || 1;
+    const unitPrice = rc.unitPrice;
+    const gstRate = rc.gstRate ?? 12;
+    gstAmt = Math.round(unitPrice * totalQuantity * gstRate / 100);
+    totalEquipmentCost = unitPrice * totalQuantity;
+    total = totalEquipmentCost + gstAmt;
+
+    processedItems.push({
+      equipmentId: primaryEquipmentId,
+      equipmentName: primaryEquipmentName,
+      rateContractId: rc._id,
+      rcNumber: rc.contractNumber,
+      quantity: totalQuantity,
+      unitPrice,
+      gstRate,
+      gstAmount: gstAmt,
+      unitPriceInclTax: Math.round(unitPrice * (1 + gstRate / 100)),
+      totalAmount: total,
+      indentLineItemIndex: req.body.lineIndex !== undefined ? Number(req.body.lineIndex) : undefined,
+      specifications: "",
+      category: "Medical Equipment",
+      department: "General",
+    });
+  }
+
+  const vn = vendorId ? await Vendor.findById(vendorId).catch(() => null) : null;
+  vendorName = vn?.name ?? vendorName;
+
+  deliveryAddress = deliveryAddress || indent?.facilityName || "Telangana Medical Facility, Central Warehouse";
+
   const psRequired = req.body.psRequired ?? false;
   const psPercent = req.body.psPercent ?? 5;
-  const psAmount = psRequired ? (total * psPercent) / 100 : 0;
+  const psAmount = psRequired ? Math.round((total * psPercent) / 100) : 0;
   const bgDueDate = psRequired ? (req.body.bgDueDate ? new Date(req.body.bgDueDate) : new Date(Date.now() + 30 * 86400000)) : undefined;
 
   const po = await PurchaseOrder.create({
@@ -207,18 +324,25 @@ router.post("/purchase-orders", async (req, res): Promise<void> => {
     indentId: indent?._id || undefined,
     indentNumber: indent?.indentNumber ?? (req.body.indentNumber || "DIRECT-RC-PO"),
     indentLineItemIndex: req.body.lineIndex !== undefined ? Number(req.body.lineIndex) : undefined,
-    rateContractId, rcNumber: rc.contractNumber,
-    vendorId, vendorName: vn?.name ?? rc.vendorName ?? "",
+    rateContractId: primaryRcId,
+    rcNumber: primaryRcNumber,
+    vendorId,
+    vendorName,
     vendorTier: req.body.vendorTier ?? "L1",
     allocationRatio: req.body.allocationRatio ?? "100%",
-    equipmentId, equipmentName: eq?.name ?? rc.equipmentName ?? "",
-    quantity, unitPrice, gstRate, gstAmount: gstAmt,
-    unitPriceInclTax: unitPrice * (1 + gstRate / 100),
-    totalEquipmentCost: unitPrice * quantity,
+    equipmentId: primaryEquipmentId,
+    equipmentName: primaryEquipmentName,
+    items: processedItems,
+    quantity: totalQuantity,
+    unitPrice: processedItems[0]?.unitPrice || 0,
+    gstRate: processedItems[0]?.gstRate || 12,
+    gstAmount: gstAmt,
+    unitPriceInclTax: processedItems[0]?.unitPriceInclTax || 0,
+    totalEquipmentCost,
     totalAmount: total,
     deliveryAddress,
-    supplyPeriodDays: rc.supplyPeriodDays ?? 45,
-    expectedDeliveryDate: req.body.expectedDeliveryDate ? new Date(req.body.expectedDeliveryDate) : new Date(Date.now() + (rc.supplyPeriodDays ?? 45) * 86400000),
+    supplyPeriodDays: req.body.supplyPeriodDays ?? 45,
+    expectedDeliveryDate: req.body.expectedDeliveryDate ? new Date(req.body.expectedDeliveryDate) : new Date(Date.now() + 45 * 86400000),
     consignees: req.body.consignees ?? [],
     psRequired,
     psPercent,
@@ -233,29 +357,30 @@ router.post("/purchase-orders", async (req, res): Promise<void> => {
 
   if (indent) {
     indent.status = "in_procurement";
-    const lineIdx = req.body.lineIndex !== undefined ? Number(req.body.lineIndex) : -1;
-    if (lineIdx >= 0 && indent.lineItems && indent.lineItems[lineIdx]) {
-      const li = indent.lineItems[lineIdx];
-      li.poId = po._id;
-      li.poNumber = po.poNumber;
-      li.lineStatus = "po_drafted";
-      li.rateContractId = rc._id;
-      li.rateContractNumber = rc.contractNumber;
-      li.rateContractVendor = vn?.name || rc.vendorName;
-      li.rateContractUnitPrice = rc.unitPrice;
-      indent.markModified("lineItems");
-    } else if (indent.lineItems && indent.lineItems.length > 0) {
-      const li = indent.lineItems.find((l: any) => String(l.equipmentId) === String(equipmentId) || (l.equipmentName && eq?.name && l.equipmentName.toLowerCase() === eq.name.toLowerCase()));
-      if (li) {
-        li.poId = po._id;
-        li.poNumber = po.poNumber;
-        li.lineStatus = "po_drafted";
-        li.rateContractId = rc._id;
-        li.rateContractNumber = rc.contractNumber;
-        li.rateContractVendor = vn?.name || rc.vendorName;
-        li.rateContractUnitPrice = rc.unitPrice;
-        indent.markModified("lineItems");
+    if (processedItems.length > 0 && indent.lineItems && indent.lineItems.length > 0) {
+      for (const p of processedItems) {
+        let li = null;
+        if (p.indentLineItemIndex !== undefined && p.indentLineItemIndex >= 0 && indent.lineItems[p.indentLineItemIndex]) {
+          li = indent.lineItems[p.indentLineItemIndex];
+        } else {
+          li = indent.lineItems.find((l: any) =>
+            (p.equipmentId && String(l.equipmentId) === String(p.equipmentId)) ||
+            (l.equipmentName && p.equipmentName && l.equipmentName.toLowerCase().trim() === p.equipmentName.toLowerCase().trim())
+          );
+        }
+        if (li) {
+          li.poId = po._id;
+          li.poNumber = po.poNumber;
+          li.lineStatus = "po_drafted";
+          if (p.rateContractId) {
+            li.rateContractId = p.rateContractId;
+            li.rateContractNumber = p.rcNumber || primaryRcNumber;
+            li.rateContractVendor = vendorName;
+            li.rateContractUnitPrice = p.unitPrice;
+          }
+        }
       }
+      indent.markModified("lineItems");
     }
     await indent.save();
   }
@@ -266,10 +391,237 @@ router.post("/purchase-orders", async (req, res): Promise<void> => {
 });
 
 router.patch("/purchase-orders/:id", async (req, res): Promise<void> => {
+  const po = await PurchaseOrder.findById(req.params.id);
+  if (!po) { res.status(404).json({ error: "Not found" }); return; }
+
+  if (Array.isArray(req.body.items)) {
+    let totalEquipmentCost = 0;
+    let gstAmt = 0;
+    let total = 0;
+    let totalQuantity = 0;
+    const processedItems: any[] = [];
+
+    for (const it of req.body.items) {
+      const itQty = Math.max(1, Number(it.quantity || it.qty) || 1);
+      const itUnitPrice = Number(it.unitPrice) || 0;
+      const itGstRate = it.gstRate != null ? Number(it.gstRate) : 12;
+      const itSubtotal = itUnitPrice * itQty;
+      const itGst = Math.round((itSubtotal * itGstRate) / 100);
+      const itLanded = itSubtotal + itGst;
+
+      totalQuantity += itQty;
+      totalEquipmentCost += itSubtotal;
+      gstAmt += itGst;
+      total += itLanded;
+
+      processedItems.push({
+        equipmentId: it.equipmentId,
+        equipmentName: it.equipmentName,
+        rateContractId: it.rateContractId,
+        rcNumber: it.rcNumber || "",
+        quantity: itQty,
+        unitPrice: itUnitPrice,
+        gstRate: itGstRate,
+        gstAmount: itGst,
+        unitPriceInclTax: Math.round(itUnitPrice * (1 + itGstRate / 100)),
+        totalAmount: itLanded,
+        indentLineItemIndex: it.indentLineItemIndex ?? it.indentLineIndex,
+        specifications: it.specifications || "",
+        category: it.category || "Medical Equipment",
+        department: it.department || "General",
+      });
+    }
+
+    req.body.items = processedItems;
+    req.body.quantity = totalQuantity;
+    req.body.totalEquipmentCost = totalEquipmentCost;
+    req.body.gstAmount = gstAmt;
+    req.body.totalAmount = total;
+    if (processedItems.length > 0) {
+      req.body.equipmentName = processedItems.map(p => p.equipmentName).join(" + ");
+    }
+
+    if (po.indentId) {
+      const indent = await Indent.findById(po.indentId).catch(() => null);
+      if (indent && indent.lineItems) {
+        for (const p of processedItems) {
+          let li = null;
+          if (p.indentLineItemIndex !== undefined && p.indentLineItemIndex >= 0 && indent.lineItems[p.indentLineItemIndex]) {
+            li = indent.lineItems[p.indentLineItemIndex];
+          } else {
+            li = indent.lineItems.find((l: any) =>
+              (p.equipmentId && String(l.equipmentId) === String(p.equipmentId)) ||
+              (l.equipmentName && p.equipmentName && l.equipmentName.toLowerCase().trim() === p.equipmentName.toLowerCase().trim())
+            );
+          }
+          if (li) {
+            li.poId = po._id;
+            li.poNumber = po.poNumber;
+            li.lineStatus = "po_drafted";
+          }
+        }
+        indent.markModified("lineItems");
+        await indent.save();
+      }
+    }
+  }
+
   const r = await PurchaseOrder.findByIdAndUpdate(req.params.id, req.body, { new: true });
   if (!r) { res.status(404).json({ error: "Not found" }); return; }
+  if (req.body.paymentStatus || req.body.tranche1Paid || req.body.tranche2Paid || req.body.paymentAmount) {
+    await syncPOPaymentToIndent(r);
+  }
   res.json(await fmt(r));
 });
+
+/* Scope Boundary: Synchronize Purchase Order Payments & Statutory 2-Tranches back to Parent Indent */
+export async function syncPOPaymentToIndent(po: any): Promise<void> {
+  if (!po) return;
+  try {
+    let indent = null;
+    if (po.indentId && mongoose.Types.ObjectId.isValid(po.indentId)) {
+      indent = await Indent.findById(po.indentId).catch(() => null);
+    }
+    if (!indent && po.indentNumber) {
+      indent = await Indent.findOne({ indentNumber: po.indentNumber }).catch(() => null);
+    }
+    if (!indent && po.poNumber) {
+      indent = await Indent.findOne({
+        $or: [
+          { "lineItems.poNumber": po.poNumber },
+          { "lineItems.poId": po._id },
+          { purchaseOrderId: po._id },
+          { poNumber: po.poNumber },
+        ],
+      }).catch(() => null);
+    }
+
+    if (!indent) return;
+
+    const total = po.totalAmount || 0;
+    const t1Amount = po.tranche1Amount != null ? po.tranche1Amount : Math.round(total * 0.9);
+    const t2Amount = po.tranche2Amount != null ? po.tranche2Amount : (total - t1Amount);
+
+    const isT1Paid = Boolean(
+      po.tranche1Paid ||
+      (po.paymentStatus === "paid" && po.tranche2Paid !== true) ||
+      (po.paymentStatus === "paid" && po.tranche1Paid === undefined) ||
+      po.paymentStatus === "partial"
+    );
+    const isT2Paid = Boolean(
+      po.tranche2Paid ||
+      (po.paymentStatus === "paid" && (po.tranche1Paid === true || po.status === "completed" || po.tranche2Paid !== false))
+    );
+
+    const poPaidPercentage = (isT1Paid ? 90 : 0) + (isT2Paid ? 10 : 0);
+    const poPaidAmount = po.paymentAmount != null
+      ? po.paymentAmount
+      : ((isT1Paid ? t1Amount : 0) + (isT2Paid ? t2Amount : 0));
+
+    // Update matching line item(s) on indent
+    if (Array.isArray(indent.lineItems)) {
+      let matchedAny = false;
+      indent.lineItems.forEach((li: any) => {
+        const isMatched = (
+          (li.poNumber && li.poNumber === po.poNumber) ||
+          (li.poId && String(li.poId) === String(po._id)) ||
+          (indent.lineItems.length === 1)
+        );
+
+        if (isMatched) {
+          matchedAny = true;
+          li.poNumber = po.poNumber;
+          li.poId = po._id;
+          li.paymentStatus = po.paymentStatus;
+          li.paidAmount = poPaidAmount;
+          li.paidPercentage = poPaidPercentage;
+          li.tranche1Paid = isT1Paid;
+          li.tranche1Amount = t1Amount;
+          li.tranche1Reference = po.tranche1Reference || (isT1Paid ? (po.paymentReference || `PAY-90-${po.poNumber}`) : "") || "";
+          li.tranche1PaidDate = po.tranche1PaidDate || (isT1Paid ? po.paymentDate : null) || null;
+          li.tranche1PaidBy = po.tranche1PaidBy || po.paidBy || "";
+          li.tranche2Paid = isT2Paid;
+          li.tranche2Amount = t2Amount;
+          li.tranche2Reference = po.tranche2Reference || (isT2Paid ? (po.paymentReference || `PAY-10-${po.poNumber}`) : "") || "";
+          li.tranche2PaidDate = po.tranche2PaidDate || null;
+          li.tranche2PaidBy = po.tranche2PaidBy || po.paidBy || "";
+        }
+      });
+      if (matchedAny) {
+        indent.markModified("lineItems");
+      }
+    }
+
+    // Query all POs for this indent to calculate true cumulative totals
+    const linkedPOs = await PurchaseOrder.find({
+      $or: [
+        { indentId: indent._id },
+        { indentNumber: indent.indentNumber },
+        { _id: po._id },
+        { poNumber: po.poNumber },
+      ],
+    }).catch(() => []);
+
+    let totalIndentPOValue = 0;
+    let totalIndentPaidAmount = 0;
+    let allPOsPaid = linkedPOs.length > 0;
+    let anyPOPaid = false;
+
+    linkedPOs.forEach((p: any) => {
+      const pTot = p.totalAmount || 0;
+      const pT1Amt = p.tranche1Amount != null ? p.tranche1Amount : Math.round(pTot * 0.9);
+      const pT2Amt = p.tranche2Amount != null ? p.tranche2Amount : (pTot - pT1Amt);
+      const pT1Paid = Boolean(
+        p.tranche1Paid ||
+        (p.paymentStatus === "paid" && p.tranche2Paid !== true) ||
+        (p.paymentStatus === "paid" && p.tranche1Paid === undefined) ||
+        p.paymentStatus === "partial"
+      );
+      const pT2Paid = Boolean(
+        p.tranche2Paid ||
+        (p.paymentStatus === "paid" && (p.tranche1Paid === true || p.status === "completed" || p.tranche2Paid !== false))
+      );
+
+      const pPaid = p.paymentAmount != null ? p.paymentAmount : ((pT1Paid ? pT1Amt : 0) + (pT2Paid ? pT2Amt : 0));
+      totalIndentPOValue += pTot;
+      totalIndentPaidAmount += pPaid;
+
+      if (p.paymentStatus !== "paid" || !pT2Paid) {
+        allPOsPaid = false;
+      }
+      if (pT1Paid || pT2Paid || p.paymentStatus === "paid" || p.paymentStatus === "partial") {
+        anyPOPaid = true;
+      }
+    });
+
+    indent.totalPaidAmount = totalIndentPaidAmount > 0 ? totalIndentPaidAmount : poPaidAmount;
+    indent.paymentStatus = allPOsPaid && linkedPOs.length > 0 ? "paid" : (anyPOPaid ? "partial" : "not_paid");
+    indent.paidPercentage = totalIndentPOValue > 0
+      ? Math.min(100, Math.round(((indent.totalPaidAmount || 0) / totalIndentPOValue) * 100))
+      : poPaidPercentage;
+
+    indent.tranche1Paid = isT1Paid;
+    indent.tranche1Amount = t1Amount;
+    indent.tranche1Reference = po.tranche1Reference || (isT1Paid ? (po.paymentReference || `PAY-90-${po.poNumber}`) : "") || "";
+    indent.tranche1PaidDate = po.tranche1PaidDate || (isT1Paid ? po.paymentDate : null) || null;
+    indent.tranche1PaidBy = po.tranche1PaidBy || po.paidBy || "";
+
+    indent.tranche2Paid = isT2Paid;
+    indent.tranche2Amount = t2Amount;
+    indent.tranche2Reference = po.tranche2Reference || (isT2Paid ? (po.paymentReference || `PAY-10-${po.poNumber}`) : "") || "";
+    indent.tranche2PaidDate = po.tranche2PaidDate || null;
+    indent.tranche2PaidBy = po.tranche2PaidBy || po.paidBy || "";
+
+    indent.paymentReference = po.paymentReference || po.tranche1Reference || `PAY-90-${po.poNumber}`;
+    indent.paymentDate = po.paymentDate || po.tranche1PaidDate || null;
+    indent.paidBy = po.paidBy || po.tranche1PaidBy || "";
+    indent.paymentRemarks = po.paymentRemarks || "";
+
+    await indent.save();
+  } catch (err) {
+    console.error("[SYNC PO PAYMENT TO INDENT ERROR]", err);
+  }
+}
 
 /* Scope Boundary: Manual Paid / Not-Paid status tracking by TGMSIDC Accounts */
 router.post("/purchase-orders/:id/payment-status", async (req, res): Promise<void> => {
@@ -335,6 +687,10 @@ router.post("/purchase-orders/:id/payment-status", async (req, res): Promise<voi
   if (po.paymentStatus === "paid") {
     await Delivery.updateMany({ purchaseOrderId: po._id }, { paymentStatus: "paid" });
   }
+
+  /* Automatically synchronize payment and 2-tranche status with linked Indent */
+  await syncPOPaymentToIndent(po);
+
   res.json(await fmt(po));
 });
 
@@ -417,6 +773,9 @@ router.post("/purchase-orders/:id/release-payment", async (req, res): Promise<vo
   if (po.paymentStatus === "paid") {
     await Delivery.updateMany({ purchaseOrderId: po._id }, { paymentStatus: "paid" });
   }
+
+  /* Automatically synchronize payment and 2-tranche status with linked Indent */
+  await syncPOPaymentToIndent(po);
 
   res.json({ message: "Manual payment status recorded successfully", po: await fmt(po) });
 });

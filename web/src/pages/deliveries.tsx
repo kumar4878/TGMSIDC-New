@@ -1,5 +1,5 @@
-import { useState, useRef } from "react";
-import { Link } from "wouter";
+import { useState, useRef, useMemo, useEffect } from "react";
+import { Link, useLocation } from "wouter";
 import { useListDeliveries, getListDeliveriesQueryKey, useListPurchaseOrders, useCreateDelivery, type Delivery } from "@/lib/api-hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +14,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/hooks/use-toast";
 import {
   Search, Eye, QrCode, Plus, Upload, FileText, X,
-  CheckCircle2, Truck, Package, AlertTriangle, Building2, Stamp,
+  CheckCircle2, Truck, Package, AlertTriangle, Building2, Stamp, Filter, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -43,6 +43,10 @@ export default function Deliveries() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [facilityFilter, setFacilityFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [, navigate] = useLocation();
   const [logOpen, setLogOpen] = useState(false);
   const [detailDelivery, setDetailDelivery] = useState<Delivery | null>(null);
 
@@ -75,21 +79,70 @@ export default function Deliveries() {
   const [docs, setDocs] = useState<DocAttachment[]>([]);
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
+  const vendorParam = useMemo(() => {
+    if (user?.role === "vendor" && user?.vendorId) {
+      return { vendorId: user.vendorId };
+    }
+    return {};
+  }, [user?.role, user?.vendorId]);
+
   const activeFilter = statusFilter !== "all" ? statusFilter : undefined;
+  const listParams = useMemo(() => ({
+    ...(activeFilter ? { status: activeFilter } : {}),
+    ...vendorParam,
+  }), [activeFilter, vendorParam]);
+
   const { data: deliveries, isLoading } = useListDeliveries(
-    activeFilter ? { status: activeFilter } : {},
-    { query: { queryKey: getListDeliveriesQueryKey(activeFilter ? { status: activeFilter } : {}) } }
+    listParams,
+    { query: { queryKey: getListDeliveriesQueryKey(listParams) } }
   );
   const { data: purchaseOrders } = useListPurchaseOrders({}, { query: { queryKey: ["purchase-orders"] } });
   const createDelivery = useCreateDelivery();
 
-  const filtered = (deliveries ?? []).filter((d) =>
-    !search ||
-    d.qrCode?.toLowerCase().includes(search.toLowerCase()) ||
-    d.poNumber?.toLowerCase().includes(search.toLowerCase()) ||
-    d.facilityName?.toLowerCase().includes(search.toLowerCase()) ||
-    d.equipmentName?.toLowerCase().includes(search.toLowerCase())
-  );
+  const facilityOptions = useMemo(() => {
+    const set = new Set<string>();
+    (deliveries ?? []).forEach((d) => {
+      if (d.facilityName) set.add(d.facilityName.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [deliveries]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    const vendorName = user?.role === "vendor" ? (user.vendorName || user.department)?.toLowerCase().trim() : null;
+    const vendorId = user?.role === "vendor" ? user.vendorId : null;
+
+    return (deliveries ?? []).filter((d) => {
+      if (user?.role === "vendor") {
+        const matchesVendor =
+          (!vendorId || d.vendorId === vendorId || String(d.vendorId) === String(vendorId)) &&
+          (!vendorName || !d.vendorName || d.vendorName.toLowerCase().trim() === vendorName);
+        if (!matchesVendor) return false;
+      }
+      const matchesSearch =
+        !q ||
+        (d.qrCode ?? "").toLowerCase().includes(q) ||
+        (d.poNumber ?? "").toLowerCase().includes(q) ||
+        (d.facilityName ?? "").toLowerCase().includes(q) ||
+        (d.equipmentName ?? "").toLowerCase().includes(q) ||
+        (d.challanNumber ?? "").toLowerCase().includes(q);
+      if (!matchesSearch) return false;
+      if (statusFilter !== "all" && d.status !== statusFilter) return false;
+      if (facilityFilter !== "all" && (d.facilityName ?? "").trim() !== facilityFilter) return false;
+      return true;
+    });
+  }, [deliveries, search, statusFilter, facilityFilter, user]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, facilityFilter, pageSize]);
+
+  const paginatedDeliveries = useMemo(() => {
+    const startIndex = (page - 1) * pageSize;
+    return filtered.slice(startIndex, startIndex + pageSize);
+  }, [filtered, page, pageSize]);
 
   function handleFileUpload(files: FileList | null, docType: string) {
     if (!files) return;
@@ -334,87 +387,232 @@ export default function Deliveries() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Filter className="w-3.5 h-3.5 text-[#6b7a93] shrink-0" />
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-44 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md">
+              <SelectTrigger className="w-36 sm:w-44 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="dispatched">Dispatched</SelectItem>
-                <SelectItem value="in_transit">In Transit</SelectItem>
-                <SelectItem value="delivered">Delivered</SelectItem>
-                <SelectItem value="qa_pending">QA Pending</SelectItem>
-                <SelectItem value="qa_passed">QA Passed</SelectItem>
-                <SelectItem value="qa_failed">QA Failed</SelectItem>
-                <SelectItem value="accepted">Accepted</SelectItem>
+                <SelectItem value="all" className="text-xs">All Statuses</SelectItem>
+                <SelectItem value="dispatched" className="text-xs">Dispatched</SelectItem>
+                <SelectItem value="in_transit" className="text-xs">In Transit</SelectItem>
+                <SelectItem value="delivered" className="text-xs">Delivered</SelectItem>
+                <SelectItem value="qa_pending" className="text-xs">QA Pending</SelectItem>
+                <SelectItem value="qa_passed" className="text-xs">QA Passed</SelectItem>
+                <SelectItem value="qa_failed" className="text-xs">QA Failed</SelectItem>
+                <SelectItem value="accepted" className="text-xs">Accepted</SelectItem>
               </SelectContent>
             </Select>
 
-            <span className="text-xs font-medium text-[#6b7a93] ml-2">
+            <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+              <SelectTrigger className="w-44 sm:w-52 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md text-[#152340]">
+                <SelectValue placeholder="All facilities" />
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                <SelectItem value="all" className="text-xs">
+                  All facilities
+                </SelectItem>
+                {facilityOptions.map((f) => (
+                  <SelectItem key={f} value={f} className="text-xs">
+                    {f}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <span className="text-xs font-medium text-[#6b7a93] ml-1 whitespace-nowrap">
               Showing <span className="font-bold text-[#152340]">{filtered.length}</span> of {(deliveries ?? []).length}
             </span>
           </div>
         </div>
 
-        <div className="p-0">
-          {isLoading ? (
-            <div className="py-16 text-center">
-              <div className="w-6 h-6 border-2 border-[#2563eb] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-              <p className="text-xs text-[#6b7a93]">Loading deliveries…</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b border-[#e4eaf2] bg-[#f8fafc] text-[#6b7a93] font-bold uppercase tracking-wider text-[10.5px]">
-                    <th className="py-2.5 px-3">Delivery Note No.</th>
-                    <th className="py-2.5 px-3">PO (Buyer's Order) No.</th>
-                    <th className="py-2.5 px-3">Equipment</th>
-                    <th className="py-2.5 px-3">Consignee (Facility)</th>
-                    <th className="py-2.5 px-3 text-center">Qty</th>
-                    <th className="py-2.5 px-3">Dispatch Date</th>
-                    <th className="py-2.5 px-3">QA Score</th>
-                    <th className="py-2.5 px-3 text-center">Docs</th>
-                    <th className="py-2.5 px-3">Status</th>
-                    <th className="py-2.5 px-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.length === 0 ? (
-                    <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">No deliveries found</td></tr>
-                  ) : filtered.map((d) => (
-                    <tr key={d.id} className="border-b hover:bg-muted/30 transition-colors cursor-pointer" onClick={() => setDetailDelivery(d as typeof detailDelivery)}>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <QrCode className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                          <span className="font-mono text-xs font-semibold text-amber-700">{d.qrCode}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-primary">{d.poNumber}</td>
-                      <td className="px-4 py-3 text-xs max-w-[150px] truncate">{d.equipmentName}</td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{d.facilityName}</td>
-                      <td className="px-4 py-3 text-xs font-semibold">{d.quantity} Nos.</td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">{d.dispatchDate ? format(new Date(d.dispatchDate), "dd MMM yyyy") : "—"}</td>
-                      <td className={cn("px-4 py-3 text-xs", qaColor(d.qaComplianceScore))}>{d.qaComplianceScore != null ? `${d.qaComplianceScore}%` : "—"}</td>
-                      <td className="px-4 py-3">
-                        <span className={cn("text-xs font-medium", d.documentsUploaded ? "text-emerald-600" : "text-amber-600")}>
-                          {d.documentsUploaded ? "✓ Uploaded" : "Pending"}
+        {/* Table Contents */}
+        {isLoading ? (
+          <div className="py-16 text-center">
+            <div className="w-6 h-6 border-2 border-[#2563eb] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+            <p className="text-xs text-[#6b7a93]">Loading deliveries…</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="py-16 text-center">
+            <FileText className="w-8 h-8 text-[#93a2b8] mx-auto mb-2" />
+            <p className="text-xs font-semibold text-[#152340]">No deliveries found</p>
+            <p className="text-[11px] text-[#6b7a93] mt-0.5">Try clearing the search or changing status filter.</p>
+          </div>
+        ) : (
+          <div className="w-full overflow-hidden">
+            <table className="w-full table-fixed text-left text-xs border-collapse">
+              <colgroup>
+                <col className="w-[12%]" />
+                <col className="w-[12%]" />
+                <col className="w-[18%]" />
+                <col className="w-[17%]" />
+                <col className="w-[6%]" />
+                <col className="w-[9%]" />
+                <col className="w-[7%]" />
+                <col className="w-[6%]" />
+                <col className="w-[7%]" />
+                <col className="w-[6%]" />
+              </colgroup>
+              <thead>
+                <tr className="border-b border-[#e4eaf2] bg-[#f8fafc] text-[#6b7a93] font-bold uppercase tracking-wider text-[10.5px]">
+                  <th className="py-2.5 px-2.5 text-left">Delivery Note No.</th>
+                  <th className="py-2.5 px-2.5 text-left">PO No.</th>
+                  <th className="py-2.5 px-2.5 text-left">Equipment</th>
+                  <th className="py-2.5 px-2.5 text-left">Consignee (Facility)</th>
+                  <th className="py-2.5 px-2 text-center">Qty</th>
+                  <th className="py-2.5 px-2 text-center">Dispatch Date</th>
+                  <th className="py-2.5 px-2 text-center">QA Score</th>
+                  <th className="py-2.5 px-2 text-center">Docs</th>
+                  <th className="py-2.5 px-2.5 text-left">Status</th>
+                  <th className="py-2.5 px-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#eff3f8]">
+                {paginatedDeliveries.map((d) => (
+                  <tr
+                    key={d.id}
+                    onClick={() => navigate(`/deliveries/${d.id}`)}
+                    className="hover:bg-[#eff5ff] cursor-pointer transition-colors group"
+                  >
+                    <td className="py-2.5 px-2.5 truncate align-middle">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <QrCode className="h-3.5 w-3.5 text-[#6b7a93] shrink-0" />
+                        <span className="font-mono text-xs font-bold text-[#2563eb] group-hover:underline truncate block" title={d.qrCode || (d as any).deliveryNoteNo}>
+                          {d.qrCode || (d as any).deliveryNoteNo}
                         </span>
-                      </td>
-                      <td className="px-4 py-3"><StatusBadge status={d.status} /></td>
-                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                        <Link href={`/deliveries/${d.id}`}>
-                          <Button variant="ghost" size="icon" className="h-8 w-8"><Eye className="h-3.5 w-3.5" /></Button>
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-2.5 align-middle truncate">
+                      <span className="font-mono text-xs font-semibold text-[#152340] truncate block" title={d.poNumber}>
+                        {d.poNumber}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-2.5 align-middle">
+                      <span className="font-medium text-[#152340] text-xs truncate block" title={d.equipmentName || "Medical Equipment"}>
+                        {d.equipmentName || "Medical Equipment"}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-2.5 align-middle">
+                      <div className="flex items-center gap-1.5 min-w-0" title={d.facilityName}>
+                        <Building2 className="w-3.5 h-3.5 text-[#6b7a93] shrink-0" />
+                        <span className="font-medium text-[#152340] text-xs truncate block">
+                          {d.facilityName || "Consignee Hospital"}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-2 text-center tabular-nums font-semibold text-[#152340] align-middle whitespace-nowrap">
+                      {d.quantity} {d.quantity === 1 ? "Unit" : "Units"}
+                    </td>
+                    <td className="py-2.5 px-2 text-center text-[#6b7a93] text-[11px] whitespace-nowrap align-middle">
+                      {d.dispatchDate ? format(new Date(d.dispatchDate), "dd MMM yyyy") : "—"}
+                    </td>
+                    <td className="py-2.5 px-2 text-center align-middle whitespace-nowrap">
+                      {d.qaComplianceScore != null ? (
+                        <span className={cn("text-xs font-semibold", qaColor(d.qaComplianceScore))}>
+                          {d.qaComplianceScore}%
+                        </span>
+                      ) : (
+                        <span className="text-xs text-[#93a2b8]">—</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-2 text-center align-middle whitespace-nowrap">
+                      <span className={cn("text-[11px] font-semibold px-2 py-0.5 rounded-full", d.documentsUploaded ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-amber-50 text-amber-700 border border-amber-200")}>
+                        {d.documentsUploaded ? "Uploaded" : "Pending"}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-2.5 align-middle">
+                      <StatusBadge status={d.status} />
+                    </td>
+                    <td className="py-2.5 px-3 text-right align-middle" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end">
+                        <button
+                          onClick={() => navigate(`/deliveries/${d.id}`)}
+                          className="px-2.5 py-1 rounded text-xs font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 bg-white border border-[#e2e8f0] text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                        >
+                          <Eye className="w-3.5 h-3.5 shrink-0" />
+                          <span>View</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Pagination Bar */}
+        {filtered.length > 0 && (
+          <div className="p-3 border-t border-[#e4eaf2] bg-[#f8fafc] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="text-xs text-[#6b7a93]">
+              Showing <span className="font-semibold text-[#152340]">{(page - 1) * pageSize + 1}</span> to{" "}
+              <span className="font-semibold text-[#152340]">
+                {Math.min(page * pageSize, filtered.length)}
+              </span>{" "}
+              of <span className="font-semibold text-[#152340]">{filtered.length}</span> shipments
             </div>
-          )}
-        </div>
+
+            <div className="flex items-center gap-3 sm:ml-auto">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[#6b7a93] whitespace-nowrap">Rows per page</span>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(val) => {
+                    setPageSize(Number(val));
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-[66px] h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md font-medium text-[#152340] px-2.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10" className="text-xs">10</SelectItem>
+                    <SelectItem value="20" className="text-xs">20</SelectItem>
+                    <SelectItem value="50" className="text-xs">50</SelectItem>
+                    <SelectItem value="100" className="text-xs">100</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center transition-colors border border-transparent",
+                    page <= 1
+                      ? "bg-[#f1f5f9] text-[#94a3b8] cursor-not-allowed opacity-40"
+                      : "bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0] cursor-pointer"
+                  )}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <span className="text-xs text-[#6b7a93] whitespace-nowrap px-1">
+                  Page {page} of {totalPages}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center transition-colors border border-transparent",
+                    page >= totalPages
+                      ? "bg-[#f1f5f9] text-[#94a3b8] cursor-not-allowed opacity-40"
+                      : "bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0] cursor-pointer"
+                  )}
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Delivery Detail Quick View */}
@@ -556,11 +754,19 @@ export default function Deliveries() {
                     <SelectValue placeholder="Select a Purchase Order..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {(purchaseOrders ?? []).map(po => (
-                      <SelectItem key={po.id} value={String(po.id)}>
-                        {po.poNumber} — {po.equipmentName} ({po.quantity} Nos.)
-                      </SelectItem>
-                    ))}
+                    {(purchaseOrders ?? [])
+                      .filter(po => {
+                        if (user?.role !== "vendor") return true;
+                        const vName = user.vendorName || user.department;
+                        const vId = user.vendorId;
+                        return (vId && (po.vendorId === vId || String(po.vendorId) === String(vId))) ||
+                               (vName && po.vendorName && po.vendorName.toLowerCase().trim() === vName.toLowerCase().trim());
+                      })
+                      .map(po => (
+                        <SelectItem key={po.id} value={String(po.id)}>
+                          {po.poNumber} — {po.equipmentName} ({po.quantity} Nos.)
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
                 {errors.purchaseOrderId && (

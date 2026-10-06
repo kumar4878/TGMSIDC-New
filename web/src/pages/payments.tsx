@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,8 +8,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
-import { Search, IndianRupee, CheckCircle2, Clock, AlertTriangle, Upload, Unlock, Plus, FileText, X, Eye, Loader2, Edit3, Save, Check } from "lucide-react";
+import {
+  Search, IndianRupee, CheckCircle2, Clock, AlertTriangle, Upload, Unlock,
+  Plus, FileText, X, Eye, Loader2, Edit3, Save, Check, Building2, Filter,
+  ChevronLeft, ChevronRight,
+} from "lucide-react";
 import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 import { usePurchaseOrders, useDeliveries } from "@/lib/api-hooks";
 import * as api from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,6 +27,7 @@ interface Payment {
   invoiceRef: string;
   poNumber: string;
   vendorName: string;
+  facilityName?: string;
   equipmentName: string;
   tranche: "tranche1_90" | "tranche2_10" | "full";
   totalPOValue: number;
@@ -45,7 +51,7 @@ const INIT_PAYMENTS: Payment[] = [
   {
     id: 1, paymentRef: "PAY-2026-0001", invoiceRef: "SSA/INV/2025-26/0011",
     poNumber: "441A/591/HPC/EQU/2025-26",
-    vendorName: "M/s. Sri Srinivasa Agencies", equipmentName: "Surgical Diathermy / Cautery Machine (Sigma+)",
+    vendorName: "M/s. Sri Srinivasa Agencies", facilityName: "GGH Sangareddy", equipmentName: "Surgical Diathermy / Cautery Machine (Sigma+)",
     tranche: "tranche1_90", totalPOValue: 582750, trancheAmount: 524475,
     status: "released", threeWayMatched: true, qpcUploaded: false, qpcApproved: false,
     releasedDate: "2026-04-02", releasedBy: "S. Lakshmi",
@@ -54,7 +60,7 @@ const INIT_PAYMENTS: Payment[] = [
   {
     id: 2, paymentRef: "PAY-2026-0002", invoiceRef: "SSA/INV/2025-26/0011",
     poNumber: "441A/591/HPC/EQU/2025-26",
-    vendorName: "M/s. Sri Srinivasa Agencies", equipmentName: "Surgical Diathermy / Cautery Machine (Sigma+)",
+    vendorName: "M/s. Sri Srinivasa Agencies", facilityName: "GGH Sangareddy", equipmentName: "Surgical Diathermy / Cautery Machine (Sigma+)",
     tranche: "tranche2_10", totalPOValue: 582750, trancheAmount: 58275,
     status: "blocked", blockedReason: "Quality Performance Certificate (QPC) not yet submitted by GGH Sangareddy facility",
     threeWayMatched: true, qpcUploaded: false, qpcApproved: false, paymentMode: "NEFT",
@@ -62,7 +68,7 @@ const INIT_PAYMENTS: Payment[] = [
   {
     id: 3, paymentRef: "PAY-2022-0001", invoiceRef: "GAMS/01533/22-23",
     poNumber: "216/418/HPC/EQU/Vemulawada/2022-23",
-    vendorName: "M/s. Green Apple Medical Systems", equipmentName: "Mammogram Compatible CR System (Fuji Film)",
+    vendorName: "M/s. Green Apple Medical Systems", facilityName: "Area Hospital Vemulawada", equipmentName: "Mammogram Compatible CR System (Fuji Film)",
     tranche: "tranche1_90", totalPOValue: 682500, trancheAmount: 614250,
     status: "released", threeWayMatched: true, qpcUploaded: true, qpcApproved: true,
     releasedDate: "2022-12-01", releasedBy: "Finance Officer",
@@ -71,7 +77,7 @@ const INIT_PAYMENTS: Payment[] = [
   {
     id: 4, paymentRef: "PAY-2023-0002", invoiceRef: "GAMS/01533/22-23",
     poNumber: "216/418/HPC/EQU/Vemulawada/2022-23",
-    vendorName: "M/s. Green Apple Medical Systems", equipmentName: "Mammogram Compatible CR System (Fuji Film)",
+    vendorName: "M/s. Green Apple Medical Systems", facilityName: "Area Hospital Vemulawada", equipmentName: "Mammogram Compatible CR System (Fuji Film)",
     tranche: "tranche2_10", totalPOValue: 682500, trancheAmount: 68250,
     status: "released", threeWayMatched: true, qpcUploaded: true, qpcApproved: true,
     releasedDate: "2023-03-15", releasedBy: "Finance Officer",
@@ -80,7 +86,7 @@ const INIT_PAYMENTS: Payment[] = [
   {
     id: 5, paymentRef: "PAY-2026-0003", invoiceRef: "INV/NMI/2026/0112",
     poNumber: "IND/HPC/EQU/WDH/PO/2026/003",
-    vendorName: "Nidek Medical India Pvt Ltd", equipmentName: "Fully Automated Biochemistry Analyser",
+    vendorName: "Nidek Medical India Pvt Ltd", facilityName: "Warangal District Hospital", equipmentName: "Fully Automated Biochemistry Analyser",
     tranche: "tranche1_90", totalPOValue: 1344000, trancheAmount: 1209600,
     status: "pending", threeWayMatched: false, qpcUploaded: false, qpcApproved: false,
     blockedReason: "3-way match incomplete — GRN not recorded (goods not yet received at Warangal District Hospital)", paymentMode: "RTGS",
@@ -103,6 +109,10 @@ export default function Payments() {
   const isFinanceRole = user?.role === "admin" || user?.role === "executive_director" || user?.role === "tgmsidc_user";
   const [payments, setPayments] = useState<Payment[]>(INIT_PAYMENTS);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [facilityFilter, setFacilityFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [detail, setDetail] = useState<Payment | null>(null);
   const [qpcDialog, setQpcDialog] = useState<Payment | null>(null);
   const [qpcRef, setQpcRef] = useState("");
@@ -167,6 +177,7 @@ export default function Payments() {
       const isT2Paid = Boolean(po.tranche2Paid || (po.paymentStatus === "paid" && (po.status === "completed" || po.tranche2Paid)));
 
       const invoiceRef = acceptedDel?.invoiceNumber || (acceptedDel?.challanNumber ? `INV-${acceptedDel.challanNumber}` : "") || (acceptedDel?.deliveryChallanNo ? `INV-${acceptedDel.deliveryChallanNo}` : "") || `INV-${po.poNumber?.slice(-4)}`;
+      const facilityName = po.facilityName || po.deliveryAddress || po.consignees?.[0]?.institutionName || acceptedDel?.facilityName || "Government Medical College, Telangana";
 
       // Tranche 1 (90%)
       list.push({
@@ -176,6 +187,7 @@ export default function Payments() {
         invoiceRef,
         poNumber: po.poNumber,
         vendorName: po.vendorName,
+        facilityName,
         equipmentName: po.equipmentName,
         tranche: "tranche1_90",
         totalPOValue: total,
@@ -203,6 +215,7 @@ export default function Payments() {
         invoiceRef,
         poNumber: po.poNumber,
         vendorName: po.vendorName,
+        facilityName,
         equipmentName: po.equipmentName,
         tranche: "tranche2_10",
         totalPOValue: total,
@@ -227,14 +240,45 @@ export default function Payments() {
 
   const allPayments = useMemo(() => [...livePayments, ...payments], [livePayments, payments]);
 
-  const filtered = useMemo(() => allPayments.filter(p =>
-    !search ||
-    p.paymentRef.toLowerCase().includes(search.toLowerCase()) ||
-    p.poNumber.toLowerCase().includes(search.toLowerCase()) ||
-    p.vendorName.toLowerCase().includes(search.toLowerCase()) ||
-    (p.deliveryChallan && p.deliveryChallan.toLowerCase().includes(search.toLowerCase())) ||
-    (p.grnNumber && p.grnNumber.toLowerCase().includes(search.toLowerCase()))
-  ), [allPayments, search]);
+  const facilityOptions = useMemo(() => {
+    const set = new Set<string>();
+    allPayments.forEach((p) => {
+      if (p.facilityName?.trim()) set.add(p.facilityName.trim());
+    });
+    return Array.from(set).sort();
+  }, [allPayments]);
+
+  const filtered = useMemo(() => {
+    return allPayments.filter((p) => {
+      if (search) {
+        const q = search.toLowerCase();
+        const matchesSearch =
+          p.paymentRef.toLowerCase().includes(q) ||
+          p.poNumber.toLowerCase().includes(q) ||
+          p.vendorName.toLowerCase().includes(q) ||
+          (p.facilityName && p.facilityName.toLowerCase().includes(q)) ||
+          (p.equipmentName && p.equipmentName.toLowerCase().includes(q)) ||
+          (p.invoiceRef && p.invoiceRef.toLowerCase().includes(q)) ||
+          (p.deliveryChallan && p.deliveryChallan.toLowerCase().includes(q)) ||
+          (p.grnNumber && p.grnNumber.toLowerCase().includes(q));
+        if (!matchesSearch) return false;
+      }
+      if (statusFilter !== "all" && p.status !== statusFilter) return false;
+      if (facilityFilter !== "all" && (p.facilityName ?? "").trim() !== facilityFilter) return false;
+      return true;
+    });
+  }, [allPayments, search, statusFilter, facilityFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, facilityFilter, pageSize]);
+
+  const paginatedPayments = useMemo(() => {
+    const startIndex = (page - 1) * pageSize;
+    return filtered.slice(startIndex, startIndex + pageSize);
+  }, [filtered, page, pageSize]);
 
   const released = allPayments.filter(p => p.status === "released").reduce((a, p) => a + p.trancheAmount, 0);
   const pending = allPayments.filter(p => p.status !== "released").reduce((a, p) => a + p.trancheAmount, 0);
@@ -519,139 +563,377 @@ export default function Payments() {
     grnNumber: undefined,
     challanNumber: undefined,
   } : null;
-
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4">
+      {/* ── Page Header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#e4eaf2] pb-3">
         <div>
-          <h1 className="text-2xl font-bold">Payment Processing</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">90% on 3-way match · 10% on Quality Performance Certificate</p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#152340]">
+              Payment Processing & Disbursements
+            </h1>
+            <span className="neo-chip gry">Treasury & Vendor Settlement</span>
+          </div>
+          <p className="text-xs text-[#6b7a93] mt-0.5">
+            Two-tranche statutory disbursements: 90% against verified 3-Way Match · 10% retention on Quality Performance Certificate (QPC)
+          </p>
         </div>
         {isFinanceRole && (
-          <Button size="sm" className="gap-2" onClick={openCreateDialog}>
-            <Plus className="h-4 w-4" />Create Payment Request
+          <Button size="sm" className="gap-1.5 cursor-pointer" onClick={openCreateDialog}>
+            <Plus className="w-3.5 h-3.5" />
+            <span>Create Payment Request</span>
           </Button>
         )}
       </div>
 
-      {/* KPI row */}
-      <div className="grid grid-cols-4 gap-4">
-        <Card><CardContent className="p-4 flex items-center gap-3"><IndianRupee className="h-5 w-5 text-primary" /><div><p className="text-lg font-bold">{fmt(released + pending)}</p><p className="text-xs text-muted-foreground">Total PO Value</p></div></CardContent></Card>
-        <Card className="border-emerald-200 bg-emerald-50/40"><CardContent className="p-4 flex items-center gap-3"><CheckCircle2 className="h-5 w-5 text-emerald-600" /><div><p className="text-lg font-bold text-emerald-700">{fmt(released)}</p><p className="text-xs text-muted-foreground">Released</p></div></CardContent></Card>
-        <Card className="border-amber-200 bg-amber-50/40"><CardContent className="p-4 flex items-center gap-3"><Clock className="h-5 w-5 text-amber-600" /><div><p className="text-lg font-bold text-amber-700">{fmt(pending)}</p><p className="text-xs text-muted-foreground">Pending Release</p></div></CardContent></Card>
-        <Card className="border-red-200 bg-red-50/40"><CardContent className="p-4 flex items-center gap-3"><AlertTriangle className="h-5 w-5 text-red-600" /><div><p className="text-lg font-bold text-red-700">{blocked}</p><p className="text-xs text-muted-foreground">Blocked</p></div></CardContent></Card>
-      </div>
-
-      {/* 90/10 explainer */}
-      <div className="grid grid-cols-2 gap-4">
-        <Card className="border-l-4 border-l-emerald-500">
-          <CardContent className="p-4">
-            <p className="text-sm font-semibold text-emerald-700">Tranche 1 — 90%</p>
-            <p className="text-xs text-muted-foreground mt-1">Released after successful 3-Way Match (PO + GRN + Invoice) and Finance approval</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-amber-500">
-          <CardContent className="p-4">
-            <p className="text-sm font-semibold text-amber-700">Tranche 2 — 10%</p>
-            <p className="text-xs text-muted-foreground mt-1">Released after Quality Performance Certificate (QPC) uploaded by facility and approved by Finance</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <div className="p-4 border-b flex items-center justify-between">
-          <div className="relative max-w-sm flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search by ref, PO, vendor, challan..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
-          </div>
-          <div className="text-xs text-muted-foreground">
-            Showing <span className="font-semibold text-slate-800">{filtered.length}</span> payment records
-          </div>
+      {/* ── KPI Ribbon ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#6b7a93] uppercase tracking-wider block">
+            Total Committed Value
+          </span>
+          <span className="text-2xl font-bold text-[#152340] tabular-nums mt-1 block">
+            {fmt(released + pending)}
+          </span>
+          <span className="text-[10.5px] text-[#6b7a93] mt-1 block">Active Purchase Orders</span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40">
-                {["Payment Ref", "Invoice / PO", "Vendor", "Tranche", "Amount", "3-Way Match", "QPC", "Status", "Actions"].map(h => (
-                  <th key={h} className="text-left text-xs font-semibold text-muted-foreground px-4 py-3">{h}</th>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#159557] uppercase tracking-wider block">
+            Released / Paid
+          </span>
+          <span className="text-2xl font-bold text-[#159557] tabular-nums mt-1 block">
+            {fmt(released)}
+          </span>
+          <span className="text-[10.5px] text-[#159557] font-semibold mt-1 block">Disbursed via Treasury</span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#e08a0b] uppercase tracking-wider block">
+            Pending Release
+          </span>
+          <span className="text-2xl font-bold text-[#e08a0b] tabular-nums mt-1 block">
+            {fmt(pending)}
+          </span>
+          <span className="text-[10.5px] text-[#e08a0b] font-semibold mt-1 block">Awaiting match or QPC</span>
+        </div>
+
+        <div className="neo-kpi-card">
+          <span className="text-[10px] font-bold text-[#e11d48] uppercase tracking-wider block">
+            Blocked Disbursements
+          </span>
+          <span className="text-2xl font-bold text-[#e11d48] tabular-nums mt-1 block">
+            {blocked}
+          </span>
+          <span className="text-[10.5px] text-[#e11d48] font-semibold mt-1 block">Discrepancy / hold</span>
+        </div>
+      </div>
+
+      {/* ── 90/10 Policy Notice ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="p-3 bg-white border border-[#e4eaf2] border-l-4 border-l-[#159557] rounded-xl shadow-xs">
+          <p className="text-xs font-bold text-[#159557]">Tranche 1 — 90% Advance Against Supply</p>
+          <p className="text-[11px] text-[#6b7a93] mt-0.5">Released after verified 3-Way Match (Purchase Order + GRN + Tax Invoice) and Finance certification</p>
+        </div>
+        <div className="p-3 bg-white border border-[#e4eaf2] border-l-4 border-l-[#e08a0b] rounded-xl shadow-xs">
+          <p className="text-xs font-bold text-[#e08a0b]">Tranche 2 — 10% Statutory Performance Retention</p>
+          <p className="text-[11px] text-[#6b7a93] mt-0.5">Released after Quality Performance Certificate (QPC) is issued by hospital and verified after 3 months satisfactory usage</p>
+        </div>
+      </div>
+
+      {/* ── Table Card ── */}
+      <div className="bg-white border border-[#e4eaf2] rounded-xl shadow-xs overflow-hidden">
+        {/* Filter bar */}
+        <div className="p-3 border-b border-[#e4eaf2] bg-[#f8fafc] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 flex-1 max-w-md">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-[#93a2b8] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search by Payment Ref, PO, invoice, vendor, facility..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full h-[32px] bg-white border border-[#e4eaf2] rounded-md text-xs text-[#152340] placeholder:text-[#93a2b8] pl-9 pr-3 focus:outline-none focus:border-[#2563eb]"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <Filter className="w-3.5 h-3.5 text-[#6b7a93] shrink-0" />
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-36 sm:w-44 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-xs">All Statuses</SelectItem>
+                <SelectItem value="released" className="text-xs">Released / Paid</SelectItem>
+                <SelectItem value="processing" className="text-xs">Processing / In-Flight</SelectItem>
+                <SelectItem value="pending" className="text-xs">Pending Match</SelectItem>
+                <SelectItem value="blocked" className="text-xs">Blocked (Hold)</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+              <SelectTrigger className="w-44 sm:w-52 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md text-[#152340]">
+                <SelectValue placeholder="All facilities" />
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                <SelectItem value="all" className="text-xs">All facilities</SelectItem>
+                {facilityOptions.map((f) => (
+                  <SelectItem key={f} value={f} className="text-xs">
+                    {f}
+                  </SelectItem>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(p => (
-                <tr key={p.id} className="border-b hover:bg-muted/20">
-                  <td className="px-4 py-3 font-mono text-xs font-semibold text-primary">{p.paymentRef}</td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs block font-medium">{p.invoiceRef}</span>
-                    <span className="text-xs text-muted-foreground font-mono">{p.poNumber}</span>
-                    {p.deliveryChallan && (
-                      <span className="text-[11px] text-emerald-700 block font-sans">
-                        Challan: {p.deliveryChallan} {p.grnNumber ? `(${p.grnNumber})` : ""}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm">
-                    <div>{p.vendorName}</div>
-                    <div className="text-xs text-muted-foreground truncate max-w-[200px]">{p.equipmentName}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant="outline" className={`text-xs border ${p.tranche === "tranche1_90" ? "border-blue-200 bg-blue-50 text-blue-700" : p.tranche === "tranche2_10" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-purple-200 bg-purple-50 text-purple-700"}`}>
-                      {p.tranche === "tranche1_90" ? "90%" : p.tranche === "tranche2_10" ? "10% QPC" : "100% Full"}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3 font-semibold">{fmt(p.trancheAmount)}</td>
-                  <td className="px-4 py-3">
-                    {p.threeWayMatched ? <span title="3-Way Match Complete"><CheckCircle2 className="h-4 w-4 text-emerald-600" /></span> : <span title="Pending Match"><AlertTriangle className="h-4 w-4 text-red-500" /></span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    {p.tranche === "tranche2_10"
-                      ? p.qpcApproved
-                        ? <span title="QPC Approved"><CheckCircle2 className="h-4 w-4 text-emerald-600" /></span>
-                        : <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={() => setQpcDialog(p)}>
-                          <Upload className="h-3 w-3" />Upload QPC
-                        </Button>
-                      : <span className="text-xs text-muted-foreground">N/A</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant="outline" className={`text-xs border ${STATUS_STYLE[p.status]}`}>
-                      {p.status === "released" ? "Paid" : p.status.replace("_", " ")}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="View Details" onClick={() => setDetail(p)}>
-                        <Eye className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-2 text-xs gap-1 border-blue-200 text-blue-700 hover:bg-blue-50"
-                        title="Manually Update / Record Payment"
-                        onClick={() => openEditDialog(p)}
-                      >
-                        <Edit3 className="h-3 w-3" />
-                        <span>Update</span>
-                      </Button>
-                      {can("payment.approve") && p.status === "processing" && (
-                        <Button
-                          size="sm"
-                          disabled={releasingId === p.id}
-                          className="h-7 bg-emerald-600 hover:bg-emerald-700 px-2 text-xs gap-1"
-                          onClick={() => releasePayment(p.id)}
-                        >
-                          {releasingId === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Unlock className="h-3 w-3" />}
-                          {releasingId === p.id ? "Releasing..." : "Release"}
-                        </Button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {filtered.length === 0 && <div className="text-center py-12 text-muted-foreground">No payment records found</div>}
+              </SelectContent>
+            </Select>
+
+            <span className="text-xs font-medium text-[#6b7a93] ml-1 whitespace-nowrap">
+              Showing <span className="font-bold text-[#152340]">{filtered.length}</span> of {allPayments.length}
+            </span>
+          </div>
         </div>
-      </Card>
+
+        {/* Table Contents */}
+        {filtered.length === 0 ? (
+          <div className="py-16 text-center">
+            <FileText className="w-8 h-8 text-[#93a2b8] mx-auto mb-2" />
+            <p className="text-xs font-semibold text-[#152340]">No payment records match your criteria</p>
+            <p className="text-[11px] text-[#6b7a93] mt-0.5">Try clearing the search or changing status filter.</p>
+          </div>
+        ) : (
+          <div className="w-full overflow-hidden">
+            <table className="w-full table-fixed text-left text-xs border-collapse">
+              <colgroup>
+                <col className="w-[12%]" />
+                <col className="w-[13%]" />
+                <col className="w-[17%]" />
+                <col className="w-[15%]" />
+                <col className="w-[7%]" />
+                <col className="w-[10%]" />
+                <col className="w-[6%]" />
+                <col className="w-[6%]" />
+                <col className="w-[6%]" />
+                <col className="w-[8%]" />
+              </colgroup>
+              <thead>
+                <tr className="border-b border-[#e4eaf2] bg-[#f8fafc] text-[#6b7a93] font-bold uppercase tracking-wider text-[10.5px]">
+                  <th className="py-2.5 px-2.5 text-left">Payment Ref</th>
+                  <th className="py-2.5 px-2.5 text-left">Invoice / PO</th>
+                  <th className="py-2.5 px-2.5 text-left">Vendor / Equipment</th>
+                  <th className="py-2.5 px-2.5 text-left">Facility</th>
+                  <th className="py-2.5 px-2 text-center">Tranche</th>
+                  <th className="py-2.5 px-2.5 text-right">Amount</th>
+                  <th className="py-2.5 px-2 text-center">3-Way</th>
+                  <th className="py-2.5 px-2 text-center">QPC</th>
+                  <th className="py-2.5 px-2 text-center">Status</th>
+                  <th className="py-2.5 px-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#eff3f8]">
+                {paginatedPayments.map((p) => (
+                  <tr
+                    key={p.id}
+                    onClick={() => setDetail(p)}
+                    className="hover:bg-[#eff5ff] cursor-pointer transition-colors group"
+                  >
+                    <td className="py-2.5 px-2.5 truncate align-middle">
+                      <span className="font-mono text-xs font-bold text-[#2563eb] group-hover:underline truncate block" title={p.paymentRef}>
+                        {p.paymentRef}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-2.5 align-middle">
+                      <span className="text-xs block font-semibold text-[#152340] truncate" title={p.invoiceRef}>
+                        {p.invoiceRef}
+                      </span>
+                      <span className="text-[11px] text-[#6b7a93] font-mono block truncate" title={p.poNumber}>
+                        {p.poNumber}
+                      </span>
+                      {p.deliveryChallan && (
+                        <span className="text-[10px] text-emerald-700 block truncate font-mono">
+                          DC: {p.deliveryChallan} {p.grnNumber ? `(${p.grnNumber})` : ""}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-2.5 align-middle">
+                      <span className="font-semibold text-[#152340] text-xs truncate block" title={p.vendorName}>
+                        {p.vendorName}
+                      </span>
+                      <span className="text-[11px] text-[#6b7a93] truncate block" title={p.equipmentName}>
+                        {p.equipmentName}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-2.5 align-middle">
+                      <div className="flex items-center gap-1.5 min-w-0" title={p.facilityName || "Consignee Hospital"}>
+                        <Building2 className="w-3.5 h-3.5 text-[#6b7a93] shrink-0" />
+                        <span className="font-medium text-[#152340] text-xs truncate block">
+                          {p.facilityName || "Consignee Hospital"}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-2 text-center align-middle whitespace-nowrap">
+                      <span className={cn(
+                        "text-[10px] font-semibold px-2 py-0.5 rounded-full border",
+                        p.tranche === "tranche1_90" ? "border-blue-200 bg-blue-50 text-blue-700" :
+                        p.tranche === "tranche2_10" ? "border-amber-200 bg-amber-50 text-amber-700" :
+                        "border-purple-200 bg-purple-50 text-purple-700"
+                      )}>
+                        {p.tranche === "tranche1_90" ? "90%" : p.tranche === "tranche2_10" ? "10% QPC" : "100% Full"}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-2.5 text-right tabular-nums font-bold text-[#152340] align-middle whitespace-nowrap">
+                      {fmt(p.trancheAmount)}
+                    </td>
+                    <td className="py-2.5 px-2 text-center align-middle whitespace-nowrap">
+                      {p.threeWayMatched ? (
+                        <span className="inline-flex items-center justify-center text-emerald-600" title="3-Way Match Verified">
+                          <CheckCircle2 className="w-4 h-4" />
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center justify-center text-amber-500" title="3-Way Match Pending">
+                          <AlertTriangle className="w-4 h-4" />
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-2 text-center align-middle whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                      {p.tranche === "tranche2_10" ? (
+                        p.qpcApproved ? (
+                          <span className="inline-flex items-center justify-center text-emerald-600" title="QPC Approved">
+                            <CheckCircle2 className="w-4 h-4" />
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setQpcDialog(p)}
+                            className="px-2 py-0.5 rounded text-[10.5px] font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 bg-white border border-[#e2e8f0] text-slate-600 hover:bg-slate-50"
+                          >
+                            <Upload className="w-3 h-3" />
+                            <span>QPC</span>
+                          </button>
+                        )
+                      ) : (
+                        <span className="text-xs text-[#93a2b8]">—</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-2 text-center align-middle whitespace-nowrap">
+                      <span className={cn(
+                        "text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize",
+                        p.status === "released" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                        p.status === "processing" ? "bg-blue-50 text-blue-700 border-blue-200" :
+                        p.status === "blocked" ? "bg-red-50 text-red-700 border-red-200" :
+                        "bg-gray-100 text-gray-700 border-gray-200"
+                      )}>
+                        {p.status === "released" ? "Paid" : p.status}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-right align-middle" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1.5 flex-nowrap">
+                        <button
+                          onClick={() => setDetail(p)}
+                          className="px-2 py-1 rounded text-xs font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 bg-white border border-[#e2e8f0] text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                          title="View Payment Details"
+                        >
+                          <Eye className="w-3.5 h-3.5 shrink-0" />
+                          <span>View</span>
+                        </button>
+                        <button
+                          onClick={() => openEditDialog(p)}
+                          className="px-2 py-1 rounded text-xs font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100"
+                          title="Update Payment Record"
+                        >
+                          <Edit3 className="w-3.5 h-3.5 shrink-0" />
+                          <span>Update</span>
+                        </button>
+                        {can("payment.approve") && p.status === "processing" && (
+                          <button
+                            disabled={releasingId === p.id}
+                            onClick={() => releasePayment(p.id)}
+                            className="px-2 py-1 rounded text-xs font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                            title="Release Payment"
+                          >
+                            {releasingId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Unlock className="w-3 h-3" />}
+                            <span>Release</span>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Pagination Bar */}
+        {filtered.length > 0 && (
+          <div className="p-3 border-t border-[#e4eaf2] bg-[#f8fafc] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="text-xs text-[#6b7a93]">
+              Showing <span className="font-semibold text-[#152340]">{(page - 1) * pageSize + 1}</span> to{" "}
+              <span className="font-semibold text-[#152340]">
+                {Math.min(page * pageSize, filtered.length)}
+              </span>{" "}
+              of <span className="font-semibold text-[#152340]">{filtered.length}</span> payment records
+            </div>
+
+            <div className="flex items-center gap-3 sm:ml-auto">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[#6b7a93] whitespace-nowrap">Rows per page</span>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(val) => {
+                    setPageSize(Number(val));
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-[66px] h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md font-medium text-[#152340] px-2.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10" className="text-xs">10</SelectItem>
+                    <SelectItem value="20" className="text-xs">20</SelectItem>
+                    <SelectItem value="50" className="text-xs">50</SelectItem>
+                    <SelectItem value="100" className="text-xs">100</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center transition-colors border border-transparent",
+                    page <= 1
+                      ? "bg-[#f1f5f9] text-[#94a3b8] cursor-not-allowed opacity-40"
+                      : "bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0] cursor-pointer"
+                  )}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <span className="text-xs text-[#6b7a93] whitespace-nowrap px-1">
+                  Page {page} of {totalPages}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center transition-colors border border-transparent",
+                    page >= totalPages
+                      ? "bg-[#f1f5f9] text-[#94a3b8] cursor-not-allowed opacity-40"
+                      : "bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0] cursor-pointer"
+                  )}
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Detail Dialog */}
       <Dialog open={!!detail} onOpenChange={() => setDetail(null)}>

@@ -52,6 +52,7 @@ export interface ITender extends Document {
   cancellationReason: string;
   cancellationDate?: Date;
   reTenderRef: string;
+  rcRef?: string;
 
   /* Basic dates */
   tenderInvitedDate?: Date;
@@ -114,6 +115,7 @@ const TenderSchema = new Schema<ITender>(
     cancellationReason: { type: String, default: "" },
     cancellationDate: { type: Date },
     reTenderRef: { type: String, default: "" },
+    rcRef: { type: String, default: "" },
 
     tenderInvitedDate: { type: Date },
     bidSubmissionStartDate: { type: Date },

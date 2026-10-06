@@ -532,7 +532,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </header>
 
           {/* Main Scrollable Canvas */}
-          <main className="flex-1 overflow-y-auto p-4 sm:p-5 lg:p-6 bg-[#f4f7fb]">
+          <main id="main-scroll-container" className="flex-1 overflow-y-auto p-4 sm:p-5 lg:p-6 bg-[#f4f7fb]">
             <div className="max-w-[1720px] mx-auto w-full">
               {children}
             </div>

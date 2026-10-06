@@ -11,7 +11,7 @@ import { PurchaseOrder } from "../models/PurchaseOrder.js";
 import { Delivery } from "../models/Delivery.js";
 import { Vendor } from "../models/Vendor.js";
 import { AuditLog } from "../models/AuditLog.js";
-import { notifyPOStatusChange } from "./purchase-orders.js";
+import { notifyPOStatusChange, syncPOPaymentToIndent } from "./purchase-orders.js";
 
 const router = Router();
 
@@ -123,7 +123,18 @@ async function formatIndent(r: any) {
     equipmentName = `${r.lineItems.length} items`;
   }
 
-  // Enrich each line item with RC coverage and tendering requirement
+  // Fetch linked POs for this indent to ensure payment details and statutory 2-tranches are always accurate
+  const linkedIndentPOs = await PurchaseOrder.find({
+    $or: [
+      { indentId: r._id },
+      { indentNumber: r.indentNumber },
+      ...(r.purchaseOrderId ? [{ _id: r.purchaseOrderId }] : []),
+      ...((r.lineItems ?? []).filter((l: any) => l.poNumber).map((l: any) => ({ poNumber: l.poNumber }))),
+      ...((r.lineItems ?? []).filter((l: any) => l.poId).map((l: any) => ({ _id: l.poId }))),
+    ],
+  }).catch(() => []);
+
+  // Enrich each line item with RC coverage, tendering requirement, and payment status
   const enrichedLineItems = await Promise.all((r.lineItems ?? []).map(async (li: any) => {
     const liObj = typeof li.toObject === "function" ? li.toObject() : { ...li };
     let itemRC = null;
@@ -174,6 +185,30 @@ async function formatIndent(r: any) {
       }
     }
 
+    // Match linked PO for payment and tranche sync
+    const matchingPO = linkedIndentPOs.find((p: any) =>
+      (liObj.poNumber && p.poNumber === liObj.poNumber) ||
+      (liObj.poId && String(p._id) === String(liObj.poId)) ||
+      (linkedIndentPOs.length === 1)
+    );
+
+    const poTotal = matchingPO?.totalAmount || liObj.estimatedTotalCost || 0;
+    const t1Amt = matchingPO?.tranche1Amount ?? liObj.tranche1Amount ?? Math.round(poTotal * 0.9);
+    const t2Amt = matchingPO?.tranche2Amount ?? liObj.tranche2Amount ?? (poTotal - t1Amt);
+    const t1Paid = Boolean(
+      matchingPO?.tranche1Paid ??
+      liObj.tranche1Paid ??
+      (matchingPO?.paymentStatus === "paid" || liObj.paymentStatus === "paid" || matchingPO?.paymentStatus === "partial")
+    );
+    const t2Paid = Boolean(
+      matchingPO?.tranche2Paid ??
+      liObj.tranche2Paid ??
+      (matchingPO?.paymentStatus === "paid" && (matchingPO?.tranche1Paid || matchingPO?.status === "completed" || matchingPO?.tranche2Paid !== false))
+    );
+    const linePaymentStatus = matchingPO?.paymentStatus ?? liObj.paymentStatus ?? ((t1Paid && t2Paid) ? "paid" : (t1Paid ? "partial" : "not_paid"));
+    const linePaidPct = (t1Paid ? 90 : 0) + (t2Paid ? 10 : 0);
+    const linePaidAmt = matchingPO?.paymentAmount ?? liObj.paidAmount ?? ((t1Paid ? t1Amt : 0) + (t2Paid ? t2Amt : 0));
+
     return {
       ...liObj,
       lineStatus: computedLineStatus,
@@ -191,11 +226,24 @@ async function formatIndent(r: any) {
       rateContractVendor: itemRC?.vendorName ?? liObj.rateContractVendor ?? null,
       rateContractUnitPrice: itemRC?.unitPrice ?? liObj.rateContractUnitPrice ?? null,
       rateContractValidityEnd: itemRC?.endDate ? (itemRC.endDate instanceof Date ? itemRC.endDate.toISOString() : new Date(itemRC.endDate).toISOString()) : null,
-      poId: liObj.poId?.toString() ?? null,
-      poNumber: liObj.poNumber ?? null,
+      poId: (matchingPO?._id?.toString() ?? liObj.poId?.toString()) ?? null,
+      poNumber: matchingPO?.poNumber ?? liObj.poNumber ?? null,
       tenderId: liObj.tenderId?.toString() ?? null,
       tenderNumber: liObj.tenderNumber ?? null,
       isTenderRequired: !hasActiveRC,
+      paymentStatus: linePaymentStatus,
+      paidAmount: linePaidAmt,
+      paidPercentage: linePaidPct,
+      tranche1Paid: t1Paid,
+      tranche1Amount: t1Amt,
+      tranche1Reference: matchingPO?.tranche1Reference || liObj.tranche1Reference || (t1Paid ? (matchingPO?.paymentReference || `PAY-90-${matchingPO?.poNumber || liObj.poNumber}`) : "") || "",
+      tranche1PaidDate: matchingPO?.tranche1PaidDate ? new Date(matchingPO.tranche1PaidDate).toISOString() : (liObj.tranche1PaidDate ? new Date(liObj.tranche1PaidDate).toISOString() : null),
+      tranche1PaidBy: matchingPO?.tranche1PaidBy || liObj.tranche1PaidBy || "",
+      tranche2Paid: t2Paid,
+      tranche2Amount: t2Amt,
+      tranche2Reference: matchingPO?.tranche2Reference || liObj.tranche2Reference || (t2Paid ? (matchingPO?.paymentReference || `PAY-10-${matchingPO?.poNumber || liObj.poNumber}`) : "") || "",
+      tranche2PaidDate: matchingPO?.tranche2PaidDate ? new Date(matchingPO.tranche2PaidDate).toISOString() : (liObj.tranche2PaidDate ? new Date(liObj.tranche2PaidDate).toISOString() : null),
+      tranche2PaidBy: matchingPO?.tranche2PaidBy || liObj.tranche2PaidBy || "",
     };
   }));
 
@@ -371,6 +419,58 @@ async function formatIndent(r: any) {
     budgetValidationStatus: r.budgetValidationStatus ?? "pending",
     reprioritizationNotes: r.reprioritizationNotes ?? "",
     reprioritizationHistory: r.reprioritizationHistory ?? [],
+
+    /* Payment & Statutory 2-Tranche Breakdown */
+    paymentStatus: (() => {
+      if (r.paymentStatus && r.paymentStatus !== "not_paid") return r.paymentStatus;
+      if (linkedIndentPOs.length > 0 && linkedIndentPOs.every((p: any) => p.paymentStatus === "paid" && (p.tranche2Paid || p.status === "completed"))) return "paid";
+      if (linkedIndentPOs.some((p: any) => p.tranche1Paid || p.paymentStatus === "paid" || p.paymentStatus === "partial")) return "partial";
+      return "not_paid";
+    })(),
+    totalPaidAmount: (() => {
+      if (r.totalPaidAmount) return r.totalPaidAmount;
+      return linkedIndentPOs.reduce((s: number, p: any) => {
+        const pTot = p.totalAmount || 0;
+        const pT1 = p.tranche1Amount || Math.round(pTot * 0.9);
+        const pT2 = p.tranche2Amount || (pTot - pT1);
+        const isP1 = Boolean(p.tranche1Paid || p.paymentStatus === "paid" || p.paymentStatus === "partial");
+        const isP2 = Boolean(p.tranche2Paid || (p.paymentStatus === "paid" && (p.status === "completed" || p.tranche2Paid)));
+        return s + (p.paymentAmount != null ? p.paymentAmount : ((isP1 ? pT1 : 0) + (isP2 ? pT2 : 0)));
+      }, 0);
+    })(),
+    paidPercentage: (() => {
+      if (r.paidPercentage != null && r.paidPercentage > 0) return r.paidPercentage;
+      const totalIndentPOValue = linkedIndentPOs.reduce((s: number, p: any) => s + (p.totalAmount || 0), 0);
+      const totalIndentPaid = linkedIndentPOs.reduce((s: number, p: any) => {
+        const pTot = p.totalAmount || 0;
+        const pT1 = p.tranche1Amount || Math.round(pTot * 0.9);
+        const pT2 = p.tranche2Amount || (pTot - pT1);
+        const isP1 = Boolean(p.tranche1Paid || p.paymentStatus === "paid" || p.paymentStatus === "partial");
+        const isP2 = Boolean(p.tranche2Paid || (p.paymentStatus === "paid" && (p.status === "completed" || p.tranche2Paid)));
+        return s + (p.paymentAmount != null ? p.paymentAmount : ((isP1 ? pT1 : 0) + (isP2 ? pT2 : 0)));
+      }, 0);
+      if (totalIndentPOValue > 0) return Math.min(100, Math.round((totalIndentPaid / totalIndentPOValue) * 100));
+      const primPO = linkedIndentPOs[0];
+      const isP1 = Boolean(primPO?.tranche1Paid || primPO?.paymentStatus === "paid" || primPO?.paymentStatus === "partial");
+      const isP2 = Boolean(primPO?.tranche2Paid || (primPO?.paymentStatus === "paid" && (primPO?.status === "completed" || primPO?.tranche2Paid)));
+      return (isP1 ? 90 : 0) + (isP2 ? 10 : 0);
+    })(),
+    tranche1Paid: Boolean(r.tranche1Paid ?? linkedIndentPOs[0]?.tranche1Paid ?? (linkedIndentPOs[0]?.paymentStatus === "paid" || linkedIndentPOs[0]?.paymentStatus === "partial")),
+    tranche1Amount: r.tranche1Amount ?? linkedIndentPOs[0]?.tranche1Amount ?? (linkedIndentPOs[0]?.totalAmount ? Math.round(linkedIndentPOs[0].totalAmount * 0.9) : 0),
+    tranche1Reference: r.tranche1Reference || linkedIndentPOs[0]?.tranche1Reference || (linkedIndentPOs[0]?.tranche1Paid ? (linkedIndentPOs[0]?.paymentReference || `PAY-90-${linkedIndentPOs[0]?.poNumber}`) : "") || "",
+    tranche1PaidDate: r.tranche1PaidDate ? new Date(r.tranche1PaidDate).toISOString() : (linkedIndentPOs[0]?.tranche1PaidDate ? new Date(linkedIndentPOs[0].tranche1PaidDate).toISOString() : (linkedIndentPOs[0]?.paymentDate ? new Date(linkedIndentPOs[0].paymentDate).toISOString() : null)),
+    tranche1PaidBy: r.tranche1PaidBy || linkedIndentPOs[0]?.tranche1PaidBy || linkedIndentPOs[0]?.paidBy || "",
+
+    tranche2Paid: Boolean(r.tranche2Paid ?? linkedIndentPOs[0]?.tranche2Paid ?? (linkedIndentPOs[0]?.paymentStatus === "paid" && (linkedIndentPOs[0]?.status === "completed" || linkedIndentPOs[0]?.tranche2Paid !== false))),
+    tranche2Amount: r.tranche2Amount ?? linkedIndentPOs[0]?.tranche2Amount ?? (linkedIndentPOs[0]?.totalAmount ? (linkedIndentPOs[0].totalAmount - Math.round(linkedIndentPOs[0].totalAmount * 0.9)) : 0),
+    tranche2Reference: r.tranche2Reference || linkedIndentPOs[0]?.tranche2Reference || (linkedIndentPOs[0]?.tranche2Paid ? (linkedIndentPOs[0]?.paymentReference || `PAY-10-${linkedIndentPOs[0]?.poNumber}`) : "") || "",
+    tranche2PaidDate: r.tranche2PaidDate ? new Date(r.tranche2PaidDate).toISOString() : (linkedIndentPOs[0]?.tranche2PaidDate ? new Date(linkedIndentPOs[0].tranche2PaidDate).toISOString() : null),
+    tranche2PaidBy: r.tranche2PaidBy || linkedIndentPOs[0]?.tranche2PaidBy || linkedIndentPOs[0]?.paidBy || "",
+
+    paymentReference: r.paymentReference || linkedIndentPOs[0]?.paymentReference || (linkedIndentPOs[0]?.poNumber ? `PAY-90-${linkedIndentPOs[0].poNumber}` : null),
+    paymentDate: r.paymentDate ? new Date(r.paymentDate).toISOString() : (linkedIndentPOs[0]?.paymentDate ? new Date(linkedIndentPOs[0].paymentDate).toISOString() : null),
+    paidBy: r.paidBy || linkedIndentPOs[0]?.paidBy || null,
+    paymentRemarks: r.paymentRemarks || linkedIndentPOs[0]?.paymentRemarks || "",
 
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
@@ -2451,27 +2551,68 @@ router.post("/indents/:id/advance-lifecycle", async (req, res): Promise<void> =>
       await indent.save();
     }
 
-    if (action === "record_payment" || action === "auto_complete_all") {
-      po.paymentStatus = "paid";
-      po.paymentReference = `UTR-TG-${Math.floor(10000000 + Math.random() * 90000000)}`;
-      po.paymentDate = new Date();
-      po.paymentAmount = po.totalAmount;
+    if (action === "record_payment" || action === "auto_complete_all" || action === "release_tranche1" || action === "release_tranche2") {
+      const total = po.totalAmount || 0;
+      const t1Calculated = po.tranche1Amount || Math.round(total * 0.9);
+      const t2Calculated = po.tranche2Amount || (total - t1Calculated);
+      const genRef = () => `UTR-TG-${Math.floor(10000000 + Math.random() * 90000000)}`;
+
+      if (action === "release_tranche1") {
+        po.tranche1Paid = true;
+        po.tranche1PaidDate = new Date();
+        po.tranche1Reference = po.tranche1Reference || genRef();
+        po.tranche1PaidBy = "TGMSIDC Accounts Officer";
+        po.tranche1Amount = t1Calculated;
+        po.paymentStatus = po.tranche2Paid ? "paid" : "partial";
+        po.paymentAmount = (po.tranche2Paid ? t2Calculated : 0) + t1Calculated;
+        po.paymentReference = po.tranche1Reference;
+      } else if (action === "release_tranche2") {
+        po.tranche2Paid = true;
+        po.tranche2PaidDate = new Date();
+        po.tranche2Reference = po.tranche2Reference || genRef();
+        po.tranche2PaidBy = "TGMSIDC Accounts Officer";
+        po.tranche2Amount = t2Calculated;
+        po.paymentStatus = po.tranche1Paid ? "paid" : "partial";
+        po.paymentAmount = (po.tranche1Paid ? t1Calculated : 0) + t2Calculated;
+        po.paymentReference = po.tranche2Reference;
+      } else {
+        po.paymentStatus = "paid";
+        po.paymentReference = po.paymentReference || genRef();
+        po.paymentDate = new Date();
+        po.paymentAmount = total;
+        po.tranche1Paid = true;
+        po.tranche1PaidDate = po.tranche1PaidDate || po.paymentDate;
+        po.tranche1Reference = po.tranche1Reference || po.paymentReference;
+        po.tranche1PaidBy = "TGMSIDC Accounts Officer";
+        po.tranche1Amount = t1Calculated;
+        po.tranche2Paid = true;
+        po.tranche2PaidDate = po.tranche2PaidDate || po.paymentDate;
+        po.tranche2Reference = po.tranche2Reference || genRef();
+        po.tranche2PaidBy = "TGMSIDC Accounts Officer";
+        po.tranche2Amount = t2Calculated;
+      }
+
       po.paidBy = "TGMSIDC Accounts Officer";
       po.paymentRemarks = "Payment released against final acceptance certificate and verified invoice.";
       if (!po.paymentHistory) po.paymentHistory = [];
       po.paymentHistory.push({
-        paymentStatus: "paid",
+        paymentStatus: po.paymentStatus,
+        tranche: action === "release_tranche1" ? "tranche1_90" : action === "release_tranche2" ? "tranche2_10" : "full",
         paymentReference: po.paymentReference,
-        paymentDate: po.paymentDate,
-        paymentAmount: po.paymentAmount,
+        paymentDate: new Date(),
+        paymentAmount: action === "release_tranche1" ? t1Calculated : action === "release_tranche2" ? t2Calculated : total,
         paidBy: po.paidBy,
         remarks: po.paymentRemarks,
         recordedAt: new Date(),
       });
       await po.save();
 
-      delivery.paymentStatus = "paid";
-      await delivery.save();
+      if (po.paymentStatus === "paid") {
+        delivery.paymentStatus = "paid";
+        await delivery.save();
+      }
+
+      await syncPOPaymentToIndent(po);
     }
 
     res.json({

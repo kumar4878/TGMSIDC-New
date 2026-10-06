@@ -128,6 +128,20 @@ export interface IndentLineItem {
   rateContractId?: string;
   tenderId?: string;
   poId?: string;
+  poNumber?: string;
+  paymentStatus?: string;
+  paidAmount?: number;
+  paidPercentage?: number;
+  tranche1Paid?: boolean;
+  tranche1Amount?: number;
+  tranche1Reference?: string;
+  tranche1PaidDate?: string;
+  tranche1PaidBy?: string;
+  tranche2Paid?: boolean;
+  tranche2Amount?: number;
+  tranche2Reference?: string;
+  tranche2PaidDate?: string;
+  tranche2PaidBy?: string;
   [key: string]: any;
 }
 
@@ -189,6 +203,19 @@ export interface Indent {
   accountHeadName?: string | null;
   programmeName?: string | null;
   fundingSourceName?: string | null;
+  paymentStatus?: string;
+  totalPaidAmount?: number;
+  paidPercentage?: number;
+  tranche1Paid?: boolean;
+  tranche1Amount?: number;
+  tranche1Reference?: string;
+  tranche1PaidDate?: string;
+  tranche1PaidBy?: string;
+  tranche2Paid?: boolean;
+  tranche2Amount?: number;
+  tranche2Reference?: string;
+  tranche2PaidDate?: string;
+  tranche2PaidBy?: string;
   createdAt: string;
   updatedAt: string;
   [key: string]: any;
@@ -255,6 +282,23 @@ export interface Tender {
   updatedAt: string;
 }
 
+export interface PurchaseOrderItem {
+  equipmentId: string;
+  equipmentName: string;
+  rateContractId: string;
+  rcNumber?: string;
+  quantity: number;
+  unitPrice: number;
+  gstRate: number;
+  gstAmount?: number;
+  unitPriceInclTax?: number;
+  totalAmount: number;
+  indentLineItemIndex?: number;
+  specifications?: string;
+  category?: string;
+  department?: string;
+}
+
 export interface PurchaseOrder {
   id: string;
   poNumber: string;
@@ -270,6 +314,7 @@ export interface PurchaseOrder {
   vendorName: string;
   equipmentId: string;
   equipmentName: string;
+  items?: PurchaseOrderItem[];
   quantity: number;
   unitPrice: number;
   gstRate: number;

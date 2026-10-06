@@ -22,6 +22,23 @@ const POAmendmentSchema = new Schema({
   approvedDate: { type: Date },
 });
 
+const POItemSchema = new Schema({
+  equipmentId: { type: Schema.Types.Mixed, ref: "Equipment" },
+  equipmentName: { type: String, required: true },
+  rateContractId: { type: Schema.Types.Mixed, ref: "RateContract" },
+  rcNumber: { type: String, default: "" },
+  quantity: { type: Number, required: true, default: 1 },
+  unitPrice: { type: Number, required: true },
+  gstRate: { type: Number, default: 12 },
+  gstAmount: { type: Number, default: 0 },
+  unitPriceInclTax: { type: Number, default: 0 },
+  totalAmount: { type: Number, required: true },
+  indentLineItemIndex: { type: Number },
+  specifications: { type: String, default: "" },
+  category: { type: String, default: "Medical Equipment" },
+  department: { type: String, default: "General" },
+});
+
 export interface IPurchaseOrder extends Document {
   poNumber: string;
   poType: string;
@@ -37,6 +54,24 @@ export interface IPurchaseOrder extends Document {
   vendorName: string;
   equipmentId: Types.ObjectId;
   equipmentName: string;
+
+  /* Multiple items support */
+  items?: Array<{
+    equipmentId?: Types.ObjectId | string;
+    equipmentName: string;
+    rateContractId?: Types.ObjectId | string;
+    rcNumber?: string;
+    quantity: number;
+    unitPrice: number;
+    gstRate: number;
+    gstAmount: number;
+    unitPriceInclTax: number;
+    totalAmount: number;
+    indentLineItemIndex?: number;
+    specifications?: string;
+    category?: string;
+    department?: string;
+  }>;
 
   /* Quantity & pricing */
   quantity: number;
@@ -177,8 +212,10 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
     vendorName: { type: String, default: "" },
     vendorTier: { type: String, default: "L1" },
     allocationRatio: { type: String, default: "100%" },
-    equipmentId: { type: Schema.Types.Mixed, ref: "Equipment", required: true },
+    equipmentId: { type: Schema.Types.Mixed, ref: "Equipment", required: false },
     equipmentName: { type: String, default: "" },
+
+    items: [POItemSchema],
 
     quantity: { type: Number, required: true },
     unitPrice: { type: Number, required: true },

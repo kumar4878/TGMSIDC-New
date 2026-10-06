@@ -1,9 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { useListIndents, useListRateContracts } from "@/lib/api-hooks";
+import { useListIndents, useListRateContracts, useListInstitutions } from "@/lib/api-hooks";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
-  Plus, Search, Eye, ChevronRight, Layers, FileText, IndianRupee,
+  Plus, Search, Eye, ChevronRight, ChevronLeft, Layers, FileText, IndianRupee,
   Building2, Calendar, Filter, Clock, CheckCircle2,
   XCircle, Package, Inbox, AlertTriangle, ArrowRight
 } from "lucide-react";
@@ -98,12 +98,27 @@ const formatINR = (n: number) => {
 export default function Indents() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [facilityFilter, setFacilityFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [, navigate] = useLocation();
   const { user } = useAuth();
   const canRaiseIndent = user?.role === "deo" || user?.role === "admin";
 
   const { data: indents = [], isLoading } = useListIndents({});
   const { data: rateContracts } = useListRateContracts({ status: "active" });
+  const { data: institutions = [] } = useListInstitutions();
+
+  const facilityOptions = useMemo(() => {
+    const set = new Set<string>();
+    indents.forEach((i) => {
+      if (i.facilityName) set.add(i.facilityName.trim());
+    });
+    (institutions ?? []).forEach((inst) => {
+      if (inst.name) set.add(inst.name.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [indents, institutions]);
 
   const rcEquipmentIds = useMemo(() => {
     const set = new Set<string>();
@@ -133,10 +148,23 @@ export default function Indents() {
         i.facilityName.toLowerCase().includes(search.toLowerCase()) ||
         (i.equipmentName ?? "").toLowerCase().includes(search.toLowerCase());
       if (!matchesSearch) return false;
-      if (statusFilter === "all") return true;
-      return i.status === statusFilter;
+      if (statusFilter !== "all" && i.status !== statusFilter) return false;
+      if (facilityFilter !== "all" && (i.facilityName ?? "").trim() !== facilityFilter) return false;
+      return true;
     });
-  }, [indents, search, statusFilter]);
+  }, [indents, search, statusFilter, facilityFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+
+  // Reset page when any filter criteria changes
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, facilityFilter, pageSize]);
+
+  const paginatedIndents = useMemo(() => {
+    const startIndex = (page - 1) * pageSize;
+    return filtered.slice(startIndex, startIndex + pageSize);
+  }, [filtered, page, pageSize]);
 
   const stats = useMemo(() => {
     return {
@@ -277,10 +305,10 @@ export default function Indents() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Filter className="w-3.5 h-3.5 text-[#6b7a93]" />
+          <div className="flex items-center gap-2 flex-wrap">
+            <Filter className="w-3.5 h-3.5 text-[#6b7a93] shrink-0" />
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-44 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md">
+              <SelectTrigger className="w-36 sm:w-44 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
@@ -292,7 +320,23 @@ export default function Indents() {
               </SelectContent>
             </Select>
 
-            <span className="text-xs font-medium text-[#6b7a93] ml-2">
+            <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+              <SelectTrigger className="w-44 sm:w-52 h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md text-[#152340]">
+                <SelectValue placeholder="All facilities" />
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                <SelectItem value="all" className="text-xs">
+                  All facilities
+                </SelectItem>
+                {facilityOptions.map((f) => (
+                  <SelectItem key={f} value={f} className="text-xs">
+                    {f}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <span className="text-xs font-medium text-[#6b7a93] ml-1 whitespace-nowrap">
               Showing <span className="font-bold text-[#152340]">{filtered.length}</span> of {indents.length}
             </span>
           </div>
@@ -340,7 +384,7 @@ export default function Indents() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#eff3f8]">
-                {filtered.map((indent) => {
+                {paginatedIndents.map((indent) => {
                   const myTurn = myPendingIds.has(indent.id);
 
                   return (
@@ -442,6 +486,78 @@ export default function Indents() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination Bar */}
+        {filtered.length > 0 && (
+          <div className="p-3 border-t border-[#e4eaf2] bg-[#f8fafc] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="text-xs text-[#6b7a93]">
+              Showing <span className="font-semibold text-[#152340]">{(page - 1) * pageSize + 1}</span> to{" "}
+              <span className="font-semibold text-[#152340]">
+                {Math.min(page * pageSize, filtered.length)}
+              </span>{" "}
+              of <span className="font-semibold text-[#152340]">{filtered.length}</span> indents
+            </div>
+
+            <div className="flex items-center gap-3 sm:ml-auto">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[#6b7a93] whitespace-nowrap">Rows per page</span>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(val) => {
+                    setPageSize(Number(val));
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="w-[66px] h-[32px] text-xs bg-white border-[#e4eaf2] rounded-md font-medium text-[#152340] px-2.5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10" className="text-xs">10</SelectItem>
+                    <SelectItem value="20" className="text-xs">20</SelectItem>
+                    <SelectItem value="50" className="text-xs">50</SelectItem>
+                    <SelectItem value="100" className="text-xs">100</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center transition-colors border border-transparent",
+                    page <= 1
+                      ? "bg-[#f1f5f9] text-[#94a3b8] cursor-not-allowed opacity-40"
+                      : "bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0] cursor-pointer"
+                  )}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <span className="text-xs text-[#6b7a93] whitespace-nowrap px-1">
+                  Page {page} of {totalPages}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center transition-colors border border-transparent",
+                    page >= totalPages
+                      ? "bg-[#f1f5f9] text-[#94a3b8] cursor-not-allowed opacity-40"
+                      : "bg-[#f1f5f9] text-[#475569] hover:bg-[#e2e8f0] cursor-pointer"
+                  )}
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
