@@ -52,6 +52,13 @@ export default function PurchaseOrderDetail() {
   const { user } = useAuth();
   const role = user?.role || "tgmsidc_user";
 
+  const { data: po, isLoading } = useGetPurchaseOrder(id, { query: { enabled: !!id, queryKey: getGetPurchaseOrderQueryKey(id) } });
+  const { data: deliveries } = useListDeliveries({ poId: id }, { query: { enabled: !!id, queryKey: getListDeliveriesQueryKey({ poId: id }) } });
+  const { data: linkedRc } = useGetRateContract(po?.rateContractId || "", { query: { enabled: !!po?.rateContractId } });
+  const { data: linkedIndent } = useGetIndent(po?.indentId || "", { query: { enabled: !!po?.indentId } });
+  const approvePO = useApprovePurchaseOrder();
+  const cancelPO = useCancelPurchaseOrder();
+
   // Ensure PO detail view always starts at the top (starting details) when opened
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
@@ -61,13 +68,6 @@ export default function PurchaseOrderDetail() {
       mainEl.scrollTop = 0;
     }
   }, [id, isLoading]);
-  
-  const { data: po, isLoading } = useGetPurchaseOrder(id, { query: { enabled: !!id, queryKey: getGetPurchaseOrderQueryKey(id) } });
-  const { data: deliveries } = useListDeliveries({ poId: id }, { query: { enabled: !!id, queryKey: getListDeliveriesQueryKey({ poId: id }) } });
-  const { data: linkedRc } = useGetRateContract(po?.rateContractId || "", { query: { enabled: !!po?.rateContractId } });
-  const { data: linkedIndent } = useGetIndent(po?.indentId || "", { query: { enabled: !!po?.indentId } });
-  const approvePO = useApprovePurchaseOrder();
-  const cancelPO = useCancelPurchaseOrder();
 
   const [submitNextLevelLoading, setSubmitNextLevelLoading] = useState(false);
   const [gmReviewLoading, setGmReviewLoading] = useState(false);

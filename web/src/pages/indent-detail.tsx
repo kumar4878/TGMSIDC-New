@@ -649,7 +649,7 @@ export default function IndentDetail(props?: { id?: string }) {
 
   const [lifecycleLoading, setLifecycleLoading] = useState(false);
 
-  async function handleAdvanceLifecycle(action: "confirm_delivery" | "pass_qa" | "issue_grn" | "record_payment" | "auto_complete_all") {
+  async function handleAdvanceLifecycle(action: "confirm_delivery" | "pass_qa" | "issue_grn" | "record_payment" | "auto_complete_all" | "release_tranche1" | "release_tranche2") {
     setLifecycleLoading(true);
     try {
       const res = await fetch(`${BASE_URL}/indents/${id}/advance-lifecycle`, {
