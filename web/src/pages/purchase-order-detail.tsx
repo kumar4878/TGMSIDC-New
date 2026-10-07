@@ -44,15 +44,27 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
-export default function PurchaseOrderDetail() {
+function safeFormatDate(dateVal: any, pattern = "dd MMM yyyy"): string {
+  if (!dateVal) return "—";
+  try {
+    const dt = dateVal instanceof Date ? dateVal : new Date(dateVal);
+    if (isNaN(dt.getTime())) return "—";
+    return format(dt, pattern);
+  } catch {
+    return "—";
+  }
+}
+
+export default function PurchaseOrderDetail(props?: { id?: string }) {
   const [, params] = useRoute("/purchase-orders/:id");
-  const id = (params?.id ?? "");
+  const id = (props?.id || params?.id || "");
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { user } = useAuth();
   const role = user?.role || "tgmsidc_user";
 
   const { data: po, isLoading } = useGetPurchaseOrder(id, { query: { enabled: !!id, queryKey: getGetPurchaseOrderQueryKey(id) } });
+  const rawPO = (po ?? {}) as any;
   const { data: deliveries } = useListDeliveries({ poId: id }, { query: { enabled: !!id, queryKey: getListDeliveriesQueryKey({ poId: id }) } });
   const { data: linkedRc } = useGetRateContract(po?.rateContractId || "", { query: { enabled: !!po?.rateContractId } });
   const { data: linkedIndent } = useGetIndent(po?.indentId || "", { query: { enabled: !!po?.indentId } });
@@ -196,8 +208,6 @@ export default function PurchaseOrderDetail() {
 
   if (isLoading) return <div className="flex justify-center py-20"><div className="animate-spin h-8 w-8 rounded-full border-4 border-primary border-t-transparent" /></div>;
   if (!po) return <div className="text-center py-20 text-muted-foreground">PO not found</div>;
-
-  const rawPO = po as any;
 
   async function handleApproveForNextLevel() {
     try {
@@ -398,9 +408,10 @@ export default function PurchaseOrderDetail() {
   }
 
   // Vendor ack SLA check (7 days)
-  const poDate = po.poDate ? new Date(po.poDate) : new Date(po.createdAt);
-  const daysSincePO = differenceInDays(new Date(), poDate);
-  const ackOverdue = !rawPO.vendorAcknowledged && daysSincePO > 7;
+  const poDateRaw = po?.poDate ? new Date(po.poDate) : (po?.createdAt ? new Date(po.createdAt) : new Date());
+  const poDate = isNaN(poDateRaw.getTime()) ? new Date() : poDateRaw;
+  const daysSincePO = !isNaN(poDate.getTime()) ? differenceInDays(new Date(), poDate) : 0;
+  const ackOverdue = !rawPO?.vendorAcknowledged && daysSincePO > 7;
 
   const totalAmount = po?.totalAmount || 0;
   const t1Amount = rawPO.tranche1Amount || Math.round(totalAmount * 0.9);
@@ -444,7 +455,7 @@ export default function PurchaseOrderDetail() {
             )}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Issued on {format(poDate, "dd MMM yyyy")} · Indent #{rawPO.indentNumber || "Requisition"} · RC #{rawPO.rcNumber || "Contract"}
+            Issued on {safeFormatDate(poDate, "dd MMM yyyy")} · Indent #{rawPO.indentNumber || "Requisition"} · RC #{rawPO.rcNumber || "Contract"}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -815,7 +826,7 @@ export default function PurchaseOrderDetail() {
                 <CheckCheck className="h-4 w-4 text-slate-700" /> This Purchase Order has been officially closed.
               </div>
               <p className="text-slate-600 text-[11px]">
-                Closed by <strong>{rawPO.closedBy || "TGMSIDC Authority"}</strong> on {rawPO.closedAt ? format(new Date(rawPO.closedAt), "dd MMM yyyy, hh:mm a") : "—"}.
+                Closed by <strong>{rawPO.closedBy || "TGMSIDC Authority"}</strong> on {rawPO.closedAt ? safeFormatDate(rawPO.closedAt, "dd MMM yyyy, hh:mm a") : "—"}.
                 {rawPO.closureRemarks ? ` Remarks: "${rawPO.closureRemarks}"` : ""}
               </p>
             </div>
@@ -1009,7 +1020,7 @@ export default function PurchaseOrderDetail() {
             <DR label="Unit Landed Price" value={po.unitPrice != null ? `₹${po.unitPrice.toLocaleString("en-IN")}` : "—"} />
             <DR label="GST Tax Slab" value={`${po.gstRate ?? 12}%`} />
             <DR label="Total Order Value" value={po.totalAmount != null ? `₹${po.totalAmount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—"} />
-            <DR label="Order Date" value={format(poDate, "dd MMM yyyy")} />
+            <DR label="Order Date" value={safeFormatDate(poDate, "dd MMM yyyy")} />
             <DR label="Allocated Ratio" value={rawPO.allocationRatio || "100% (Single Vendor)"} />
           </CardContent>
         </Card>
@@ -1024,7 +1035,7 @@ export default function PurchaseOrderDetail() {
               {/* Vendor Ack SLA */}
               {rawPO.vendorAcknowledged ? (
                 <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-[10px] gap-1">
-                  <CheckCircle2 className="h-3 w-3" /> Acknowledged {rawPO.vendorAckDate ? format(new Date(rawPO.vendorAckDate), "dd MMM") : ""}
+                  <CheckCircle2 className="h-3 w-3" /> Acknowledged {rawPO.vendorAckDate ? safeFormatDate(rawPO.vendorAckDate, "dd MMM") : ""}
                 </Badge>
               ) : ackOverdue ? (
                 <Badge className="bg-red-100 text-red-800 border-red-300 text-[10px] gap-1">
@@ -1032,7 +1043,7 @@ export default function PurchaseOrderDetail() {
                 </Badge>
               ) : (
                 <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-[10px] gap-1">
-                  <Clock className="h-3 w-3" /> Ack Pending ({7 - daysSincePO}d left)
+                  <Clock className="h-3 w-3" /> Ack Pending ({Math.max(0, 7 - (daysSincePO || 0))}d left)
                 </Badge>
               )}
             </CardTitle>
@@ -1040,9 +1051,9 @@ export default function PurchaseOrderDetail() {
           <CardContent className="space-y-2.5 pt-4">
             <DR label="Delivery Destination" value={po.deliveryAddress || "Consignee Hospital"} />
             <DR label="Contracted Supply Period" value={`${rawPO.supplyPeriodDays || 45} Calendar Days`} />
-            <DR label="Expected Delivery Date" value={po.expectedDeliveryDate ? format(new Date(po.expectedDeliveryDate), "dd MMM yyyy") : "Not set"} />
-            <DR label="Actual Delivery Date" value={po.actualDeliveryDate ? format(new Date(po.actualDeliveryDate), "dd MMM yyyy") : "Pending Dispatch"} />
-            <DR label="Vendor Dispatch Commitment" value={rawPO.vendorExpectedDispatchDate ? format(new Date(rawPO.vendorExpectedDispatchDate), "dd MMM yyyy") : "Pending Confirmation"} />
+            <DR label="Expected Delivery Date" value={po.expectedDeliveryDate ? safeFormatDate(po.expectedDeliveryDate, "dd MMM yyyy") : "Not set"} />
+            <DR label="Actual Delivery Date" value={po.actualDeliveryDate ? safeFormatDate(po.actualDeliveryDate, "dd MMM yyyy") : "Pending Dispatch"} />
+            <DR label="Vendor Dispatch Commitment" value={rawPO.vendorExpectedDispatchDate ? safeFormatDate(rawPO.vendorExpectedDispatchDate, "dd MMM yyyy") : "Pending Confirmation"} />
             {po.cancellationReason && <DR label="Cancellation Reason" value={po.cancellationReason} />}
 
             {/* Lifecycle Action Buttons */}
@@ -1053,9 +1064,9 @@ export default function PurchaseOrderDetail() {
                     size="sm"
                     className="w-full bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs shadow-sm"
                     onClick={() => {
-                      const d = new Date();
-                      d.setDate(d.getDate() + 30);
-                      setAckExpectedDispatchDate(d.toISOString().split("T")[0]);
+                      const expDispatchDate = new Date();
+                      expDispatchDate.setDate(expDispatchDate.getDate() + 30);
+                      setAckExpectedDispatchDate(expDispatchDate.toISOString().split("T")[0]);
                       setAckRemarks("Stock allocated. Dispatch committed within SLA.");
                       setAckOpen(true);
                     }}
@@ -1181,7 +1192,7 @@ export default function PurchaseOrderDetail() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Payment Date:</span>
-                <span className="text-slate-800">{rawPO.paymentDate ? format(new Date(rawPO.paymentDate), "dd MMM yyyy") : "—"}</span>
+                <span className="text-slate-800">{rawPO.paymentDate ? safeFormatDate(rawPO.paymentDate, "dd MMM yyyy") : "—"}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Recorded By:</span>
@@ -1230,7 +1241,7 @@ export default function PurchaseOrderDetail() {
           <CardContent className="space-y-2.5 pt-4">
             <DR label="Performance Security" value={rawPO.psRequired ? `Mandatory (${rawPO.psPercent || 5}%)` : "Exempted"} />
             <DR label="PS Security Amount" value={rawPO.psAmount ? `₹${Number(rawPO.psAmount).toLocaleString("en-IN")}` : `₹${Math.round((po.totalAmount || 0) * 0.05).toLocaleString("en-IN")}`} />
-            <DR label="BG Submission Deadline" value={rawPO.bgDueDate ? format(new Date(rawPO.bgDueDate), "dd MMM yyyy") : "Within 30 Days of PO Issue"} />
+            <DR label="BG Submission Deadline" value={rawPO.bgDueDate ? safeFormatDate(rawPO.bgDueDate, "dd MMM yyyy") : "Within 30 Days of PO Issue"} />
             <DR label="BG Reference Number" value={rawPO.bgReferenceNo || "Pending Vendor Submission"} />
             <DR label="BG Verification Status" value={rawPO.bgStatus ? rawPO.bgStatus.toUpperCase() : "PENDING"} />
           </CardContent>
@@ -1289,19 +1300,19 @@ export default function PurchaseOrderDetail() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {deliveries.map((d) => (
-                  <tr key={d.id} className="hover:bg-muted/30">
+                {deliveries.map((deliv) => (
+                  <tr key={deliv.id} className="hover:bg-muted/30">
                     <td className="px-4 py-3">
-                      <Link href={`/deliveries/${d.id}`}>
-                        <span className="font-mono text-xs font-semibold text-primary hover:underline">{d.qrCode}</span>
+                      <Link href={`/deliveries/${deliv.id}`}>
+                        <span className="font-mono text-xs font-semibold text-primary hover:underline">{deliv.qrCode}</span>
                       </Link>
                     </td>
-                    <td className="px-4 py-3">{d.facilityName}</td>
-                    <td className="px-4 py-3 text-center font-mono font-bold">{d.quantity}</td>
-                    <td className="px-4 py-3 text-center"><StatusBadge status={d.status} /></td>
-                    <td className="px-4 py-3 text-center font-mono">{d.qaComplianceScore != null ? `${d.qaComplianceScore}%` : "—"}</td>
+                    <td className="px-4 py-3">{deliv.facilityName}</td>
+                    <td className="px-4 py-3 text-center font-mono font-bold">{deliv.quantity}</td>
+                    <td className="px-4 py-3 text-center"><StatusBadge status={deliv.status} /></td>
+                    <td className="px-4 py-3 text-center font-mono">{deliv.qaComplianceScore != null ? `${deliv.qaComplianceScore}%` : "—"}</td>
                     <td className="px-4 py-3 text-right">
-                      <Link href={`/deliveries/${d.id}`}>
+                      <Link href={`/deliveries/${deliv.id}`}>
                         <Button variant="outline" size="sm" className="h-7 text-xs">View Inspection</Button>
                       </Link>
                     </td>
@@ -1339,7 +1350,7 @@ export default function PurchaseOrderDetail() {
                     <td className="px-4 py-2.5 uppercase font-medium">{a.amendmentType?.replace("_", " ")}</td>
                     <td className="px-4 py-2.5">{a.description}</td>
                     <td className="px-4 py-2.5 text-muted-foreground">{a.requestedBy || "Procurement Officer"}</td>
-                    <td className="px-4 py-2.5 text-right text-muted-foreground">{a.requestedDate ? format(new Date(a.requestedDate), "dd MMM yyyy") : "—"}</td>
+                    <td className="px-4 py-2.5 text-right text-muted-foreground">{a.requestedDate ? safeFormatDate(a.requestedDate, "dd MMM yyyy") : "—"}</td>
                   </tr>
                 ))}
               </tbody>

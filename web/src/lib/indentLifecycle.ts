@@ -59,12 +59,12 @@ export function getIndentLifecycleData(
   // 2. Resolve Deliveries (strict: only real deliveries matching linked POs)
   let delivs: any[] = [];
   if (liveDeliveries && liveDeliveries.length > 0) {
-    delivs = liveDeliveries.filter((d) => poIds.has(String(d.purchaseOrderId)));
+    delivs = liveDeliveries.filter((deliv) => poIds.has(String(deliv.purchaseOrderId)));
   }
   if (delivs.length === 0 && (!liveDeliveries || liveDeliveries.length === 0) && poIds.size > 0) {
-    delivs = mockDeliveries.filter((d) =>
-      poIds.has(String(d.purchaseOrderId)) ||
-      (pos.length > 0 && String(d.purchaseOrderId) === String(pos[0].id))
+    delivs = mockDeliveries.filter((deliv) =>
+      poIds.has(String(deliv.purchaseOrderId)) ||
+      (pos.length > 0 && String(deliv.purchaseOrderId) === String(pos[0].id))
     );
   }
 

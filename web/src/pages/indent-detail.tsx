@@ -72,10 +72,10 @@ const PROCURE_MODE_OPTIONS = [
   { value: "single_source", label: "Single Source — Proprietary / Emergency purchase" },
 ];
 
-function safeFormat(d: string | null | undefined, pattern = "dd MMM yyyy"): string {
-  if (!d) return "—";
+function safeFormat(dateVal: string | null | undefined, pattern = "dd MMM yyyy"): string {
+  if (!dateVal) return "—";
   try {
-    const dt = new Date(d);
+    const dt = new Date(dateVal);
     if (isNaN(dt.getTime())) return "—";
     return format(dt, pattern);
   } catch {
@@ -83,10 +83,10 @@ function safeFormat(d: string | null | undefined, pattern = "dd MMM yyyy"): stri
   }
 }
 
-function safeDistance(d: string | null | undefined): string {
-  if (!d) return "";
+function safeDistance(dateVal: string | null | undefined): string {
+  if (!dateVal) return "";
   try {
-    const dt = new Date(d);
+    const dt = new Date(dateVal);
     if (isNaN(dt.getTime())) return "";
     return formatDistanceToNow(dt, { addSuffix: true });
   } catch {
@@ -712,9 +712,9 @@ export default function IndentDetail(props?: { id?: string }) {
   const lifecycleData = getIndentLifecycleData(id, indent, livePOs, liveDeliveries, dbAuditLogs);
   const { purchaseOrders: linkedPOs, deliveries: linkedDeliveries, invoices: linkedInvoices, auditLog } = lifecycleData;
 
-  const firstDeliveredDelivery = linkedDeliveries.find((d) => d.deliveredDate || d.status === "delivered");
-  const firstQAPassedDelivery = linkedDeliveries.find((d) => d.status === "qa_passed" || d.status === "accepted" || d.qaDecision === "accepted" || (d.qaComplianceScore != null && d.qaComplianceScore >= 100));
-  const firstAcceptedDelivery = linkedDeliveries.find((d) => d.acceptanceCertificateIssued);
+  const firstDeliveredDelivery = linkedDeliveries.find((deliv) => deliv.deliveredDate || deliv.status === "delivered");
+  const firstQAPassedDelivery = linkedDeliveries.find((deliv) => deliv.status === "qa_passed" || deliv.status === "accepted" || deliv.qaDecision === "accepted" || (deliv.qaComplianceScore != null && deliv.qaComplianceScore >= 100));
+  const firstAcceptedDelivery = linkedDeliveries.find((deliv) => deliv.acceptanceCertificateIssued);
   const isPOPaid = linkedPOs.some((p: any) => p.paymentStatus === "paid" || (p.tranche1Paid && p.tranche2Paid)) || linkedInvoices.some((i: any) => i.status === "paid") || indent.paymentStatus === "paid";
   const isT1Paid = linkedPOs.some((p: any) => p.tranche1Paid || p.paymentStatus === "paid" || p.paymentStatus === "partial") || indent.tranche1Paid || indent.paymentStatus === "paid";
   const isT2Paid = linkedPOs.some((p: any) => p.tranche2Paid || (p.paymentStatus === "paid" && (p.status === "completed" || p.tranche2Paid))) || indent.tranche2Paid || (indent.paymentStatus === "paid" && (indent.tranche2Paid || indent.tranche1Paid));
@@ -752,7 +752,7 @@ export default function IndentDetail(props?: { id?: string }) {
 
   const totalPOValue = linkedPOs.reduce((s, p) => s + (p.totalAmount || 0), 0);
   const totalInvoiced = linkedInvoices.reduce((s, i) => s + (i.amount || 0), 0);
-  const grnCount = linkedDeliveries.filter((d) => d.acceptanceCertificateIssued).length;
+  const grnCount = linkedDeliveries.filter((deliv) => deliv.acceptanceCertificateIssued).length;
   const allInvoicesPaid = linkedInvoices.length > 0 && linkedInvoices.every((i) => i.status === "paid");
 
   const AUDIT_EVENT_COLORS: Record<AuditEventType, string> = {

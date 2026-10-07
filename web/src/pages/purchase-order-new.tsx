@@ -44,6 +44,17 @@ interface OrderItemRow {
   }>;
 }
 
+function safeFormatDate(dateVal: any, pattern = "dd MMM yyyy"): string {
+  if (!dateVal) return "—";
+  try {
+    const dt = dateVal instanceof Date ? dateVal : new Date(dateVal);
+    if (isNaN(dt.getTime())) return "—";
+    return format(dt, pattern);
+  } catch {
+    return "—";
+  }
+}
+
 export default function PurchaseOrderNew() {
   const { user } = useAuth();
   const isRaisePoAllowed = user?.role === "admin" || user?.role === "tgmsidc_user" || user?.role === "gm_equipment" || (user?.role as string) === "gm";
@@ -72,9 +83,9 @@ export default function PurchaseOrderNew() {
   const [selectedIndentId, setSelectedIndentId] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 45);
-    return d.toISOString().split("T")[0];
+    const defaultDate = new Date();
+    defaultDate.setDate(defaultDate.getDate() + 45);
+    return defaultDate.toISOString().split("T")[0];
   });
 
   const [orderItems, setOrderItems] = useState<OrderItemRow[]>([]);
@@ -85,9 +96,9 @@ export default function PurchaseOrderNew() {
   const [psRequired, setPsRequired] = useState(true);
   const [psPercent, setPsPercent] = useState<number>(5);
   const [bgDueDate, setBgDueDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 30);
-    return d.toISOString().split("T")[0];
+    const bgTarget = new Date();
+    bgTarget.setDate(bgTarget.getDate() + 30);
+    return bgTarget.toISOString().split("T")[0];
   });
 
   // Multi-Vendor Allocation state (Process Book §5 Step 10 & §12 F-15)
@@ -951,7 +962,7 @@ export default function PurchaseOrderNew() {
                     <div className="flex justify-between">
                       <span className="text-slate-500">Validity Window:</span>
                       <span className="text-slate-700 text-[11px]">
-                        {selectedRc?.startDate ? format(new Date(selectedRc.startDate), "dd MMM yyyy") : "01 Apr 2026"} to {selectedRc?.endDate ? format(new Date(selectedRc.endDate), "dd MMM yyyy") : "31 Mar 2028"}
+                        {selectedRc?.startDate ? safeFormatDate(selectedRc.startDate, "dd MMM yyyy") : "01 Apr 2026"} to {selectedRc?.endDate ? safeFormatDate(selectedRc.endDate, "dd MMM yyyy") : "31 Mar 2028"}
                       </span>
                     </div>
                     <div className="flex justify-between">

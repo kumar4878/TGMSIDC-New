@@ -51,8 +51,15 @@ export class ErrorBoundary extends Component<Props, State> {
             </CardHeader>
             <CardContent className="p-6 space-y-4">
               {this.state.error && (
-                <div className="p-3 rounded-md bg-slate-50 border border-slate-200 text-xs text-slate-700 font-mono overflow-auto max-h-40">
-                  {this.state.error.message}
+                <div className="space-y-2">
+                  <div className="p-3 rounded-md bg-slate-50 border border-slate-200 text-xs text-slate-700 font-mono overflow-auto max-h-40">
+                    {this.state.error.message}
+                  </div>
+                  {this.state.error.stack && (
+                    <pre className="p-3 rounded-md bg-slate-900 text-slate-200 text-[11px] font-mono overflow-auto max-h-60 whitespace-pre-wrap">
+                      {this.state.error.stack}
+                    </pre>
+                  )}
                 </div>
               )}
               <div className="flex gap-2">
