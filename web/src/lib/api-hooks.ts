@@ -538,10 +538,13 @@ export const useVendorPerformance = useGetVendorPerformance;
 // ── Rate Contract Hooks ─────────────────────────────────────────────────────
 
 export function useListRateContracts(params?: any, options?: { query?: any }) {
+  const isOptionsInParams = params && "query" in params && !options;
+  const actualOptions = isOptionsInParams ? params : options;
+  const actualParams = isOptionsInParams ? undefined : params;
   return useQuery<RateContract[]>({
-    queryKey: getListRateContractsQueryKey(params),
-    queryFn: () => api.getRateContracts(params),
-    ...options?.query,
+    queryKey: getListRateContractsQueryKey(actualParams),
+    queryFn: () => api.getRateContracts(actualParams),
+    ...actualOptions?.query,
   });
 }
 export const useRateContracts = useListRateContracts;
@@ -743,10 +746,13 @@ export function useReturnIndent(options?: UseMutationOptions<Indent, unknown, an
 // ── Tender Hooks ────────────────────────────────────────────────────────────
 
 export function useListTenders(params?: any, options?: { query?: any }) {
+  const isOptionsInParams = params && "query" in params && !options;
+  const actualOptions = isOptionsInParams ? params : options;
+  const actualParams = isOptionsInParams ? undefined : params;
   return useQuery<Tender[]>({
-    queryKey: getListTendersQueryKey(params),
-    queryFn: () => api.getTenders(params),
-    ...options?.query,
+    queryKey: getListTendersQueryKey(actualParams),
+    queryFn: () => api.getTenders(actualParams),
+    ...actualOptions?.query,
   });
 }
 export const useTenders = useListTenders;

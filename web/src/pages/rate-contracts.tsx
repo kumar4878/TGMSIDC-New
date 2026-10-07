@@ -29,10 +29,9 @@ export default function RateContracts() {
 
   const activeFilter = statusFilter !== "all" ? statusFilter : undefined;
   const { data: contracts = [], isLoading } = useListRateContracts(
-    activeFilter ? { status: activeFilter } : {},
-    { query: { queryKey: getListRateContractsQueryKey(activeFilter ? { status: activeFilter } : {}) } }
+    activeFilter ? { status: activeFilter } : undefined
   );
-  const { data: expiring = [] } = useGetExpiringRateContracts({ query: { queryKey: getGetExpiringRateContractsQueryKey() } });
+  const { data: expiring = [] } = useGetExpiringRateContracts();
 
   const filtered = useMemo(() => {
     return contracts.filter((c) => {

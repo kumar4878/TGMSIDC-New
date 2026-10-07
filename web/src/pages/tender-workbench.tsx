@@ -167,9 +167,7 @@ function fmt(n: number) {
 
 export default function TenderWorkbench() {
   const queryClient = useQueryClient();
-  const { data: serverTenders = [] } = useListTenders({
-    query: { queryKey: getListTendersQueryKey() },
-  });
+  const { data: serverTenders = [] } = useListTenders();
   const updateTender = useUpdateTender();
 
   const [tenders, setTenders] = useState<WorkbenchTender[]>(SEED_WORKBENCH_TENDERS);

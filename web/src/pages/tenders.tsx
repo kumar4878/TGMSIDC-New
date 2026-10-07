@@ -30,7 +30,7 @@ function milestoneProgress(status: string) {
 export default function Tenders() {
   const [search, setSearch] = useState("");
   const [, navigate] = useLocation();
-  const { data: tenders = [], isLoading } = useListTenders({ query: { queryKey: getListTendersQueryKey() } });
+  const { data: tenders = [], isLoading } = useListTenders();
 
   const filtered = useMemo(() => {
     return tenders.filter((t) =>

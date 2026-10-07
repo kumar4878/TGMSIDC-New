@@ -20,33 +20,42 @@ async function findRcDoc(id: string) {
   }).catch(() => null);
 }
 
+function toISO(d: any): string | null {
+  if (!d) return null;
+  if (d instanceof Date) return isNaN(d.getTime()) ? null : d.toISOString();
+  const parsed = new Date(d);
+  return isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
 async function fmt(r: any) {
   const eq = r.equipmentName ? null : (mongoose.Types.ObjectId.isValid(r.equipmentId) ? await Equipment.findById(r.equipmentId).catch(() => null) : null);
   const vn = r.vendorName ? null : (mongoose.Types.ObjectId.isValid(r.vendorId) ? await Vendor.findById(r.vendorId).catch(() => null) : null);
   const now = new Date();
-  const end = new Date(r.endDate);
+  const end = r.endDate ? new Date(r.endDate) : now;
   const daysToExpiry = Math.ceil((end.getTime() - now.getTime()) / 86400000);
-  const startDateStr = r.startDate instanceof Date ? r.startDate.toISOString() : new Date(r.startDate).toISOString();
-  const endDateStr = r.endDate instanceof Date ? r.endDate.toISOString() : new Date(r.endDate).toISOString();
+  const startDateStr = toISO(r.startDate) || now.toISOString();
+  const endDateStr = toISO(r.endDate) || now.toISOString();
+  const createdAtStr = toISO(r.createdAt) || now.toISOString();
+  const updatedAtStr = toISO(r.updatedAt) || createdAtStr;
   return {
     id: r._id.toString(),
     contractNumber: r.contractNumber,
     financialYear: r.financialYear ?? "2025-26",
-    equipmentId: r.equipmentId.toString(),
+    equipmentId: r.equipmentId ? r.equipmentId.toString() : "",
     equipmentName: r.equipmentName || eq?.name || "Unknown",
     equipmentCategory: r.equipmentCategory ?? "",
     tenderId: r.tenderId?.toString() ?? null,
     tenderRef: r.tenderRef ?? "",
-    vendorId: r.vendorId.toString(),
+    vendorId: r.vendorId ? r.vendorId.toString() : "",
     vendorName: r.vendorName || vn?.name || "Unknown",
     l1VendorName: r.l1VendorName ?? "", l2VendorName: r.l2VendorName ?? "", l3VendorName: r.l3VendorName ?? "",
     unitPrice: r.unitPrice,
     gstRate: r.gstRate,
-    unitPriceInclTax: r.unitPriceInclTax || r.unitPrice * (1 + r.gstRate / 100),
+    unitPriceInclTax: r.unitPriceInclTax || r.unitPrice * (1 + (r.gstRate || 0) / 100),
     maxOrderQty: r.maxOrderQty ?? 0,
     warrantyMonths: r.warrantyMonths ?? (r.warrantyYears ? r.warrantyYears * 12 : 36),
     supplyPeriodDays: r.supplyPeriodDays ?? 45,
-    awardDate: r.awardDate ? (r.awardDate instanceof Date ? r.awardDate.toISOString() : new Date(r.awardDate).toISOString()) : null,
+    awardDate: toISO(r.awardDate),
     startDate: startDateStr,
     endDate: endDateStr,
     validityEndDate: endDateStr,
@@ -64,24 +73,32 @@ async function fmt(r: any) {
     totalValueOrdered: r.totalValueOrdered ?? 0,
     status: r.status,
     closureReason: r.closureReason ?? "",
-    createdAt: r.createdAt ? (r.createdAt instanceof Date ? r.createdAt.toISOString() : new Date(r.createdAt).toISOString()) : new Date().toISOString(),
-    updatedAt: r.updatedAt ? (r.updatedAt instanceof Date ? r.updatedAt.toISOString() : new Date(r.updatedAt).toISOString()) : new Date().toISOString(),
+    createdAt: createdAtStr,
+    updatedAt: updatedAtStr,
   };
 }
 
 router.get("/rate-contracts", async (req, res): Promise<void> => {
-  const filter: Record<string, any> = {};
-  if (req.query.status && req.query.status !== "all") filter.status = req.query.status;
-  if (req.query.equipmentId) filter.equipmentId = req.query.equipmentId;
-  const rows = await RateContract.find(filter).sort({ createdAt: -1 });
-  res.json(await Promise.all(rows.map(fmt)));
+  try {
+    const filter: Record<string, any> = {};
+    if (req.query.status && req.query.status !== "all") filter.status = req.query.status;
+    if (req.query.equipmentId) filter.equipmentId = req.query.equipmentId;
+    const rows = await RateContract.find(filter).sort({ createdAt: -1 });
+    res.json(await Promise.all(rows.map(fmt)));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to fetch rate contracts" });
+  }
 });
 
-router.get("/rate-contracts/expiring-soon", async (_req, res): Promise<void> => {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() + 90);
-  const rows = await RateContract.find({ status: "active", endDate: { $lte: cutoff } }).sort({ endDate: 1 });
-  res.json(await Promise.all(rows.map(fmt)));
+router.get(["/rate-contracts/expiring-soon", "/rate-contracts/expiring"], async (_req, res): Promise<void> => {
+  try {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() + 90);
+    const rows = await RateContract.find({ status: "active", endDate: { $lte: cutoff } }).sort({ endDate: 1 });
+    res.json(await Promise.all(rows.map(fmt)));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to fetch expiring rate contracts" });
+  }
 });
 
 router.get("/rate-contracts/:id", async (req, res): Promise<void> => {

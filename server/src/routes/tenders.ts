@@ -36,6 +36,13 @@ async function findTender(id: string) {
   return null;
 }
 
+function toISO(d: any): string | null {
+  if (!d) return null;
+  if (d instanceof Date) return isNaN(d.getTime()) ? null : d.toISOString();
+  const parsed = new Date(d);
+  return isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
 async function enrichTender(t: any) {
   let equipmentName = t.equipmentName || "";
   if (!equipmentName && t.indentId) {
@@ -51,6 +58,8 @@ async function enrichTender(t: any) {
       equipmentName = equip?.name ?? "Medical Equipment";
     }
   }
+  const createdAtStr = toISO(t.createdAt) || new Date().toISOString();
+  const updatedAtStr = toISO(t.updatedAt) || createdAtStr;
   return {
     id: t._id.toString(),
     tenderNumber: t.tenderNumber,
@@ -66,7 +75,7 @@ async function enrichTender(t: any) {
     specsStatus: t.specsStatus ?? "pending",
     specsConfirmationType: t.specsConfirmationType ?? "",
     specsApproverNames: t.specsApproverNames ?? "",
-    bfcApprovalDate: t.bfcApprovalDate?.toISOString() ?? null,
+    bfcApprovalDate: toISO(t.bfcApprovalDate),
     bfcApprovalRef: t.bfcApprovalRef ?? "",
     bfcMembersPresent: t.bfcMembersPresent ?? "",
     l1VendorName: t.l1VendorName ?? "",
@@ -78,22 +87,26 @@ async function enrichTender(t: any) {
     isCancelled: t.isCancelled ?? false,
     cancellationStage: t.cancellationStage ?? 0,
     cancellationReason: t.cancellationReason ?? "",
-    tenderInvitedDate: t.tenderInvitedDate?.toISOString() ?? null,
-    bidSubmissionStartDate: t.bidSubmissionStartDate?.toISOString() ?? null,
-    bidSubmissionEndDate: t.bidSubmissionEndDate?.toISOString() ?? null,
-    bidsReceivedDate: t.bidsReceivedDate?.toISOString() ?? null,
+    tenderInvitedDate: toISO(t.tenderInvitedDate),
+    bidSubmissionStartDate: toISO(t.bidSubmissionStartDate),
+    bidSubmissionEndDate: toISO(t.bidSubmissionEndDate),
+    bidsReceivedDate: toISO(t.bidsReceivedDate),
     status: t.status,
     notes: t.notes ?? "",
-    createdAt: t.createdAt.toISOString(),
-    updatedAt: t.updatedAt.toISOString(),
+    createdAt: createdAtStr,
+    updatedAt: updatedAtStr,
   };
 }
 
 router.get("/tenders", async (req, res): Promise<void> => {
-  const filter: Record<string, any> = {};
-  if (req.query.status && req.query.status !== "all") filter.status = req.query.status;
-  const rows = await Tender.find(filter).sort({ createdAt: -1 });
-  res.json(await Promise.all(rows.map(enrichTender)));
+  try {
+    const filter: Record<string, any> = {};
+    if (req.query.status && req.query.status !== "all") filter.status = req.query.status;
+    const rows = await Tender.find(filter).sort({ createdAt: -1 });
+    res.json(await Promise.all(rows.map(enrichTender)));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to fetch tenders" });
+  }
 });
 
 router.post("/tenders", async (req, res): Promise<void> => {
