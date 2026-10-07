@@ -1751,7 +1751,7 @@ export default function PurchaseOrderDetail(props?: { id?: string }) {
             <Button variant="outline" disabled={ackSubmitting} onClick={() => setAckOpen(false)}>Cancel</Button>
             <Button onClick={handleAcknowledgePO} disabled={ackSubmitting}>
               {ackSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-              {ackSubmitting ? "Recording Acknowledgement (2–3s)..." : "Submit Acknowledgement"}
+              {ackSubmitting ? "Recording Acknowledgement..." : "Submit Acknowledgement"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1835,7 +1835,7 @@ export default function PurchaseOrderDetail(props?: { id?: string }) {
               <Button type="button" variant="outline" disabled={dispatchSubmitting} onClick={() => setDispatchOpen(false)}>Cancel</Button>
               <Button type="submit" disabled={dispatchSubmitting}>
                 {dispatchSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-                {dispatchSubmitting ? "Transmitting Dispatch to DB (2–3s)..." : "Confirm & Transmit Dispatch"}
+                {dispatchSubmitting ? "Transmitting Dispatch to DB..." : "Confirm & Transmit Dispatch"}
               </Button>
             </DialogFooter>
           </form>

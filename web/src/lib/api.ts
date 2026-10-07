@@ -1,7 +1,21 @@
 /// <reference types="vite/client" />
 // Central API client for TGMSIDC web app.
 
-export const BASE_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:5000") + "/api";
+export const BASE_URL = (() => {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (!envUrl) return "/api";
+  if (envUrl.startsWith("/")) return envUrl.endsWith("/api") ? envUrl : `${envUrl}/api`;
+  if (
+    typeof window !== "undefined" &&
+    window.location.hostname !== "localhost" &&
+    window.location.hostname !== "127.0.0.1"
+  ) {
+    if (envUrl.includes("localhost") || envUrl.includes("127.0.0.1")) {
+      return "/api";
+    }
+  }
+  return envUrl.endsWith("/api") ? envUrl : `${envUrl}/api`;
+})();
 
 export class ApiError extends Error {
   constructor(

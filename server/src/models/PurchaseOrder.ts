@@ -344,4 +344,12 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
   { timestamps: true }
 );
 
+PurchaseOrderSchema.index({ indentId: 1 });
+PurchaseOrderSchema.index({ indentNumber: 1 });
+PurchaseOrderSchema.index({ status: 1 });
+PurchaseOrderSchema.index({ approvalStatus: 1 });
+PurchaseOrderSchema.index({ vendorId: 1 });
+PurchaseOrderSchema.index({ rateContractId: 1 });
+PurchaseOrderSchema.index({ "items.equipmentId": 1 });
+
 export const PurchaseOrder = model<IPurchaseOrder>("PurchaseOrder", PurchaseOrderSchema);

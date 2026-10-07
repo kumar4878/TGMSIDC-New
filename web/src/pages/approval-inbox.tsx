@@ -24,6 +24,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ProductSpecSheet } from "@/components/ProductSpecSheet";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 /** Unit price lookup for estimated value display — mirrors the handler's fallback map.
  *  RC prices are used when the equipment has an active rate contract. */
@@ -87,6 +88,7 @@ interface InboxItem {
 export default function ApprovalInbox() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: allIndents = [] } = useListIndents({});
   const { data: allPOs = [] } = useListPurchaseOrders({});
@@ -176,19 +178,32 @@ export default function ApprovalInbox() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       setProcessing(false);
       setActionDialog(null);
       setComments("");
       queryClient.invalidateQueries({ queryKey: ["/indents"] });
       queryClient.invalidateQueries({ queryKey: ["/dashboard/summary"] });
       queryClient.invalidateQueries({ queryKey: ["/dashboard/procurement-pipeline"] });
+      toast({
+        title: variables.status === "approved" ? "Approval Saved" : variables.status === "returned" ? "Returned for Revision" : "Rejected",
+        description: `Indent approval step ${variables.stepNumber} has been updated in database.`,
+      });
     },
-    onError: () => setProcessing(false),
+    onError: (err: any) => {
+      setProcessing(false);
+      toast({
+        title: "Action Failed",
+        description: err.message || "Could not save approval step. Please try again.",
+        variant: "destructive",
+      });
+    },
   });
 
   function submitAction() {
     if (!actionDialog) return;
+    if (processing || actionMutation.isPending) return;
+    setProcessing(true);
     const { item, action } = actionDialog;
     const steps = (item.indent.approvalSteps && item.indent.approvalSteps.length > 0) ? item.indent.approvalSteps : getSteps(item.indent.id);
     const totalSteps = steps.length;
@@ -613,7 +628,7 @@ export default function ApprovalInbox() {
                   {processing && (
                     <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-center gap-2.5 animate-pulse">
                       <Loader2 className="h-4 w-4 text-blue-600 animate-spin shrink-0" />
-                      <span>Applying electronic signature & saving approval to database (approx. 2–3s)...</span>
+                      <span>Applying electronic signature & saving approval to database...</span>
                     </div>
                   )}
                 </div>

@@ -385,7 +385,7 @@ router.post("/purchase-orders", async (req, res): Promise<void> => {
     await indent.save();
   }
 
-  await notifyPOStatusChange(po, "created_as_draft", req.body.generatedBy);
+  notifyPOStatusChange(po, "created_as_draft", req.body.generatedBy).catch(() => {});
 
   res.status(201).json(await fmt(po));
 });
@@ -877,7 +877,7 @@ router.patch("/purchase-orders/:id/submit-for-approval", async (req, res): Promi
     });
 
     await po.save();
-    await notifyPOStatusChange(po, "submitted for GM approval", submittedBy);
+    notifyPOStatusChange(po, "submitted for GM approval", submittedBy).catch(() => {});
     res.json(await fmt(po));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -918,7 +918,7 @@ router.patch("/purchase-orders/:id/gm-review", async (req, res): Promise<void> =
         remarks: po.gmReviewNotes,
         actionedAt: new Date(),
       });
-      await notifyPOStatusChange(po, "approved by GM Equipment", effectiveReviewedBy);
+      notifyPOStatusChange(po, "approved by GM Equipment", effectiveReviewedBy).catch(() => {});
     } else if (action === "recommend" || action === "recommend_approve") {
       po.approvalStatus = "pending_so_approval";
       po.gmReviewNotes = effectiveComments || "Recommended for SO approval.";
@@ -932,7 +932,7 @@ router.patch("/purchase-orders/:id/gm-review", async (req, res): Promise<void> =
         remarks: po.gmReviewNotes,
         actionedAt: new Date(),
       });
-      await notifyPOStatusChange(po, "recommended by GM Equipment", effectiveReviewedBy);
+      notifyPOStatusChange(po, "recommended by GM Equipment", effectiveReviewedBy).catch(() => {});
     } else if (action === "return") {
       po.approvalStatus = "returned_by_gm";
       po.returnComments = comments;
@@ -944,7 +944,7 @@ router.patch("/purchase-orders/:id/gm-review", async (req, res): Promise<void> =
         remarks: comments,
         actionedAt: new Date(),
       });
-      await notifyPOStatusChange(po, "returned by GM Equipment", reviewedBy);
+      notifyPOStatusChange(po, "returned by GM Equipment", reviewedBy).catch(() => {});
     } else if (action === "reject" || action === "recommend_reject") {
       po.approvalStatus = "rejected_by_gm";
       po.status = "rejected";

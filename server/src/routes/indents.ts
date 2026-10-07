@@ -2043,7 +2043,7 @@ router.patch("/indents/:id/approval-steps/:stepNumber", async (req, res): Promis
                 actionedAt: new Date(),
               });
               await po.save();
-              await notifyPOStatusChange(po, "issued_to_vendor", approvedBy || step.assignedUserName);
+              notifyPOStatusChange(po, "issued_to_vendor", approvedBy || step.assignedUserName).catch(() => {});
             }
 
             indent.purchaseOrderId = linkedPOs[0]._id;
@@ -2132,7 +2132,7 @@ router.patch("/indents/:id/approval-steps/:stepNumber", async (req, res): Promis
               }
               indent.markModified("lineItems");
             }
-            await notifyPOStatusChange(po, "issued_to_vendor", approvedBy || step.assignedUserName);
+            notifyPOStatusChange(po, "issued_to_vendor", approvedBy || step.assignedUserName).catch(() => {});
           }
         } else {
           // No active Rate Contract available: seamlessly route into Open Tendering
@@ -2167,7 +2167,9 @@ router.patch("/indents/:id/approval-steps/:stepNumber", async (req, res): Promis
     indent.markModified("approvalSteps");
     await indent.save();
 
-    await notifyIndentStatusChange(indent, "step_approved", approvedBy || step.assignedUserName);
+    notifyIndentStatusChange(indent, "step_approved", approvedBy || step.assignedUserName).catch((err) => {
+      console.error("[NOTIFICATION ERROR]", err);
+    });
     res.json(await formatIndent(indent));
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to update approval step" });

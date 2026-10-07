@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   ArrowLeft, CheckCircle2, Package, ShoppingCart, IndianRupee, Layers,
   ShieldCheck, Users, Building2, Split, FileText, Phone, Mail, MapPin, Tag,
-  AlertCircle, ExternalLink, Send,
+  AlertCircle, ExternalLink, Send, Loader2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -87,6 +87,7 @@ export default function PurchaseOrderNew() {
     defaultDate.setDate(defaultDate.getDate() + 45);
     return defaultDate.toISOString().split("T")[0];
   });
+  const [submitting, setSubmitting] = useState(false);
 
   const [orderItems, setOrderItems] = useState<OrderItemRow[]>([]);
   const [identifiedVendorId, setIdentifiedVendorId] = useState("");
@@ -357,7 +358,8 @@ export default function PurchaseOrderNew() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!isValid) return;
+    if (!isValid || submitting || createPO.isPending) return;
+    setSubmitting(true);
 
     try {
       const rc = rcs.find(r => r.id === primaryItem?.rateContractId) || selectedRc;
@@ -489,6 +491,8 @@ export default function PurchaseOrderNew() {
         description: err.message || "An unexpected error occurred",
         variant: "destructive",
       });
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -1159,11 +1163,15 @@ export default function PurchaseOrderNew() {
                 </Link>
                 <Button
                   type="submit"
-                  disabled={createPO.isPending || !isValid}
+                  disabled={submitting || createPO.isPending || !isValid}
                   className="shadow-md font-semibold px-6 gap-2 cursor-pointer"
                 >
-                  <FileText className="h-4 w-4" />
-                  {createPO.isPending ? "Drafting PO..." : isSplit ? "Draft Split Purchase Orders" : "Draft PO"}
+                  {submitting || createPO.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileText className="h-4 w-4" />
+                  )}
+                  {submitting || createPO.isPending ? "Drafting PO..." : isSplit ? "Draft Split Purchase Orders" : "Draft PO"}
                 </Button>
               </div>
             </CardContent>

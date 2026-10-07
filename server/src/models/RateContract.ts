@@ -146,4 +146,9 @@ const RateContractSchema = new Schema<IRateContract>(
   { timestamps: true }
 );
 
+RateContractSchema.index({ equipmentId: 1, status: 1 });
+RateContractSchema.index({ equipmentName: 1 });
+RateContractSchema.index({ vendorId: 1 });
+RateContractSchema.index({ status: 1, endDate: 1 });
+
 export const RateContract = model<IRateContract>("RateContract", RateContractSchema);

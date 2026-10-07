@@ -309,4 +309,13 @@ const IndentSchema = new Schema<IIndent>(
   { timestamps: true }
 );
 
+IndentSchema.index({ indentRefNumber: 1 });
+IndentSchema.index({ status: 1 });
+IndentSchema.index({ facilityId: 1 });
+IndentSchema.index({ equipmentId: 1 });
+IndentSchema.index({ purchaseOrderId: 1 });
+IndentSchema.index({ poNumber: 1 });
+IndentSchema.index({ "lineItems.equipmentId": 1 });
+IndentSchema.index({ "lineItems.poId": 1 });
+
 export const Indent = model<IIndent>("Indent", IndentSchema);

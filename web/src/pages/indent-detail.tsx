@@ -39,7 +39,7 @@ import {
   Package, Truck, Receipt, ClipboardCheck, History, Layers,
   Split, FileCheck2, ZoomIn, ZoomOut, CheckCheck, Eye,
   AlertTriangle, ExternalLink, Phone, Mail, Paperclip, Download,
-  Award, CheckSquare, Zap,
+  Award, CheckSquare, Zap, Loader2,
 } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { getIndentLifecycleData, daysBetween } from "@/lib/indentLifecycle";
@@ -633,7 +633,7 @@ export default function IndentDetail(props?: { id?: string }) {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       refetchSteps();
       queryClient.invalidateQueries({ queryKey: getGetIndentQueryKey(id) });
       queryClient.invalidateQueries({ queryKey: ["/indents"] });
@@ -643,8 +643,19 @@ export default function IndentDetail(props?: { id?: string }) {
       queryClient.invalidateQueries({ queryKey: ["/dashboard/procurement-pipeline"] });
       setComments("");
       setProcessing(false);
+      toast({
+        title: variables.status === "approved" ? "Indent Approved" : variables.status === "returned" ? "Indent Returned to DEO" : "Indent Rejected",
+        description: `Step ${variables.stepNumber} has been successfully saved to the database.`,
+      });
     },
-    onError: () => setProcessing(false),
+    onError: (err: any) => {
+      setProcessing(false);
+      toast({
+        title: "Action Failed",
+        description: err.message || "Failed to update approval step. Please try again.",
+        variant: "destructive",
+      });
+    },
   });
 
   const [lifecycleLoading, setLifecycleLoading] = useState(false);
@@ -768,6 +779,8 @@ export default function IndentDetail(props?: { id?: string }) {
   function handleAction(action: "approved" | "returned") {
     if (!pendingStep) return;
     if (action === "returned" && !comments.trim()) return;
+    if (processing || stepMutation.isPending) return;
+    setProcessing(true);
     const isLastStep = pendingStep.stepNumber === progress_live.totalSteps;
     stepMutation.mutate({
       stepNumber: pendingStep.stepNumber,
@@ -2261,19 +2274,27 @@ export default function IndentDetail(props?: { id?: string }) {
                   <Button
                     className="bg-emerald-600 hover:bg-emerald-700 gap-2 text-white"
                     onClick={() => handleAction("approved")}
-                    disabled={processing}
+                    disabled={processing || stepMutation.isPending}
                   >
-                    <CheckCircle2 className="h-4 w-4" />
-                    {processing ? "Processing..." : "Approve"}
+                    {processing || stepMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4" />
+                    )}
+                    {processing || stepMutation.isPending ? "Saving Approval..." : "Approve"}
                   </Button>
                   <Button
                     variant="outline"
                     className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-40"
                     onClick={() => handleAction("returned")}
-                    disabled={processing || !comments.trim()}
+                    disabled={processing || stepMutation.isPending || !comments.trim()}
                     title={!comments.trim() ? "Enter a revision reason before returning" : undefined}
                   >
-                    <RotateCcw className="h-4 w-4" />
+                    {processing || stepMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RotateCcw className="h-4 w-4" />
+                    )}
                     Return to DEO
                   </Button>
                   <Button
